@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Date | 2026-10-12 (vision-first UI; on-device control_detect → coords+type; dual-device: panther primary, akita secondary) |
+| Date | 2026-10-12 (model choice open/TBD; audio cache; live-map look-around + Maps duplex Q&A; vision-first; dual-device panther/akita) |
 | Owner | Caleb |
 | Name | **VOS**. Packages `com.vos.session` and `com.vos.actuator` (`com.vos.sandbox` at M7). Tool bus: **VOS Tool Bus (VTB)**. |
 | Replaces | The earlier target plan in `argoos/TARGET-PLAN.md` and every name in it. Its architecture is reused. Its platform choice (Google's Pixel factory OTA) is reversed. Nothing is carried forward for compatibility. |
@@ -35,7 +35,7 @@
 8. **Reach comes from Tier S.** It runs on any Android 14+ phone, including Caleb's current GrapheneOS daily phone, with setup in 10 minutes and no ADB. Tier P is the full-power reference build.
 9. **Phone B (Pixel 7 `panther`) is the main flash/dev rig; Pixel 8a (`akita`) stays a first-class supported target (Phone A / second image). UStor2 is enough disk.** The disk is mounted today at `/media/caleb/UStor21`, and that path gets pinned in fstab (§7). Firmware trees for both `panther` and `akita`. Tier P needs no source tree. Tier F needs about 250 GB, which fits.
 10. **Everything lives in git from the first hour,** with CI and static security checks on every push. **GitHub `calebtt/vos` is the source of truth** for the plan, issues, and milestones; `/home/caleb/vos`, UStor2, and box copies are caches synced from it (`docs/TRACKING.md`).
-11. **ModelRouter is a thin policy table (role / task_class → model), not a fancy Settings picker for v0.** A session-owned registry of pluggable backends (LLMs *and* non-LLM models: ASR, TTS, OCR, wake word, VAD/AEC, vision, embeddings) bound per task class (and per agent-team role) by a policy table, with cost/latency tiers and offline vs cloud. Switches are audited. Simple jobs get small/fast/offline models; hard jobs get advanced ones. Settings UI for picking models is deferred; named profiles (*Fast/cheap*, *Balanced*, *Best*) are optional later. Provider-API juggling stays in the session (§3.2.1).
+11. **ModelRouter is a thin policy table (role / task_class → model), not a fancy Settings picker for v0.** A session-owned registry of pluggable backends (LLMs *and* non-LLM models: ASR, TTS, OCR, wake word, VAD/AEC, vision, embeddings) bound per task class (and per agent-team role) by a policy table, with cost/latency tiers and offline vs cloud. Switches are audited. Simple jobs get small/fast/offline models; hard jobs get advanced ones. Settings UI for picking models is deferred; named profiles (*Fast/cheap*, *Balanced*, *Best*) are optional later. Provider-API juggling stays in the session (§3.2.1). **Concrete `control_detect` backend is TBD** — do not lock YOLO vs a11y vs OmniParser-style until research with Claude on the desktop; the thin policy slot stays.
 12. **The agent can do about everything a person can on the phone, including files — without root.** "About everything" = Shell Contract completeness (§3.6, incl. row 20 Files) + VTB + capability ladder. The actuator reads/writes phone storage (MediaStore, SAF grants, app-visible shared storage) for tasks; the session manages only its own CE storage and declared egress; M7 skills stay isolated. Irreversible file acts (delete, overwrite, share out) go through the trusted path.
 13. **One user-facing agent, a small internal agent team.** The owner talks to exactly one agent (the voice/shell session). Under it, a small fixed set of specialist roles (Conductor, Planner, Vision, Router in the session; Operator, Duplex, Files, Announcer in the actuator) split along the session/actuator UID line and talk over Binder/VTB. Roles are internal, never separate user-visible bots. Security is unchanged: only actuator roles actuate, only session roles have network, irreversible acts still go through the trusted path, no keys in the actuator (§3.7).
 14. **Vision + accessibility is the default for in-app UI work; intents are a weak fallback.** Field experience: public intents and deep links are unreliable for real apps (Maps nav included). The default path for UI tasks is a screenshot → on-device control detect → (optional) cloud vision → `dispatchGesture` loop (§3.5). Typed rungs (built-ins, VTB, notifications, MediaBrowser) stay first for *non-UI* fast tools. Intents/AppFunctions may still be tried as a cheap probe but never gate success. Eval uses current up-to-date apps; version-pinning test apps is forbidden as the success criterion (§6 M3).
@@ -73,6 +73,9 @@ Every earlier product, package, permission, interface, and path name is retired.
 | (2026-10-12) A small agent team may suit better, even with one main agent the user works with | One user-facing agent + small internal specialist team mapped onto the UID split; agent↔agent over Binder/VTB made first-class; ModelRouter binds each role's backend and escalates (decision 13, §3.4, §3.7). M1 ships internal roles in one session + one actuator; M5 opens VTB peer agents. Issue: *Agent team* (M1). |
 | (2026-10-12) Treat GitHub as the source of truth | `calebtt/vos` wins; local copies are caches (`docs/TRACKING.md`, decision 10). |
 | (2026-10-12) Intents suck (tried them); screenshots are about the only way; on-device models can pick out buttons; needs heavy real-world benchmarks on up-to-date apps; version-locking those tests is counterproductive | Decision 14 + rewritten §3.5: vision+a11y screenshot loop is the default UI path; intents demoted to weak/fallback. Hybrid vision pipeline (§3.5.1): on-device OCR/button detect in the actuator; cloud multimodal via ModelRouter for hard scene understanding. M3 eval: real-world tasks on current Play/Graphene apps; track app version in results but refresh targets — no version-pin success criterion. |
+| (2026-10-12) Model choice for on-device UI detect is unsettled (fine-tuned YOLO may or may not cover buttons; a11y merge / OmniParser-style / other detectors need research); hold until Claude is back on the desktop | Leave concrete `control_detect` model **open**. Thin ModelRouter policy stays (decision 11, §3.2.1); do **not** lock YOLO vs a11y vs OmniParser. Research + pick with Claude when desktop is back; M3 binds whatever wins. |
+| (2026-10-12) Cache and lookup compressed audio messages instead of regenerating every time | Announcer / house-voice (and common prompts): cache compressed audio keyed by `(text, voice_id)`; replay on hit; synth on miss (§3.3 ANNOUNCE, §3.7 Announcer). |
+| (2026-10-12) For mid-drive nav Q&A, look around the live map; Maps has a built-in voice AI the team can question for route guidance | Mid-drive: Operator may screenshot/pan/zoom the **live navigation map** (vision loop, not intents) to answer; and/or Duplex may question Maps' **built-in voice AI** via AppAssistantDuplex when that is better for route guidance (§3.5.1 Maps nav, §3.3 duplex). |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
 
@@ -276,6 +279,7 @@ Different jobs deserve different models. A wake-word check and "volume up" shoul
 - **Deferred UI (not Must).** A Settings picker listing task classes / current models / overrides, voice overrides ("use the smaller model for UI tasks"), and named profiles (*Fast/cheap*, *Balanced*, *Best*) may come later. v0 default is a single checked-in Balanced-equivalent policy; changing it is a config/audit path, not a Settings screen.
 - **VTB hook (M5).** A VTB tool manifest may declare `preferredModelClass` (e.g. `vision_step`, `llm_text:small`); the router treats it as a hint within the owner's policy, never as an override.
 - **Milestones.** M1: ModelRouter v0 — registry + thin policy table, `chat_voice` and `offline_grammar` bound and switchable via policy/config with audited switches (cloud voice vendor vs alternates; bundled grammar variants). **No Settings picker Must.** M3: hybrid vision — `control_detect` (on-device) + `vision_step` (cloud) + `ocr_commit` with escalation, latency budgets, and spend tracking (§3.5.1). M5: VTB `preferredModelClass`. Optional later: Settings UI + named profiles.
+- **`control_detect` model choice: open.** Which on-device detector fills the slot (fine-tuned YOLO, a11y-clickable merge, OmniParser-style, or other) is **not locked**. Research when Claude is back on the desktop; until then the pipeline contracts (coords + type + confidence, escalate on fail) are fixed and the ModelRouter policy row stays a placeholder id.
 
 ### 3.3 Audio plane (owned by the actuator)
 
@@ -310,6 +314,7 @@ Policies:
   - Fallback: a Piper voice bundled in the actuator and run through sherpa-onnx **[spike S-22]**.
 
   The house voice must sound clearly different from the vendor's voice.
+- **Audio cache (Announcer / house voice + common prompts):** cache **compressed** audio (e.g. Opus/Ogg or platform TTS cache files) keyed by `(normalized_text, voice_id)` in actuator-private storage. On hit: decode/replay, no regen. On miss: synth, write cache, play. Applies to trusted-path announcements and frequent fixed prompts ("on it", "got it, rerouting", verified earcons if synthesized). Unique one-off utterances still synth. Cache is local-only (actuator has no network); invalidate on voice_id change or APK bump. Session/vendor TTS may use the same pattern for common Conductor lines if desired; house voice path is Must for Announcer.
 - **APP_ASSIST:** VOS ducks or pauses its own CONVERSE path; registers turn-scoped AudioPolicy mixes for the target UID (inject + capture); may tap the in-app mic control; streams session PCM into `createAudioTrackSource` and app playback into `createAudioRecordSink`; offline "stop" stays armed on a privileged concurrent mic **[S-31]**. See *App-assistant duplex* below.
 - **OfflinePlane:** a bundled sherpa-onnx small-vocabulary model is the default on every tier. Graphene ships no speech recognizer. `createOnDeviceSpeechRecognizer` is used only where it exists and passes S-15.
 - **HOLD:** during any telephony or VoIP call (`AudioManager.getMode() == MODE_IN_CALL/IN_COMMUNICATION` owned by another UID), VOS never takes the communication device. A summon gets the offline grammar only. Call *content* intercept APIs exist (`CALL_AUDIO_INTERCEPTION`, redirect modes) but remain a non-goal (§9 Q7); they are only a pattern reference for APP_ASSIST.
@@ -517,7 +522,7 @@ The router stops at the first **oracle-verified** success. For UI goals it goes 
 
 #### 3.5.1 Hybrid vision pipeline (on-device detect → cloud understand)
 
-UI control is a two-stage loop. On-device models do fast control detection and return **coordinates plus control type** (button, field, icon, link, toggle, …) with optional label and confidence; cloud multimodal does hard scene understanding. High-confidence on-device hits let the Operator tap without calling the cloud. ModelRouter's thin policy binds `control_detect` (actuator, on-device only) and `vision_step` (session, cloud).
+UI control is a two-stage loop. On-device models do fast control detection and return **coordinates plus control type** (button, field, icon, link, toggle, …) with optional label and confidence; cloud multimodal does hard scene understanding. High-confidence on-device hits let the Operator tap without calling the cloud. ModelRouter's thin policy binds `control_detect` (actuator, on-device only) and `vision_step` (session, cloud). **Which on-device detector fills `control_detect` is open** (YOLO / a11y merge / OmniParser-style / other) — research later with Claude on desktop; contracts below stay fixed.
 
 ```text
 Operator (actuator)
@@ -568,7 +573,12 @@ Operator (actuator)
 
 **Privacy.** IME region always masked before upload. `FLAG_SECURE` windows are never uploaded (P12). Notification shade contents stripped unless the task is about notifications. Every upload: audit `(hash, bytes, destination, turnId)`. Actuator never holds vendor keys.
 
-**Maps nav (example).** No reliance on `google.navigation:` / `geo:` success. Open Maps (launch), then rung-7 loop: search field → type destination → pick result → Start → oracle = nav notification / guidance UI. Mid-drive "turn right here?" and "wrong entrance, other side of the lot" are further vision+oracle steps (and duplex only if talking to the in-app assistant).
+**Maps nav (example).** No reliance on `google.navigation:` / `geo:` success. Open Maps (launch), then rung-7 loop: search field → type destination → pick result → Start → oracle = nav notification / guidance UI.
+
+**Mid-drive Q&A (live map look-around + optional Maps voice AI).** For questions like "can I get there if I turn right here?" or "that's the wrong entrance — I need the lot on the far side":
+1. **Live-map vision loop (default for spatial asks):** Operator keeps Maps in the foreground (or brings guidance UI up), **screenshots / pans / zooms the live navigation map** via the hybrid pipeline (§3.5.1) — not intents — so Vision/Conductor can answer from what is on the map. Pan/zoom are gestures; each step has an oracle (map moved, camera altitude/region changed, or new screenshot differs). Wrong-pin / other-side-of-property corrections re-aim the destination the same way (search alternate entrance, drag/pick other side, Start) and require a reroute/destination oracle before "got it, rerouting."
+2. **Maps built-in voice AI via duplex:** when route guidance is better asked of Maps' own assistant (Gemini-in-Maps or equivalent), Conductor may hand Duplex an `app.assistant.duplex` turn: duck media, tap the in-app mic, inject the question, capture the spoken reply on the headset, restore (§3.3 AppAssistantDuplex). Oracle: reply energy / UI state / reroute confirmation — not the model's "done."
+3. Conductor chooses look-around vs duplex (or both) per turn; neither path uses nav intents as the success path.
 
 ### 3.6 The agent as the OS session: the Shell Contract
 
@@ -597,7 +607,7 @@ Operator (actuator)
 | 16 | A home surface: deferred queue, visual results shown at unlock, "what did you do today" | An optional `ROLE_HOME` activity in the actuator (offline, reads its own audit) | Same | — | Could |
 | 17 | Unlock a locked phone by voice | No | No | **F3:** a keyguard patch, only if Caleb answers §9 Q2 "yes". Recommended against. | Won't (default) |
 
-**Capability bar.** Caleb's bar is that the agent can do about everything required of it, including filesystem work. That is met by contract completeness, not privilege escalation: every Must row works on its tier, anything without a row goes through VTB or the ladder (§3.4–3.5; UI work defaults to vision+a11y, not intents), and gaps are reported as `NEEDS_PLATFORM` and become new rows. The actuator owns phone-storage access (row 20); the session reads/writes only its own CE storage (transcripts, hints, model files) and never touches shared storage directly; M7 sandboxed skills get no files. No root on any tier.
+**Capability bar.** Caleb's bar is that the agent can do about everything required of it, including filesystem work. That is met by contract completeness, not privilege escalation: every Must row works on its tier, anything without a row goes through VTB or the ladder (§3.4–3.5; UI work defaults to vision+a11y, not intents), and gaps are reported as `NEEDS_PLATFORM` and become new rows. The actuator owns phone-storage access (row 20); the session reads/writes only its own CE storage (transcripts, hints, model files) and never touches shared storage directly; M7 sandboxed skills get no files. No root on any tier. Mid-drive nav Q&A (live-map look-around + optional Maps voice duplex) is ladder/duplex work under rows 4–5 / 18–19, not a separate contract row (§3.5.1).
 
 **On a locked phone:**
 - Fast tools work (media, volume, timers, time).
@@ -625,10 +635,10 @@ The owner talks to **one** agent. Behind it is a small, fixed crew of roles. Eac
 | **Planner** | session | Decomposes `do`/long goals, picks the ladder rung, decides escalation | `plan_long` (small → large) |
 | **Vision** | session | Hard scene understanding on redacted screenshots when on-device conf is low or semantics are needed (§3.5.1) | `vision_step` |
 | **Router** | session | ModelRouter itself: binds backends per role, caps spend | n/a (policy) |
-| **Operator** | actuator | Hands + Shell: screenshots, `control_detect`, taps/gestures, weak intent probes, routes, oracles | `control_detect` + on-device only |
+| **Operator** | actuator | Hands + Shell: screenshots, `control_detect`, taps/gestures (incl. **live-map pan/zoom** for mid-drive Q&A), weak intent probes, routes, oracles | `control_detect` + on-device only |
 | **Duplex** | actuator | AppAssistantDuplex: inject, capture, duck/restore (§3.3) | `app_duplex_plan` (session) + on-device VAD/AEC |
 | **Files** | actuator | Row 20 storage ops; destructive ops go to Announcer | none |
-| **Announcer** | actuator | TrustedPath: class table, house voice, guard window | `tts_house`, `offline_grammar`, `ocr_commit` (bundled) |
+| **Announcer** | actuator | TrustedPath: class table, house voice, guard window; **compressed audio cache** keyed by `(text, voice_id)` — replay hit, synth miss (§3.3) | `tts_house`, `offline_grammar`, `ocr_commit` (bundled) |
 
 - **Why a team.** Smaller context per role, per-role model choice, parallel work (Vision proposes while Duplex holds the audio), and clean seams for testing and audit. One face keeps the UX simple and keeps a single owner of the turn.
 - **Unchanged invariants.** Only actuator roles actuate; only session roles have network; no keys in the actuator; irreversible acts go through Announcer/trusted path whichever role asked; oracles, not role reports, decide "done".
