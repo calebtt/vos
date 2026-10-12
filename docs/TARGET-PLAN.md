@@ -37,6 +37,7 @@
 10. **Everything lives in git from the first hour,** with CI and static security checks on every push. **GitHub `calebtt/vos` is the source of truth** for the plan, issues, and milestones; `~/vos`, data-disk, and box copies are caches synced from it (`docs/TRACKING.md`).
 11. **ModelRouter picks the model per task class, not one model for everything.** A session-owned registry of pluggable backends (LLMs *and* non-LLM models: ASR, TTS, OCR, wake word, VAD/AEC, vision, embeddings) bound per task class by a policy table, with cost/latency tiers, offline vs cloud, and a Settings picker. Simple jobs get small/fast/offline models; hard jobs get advanced ones. Provider-API juggling stays in the session (§3.2.1).
 12. **The agent can do about everything a person can on the phone, including files — without root.** "About everything" = Shell Contract completeness (§3.6, incl. row 20 Files) + VTB + capability ladder. The actuator reads/writes phone storage (MediaStore, SAF grants, app-visible shared storage) for tasks; the session manages only its own CE storage and declared egress; M7 skills stay isolated. Irreversible file acts (delete, overwrite, share out) go through the trusted path.
+13. **One user-facing agent, a small internal agent team.** The owner talks to exactly one agent (the voice/shell session). Under it, a small fixed set of specialist roles (Conductor, Planner, Vision, Router in the session; Operator, Duplex, Files, Announcer in the actuator) split along the session/actuator UID line and talk over Binder/VTB. Roles are internal, never separate user-visible bots. Security is unchanged: only actuator roles actuate, only session roles have network, irreversible acts still go through the trusted path, no keys in the actuator (§3.7).
 
 ### Names
 
@@ -68,6 +69,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 | Justify Graphene against Lineage+microG; give an escape hatch | §4.3 comparison, §4.7 hatch. |
 | (2026-10-12) A model choice picker; simpler vs more advanced models per task, not only AI models | ModelRouter + registry + policy table + Settings picker (§3.2.1, decision 11). M1 ships v0; M3 vision pick; M5 VTB tools declare a preferred model class. Issue: *ModelPicker / ModelRouter* (M1). |
 | (2026-10-12) The agent should have filesystem access and be able to do about everything required of it | Shell Contract row 20 (Files) + VTB + ladder; actuator owns phone-storage access, session only its own CE storage; trusted path on destructive file acts; no root (decision 12, §3.6). |
+| (2026-10-12) A small agent team may suit better, even with one main agent the user works with | One user-facing agent + small internal specialist team mapped onto the UID split; agent↔agent over Binder/VTB made first-class; ModelRouter binds each role's backend and escalates (decision 13, §3.4, §3.7). M1 ships internal roles in one session + one actuator; M5 opens VTB peer agents. Issue: *Agent team* (M1). |
 | (2026-10-12) Treat GitHub as the source of truth | `calebtt/vos` wins; local copies are caches (`docs/TRACKING.md`, decision 10). |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
@@ -201,6 +203,7 @@ Each principle has a test. A principle without a test does not count.
 │  Files        MediaStore / SAF grants / shared storage ops (§3.6 row 20)     │
 │  ToolBus      VTB registry + provider binding + inbound goals (§3.4)         │
 │  Audit        hash-chained, CE storage; undo journal                         │
+│  ── actuator-side team roles (§3.7): Operator, Duplex, Files, Announcer ──   │
 └──────▲─────────────────────────────┬────────────────────────────────────────┘
        │ Binder: IVosActuator          │ Binder: IVosSession (turn events,
        │ (signature perm + UID + cert) │ mic/speaker pipes as ParcelFileDescriptor)
@@ -208,6 +211,8 @@ Each principle has a test. A principle without a test does not count.
 │ SESSION   com.vos.session    — networked, NO sensors, NO actuation perms     │
 │  VoicePlane   realtime voice vendor (xAI default) over WebSocket            │
 │  Planner      fixed fast-tool surface + find_capability/do/ui_task          │
+│  ── session-side team roles (§3.7): Conductor (user-facing), Planner,     │
+│     Vision, Router; AgentBus routes role↔role and role↔VTB peer        │
 │  VisionLoop   step loop for UI tasks (calls the vision vendor)              │
 │  Player       Media3 MediaSessionService for RSS podcasts/radio (needs net) │
 │  Keys         Keystore-wrapped (StrongBox if present); entered at runtime   │
@@ -460,9 +465,15 @@ The actuator enforces these rules, not the requesting app:
 5. **Isolation.** The requester sees only its own goal's result, never observations from other apps.
 6. **Limits.** Each package has a rate limit, and the owner can say "stop letting <app> ask you things".
 
-#### Agent ↔ agent
+#### Agent ↔ agent (first-class)
 
-A provider that declares `agent.acceptsGoals` can receive a delegated sub-goal through the reserved tool `agent.goal {text, constraints}`. Progress streams back through `progress`, and an oracle still checks the result. This is how a bank's or an airline's own agent does the part only it can do, without the OS scraping its UI.
+Agent↔agent traffic, internal or external, rides one envelope on Binder/VTB. There is no second bus.
+
+- **Internal roles (M1).** The specialist roles of §3.7 exchange `AgentMsg {from_role, to_role, goalId, turnId, kind: goal|progress|result|escalate|cancel, payload, origin}`. Session↔session roles use in-process calls with the same envelope type, so they can be audited the same way. Session↔actuator roles cross `IVosActuator`/`IVosSession`, under the existing signature permission, UID, and cert check. Every cross-UID message is audited.
+- **Authority follows the UID, not the role.** A session role can only *request* an act; the actuator role that holds the permission decides, classifies (§5.5), and runs the oracle. Payloads from a role are data with an `origin` tag, the same as screen text (§5.6).
+- **Escalation.** A role returns `escalate {reason, wantClass}`; the Conductor asks ModelRouter for the next policy entry (e.g. `plan_long:small` → `plan_long:large`, `vision_step` small → large after two failed steps). One escalation per task, audited with cost (§3.2.1).
+- **Cancel and stop.** "Stop", the QS tile, and the volume chord fan a `cancel` to every role on the `turnId` from the actuator; actuator roles stop first and do not wait on the session.
+- **External peers (M5).** A provider that declares `agent.acceptsGoals` can receive a delegated sub-goal through the reserved tool `agent.goal {text, constraints}`. Progress streams back through `progress`, and an oracle still checks the result. This is how a bank's or an airline's own agent does the part only it can do, without the OS scraping its UI. Apps asking the OS for help use the inbound-goal path above; peers never get another app's observations, and irreversible results from a peer still need the trusted path.
 
 #### Mapping, adapters, versioning
 
@@ -543,6 +554,26 @@ The router tries rungs in order and stops at the first **oracle-verified** succe
 None of these block a Must row.
 
 ---
+
+### 3.7 Agent team: one face, small internal crew
+
+The owner talks to **one** agent. Behind it is a small, fixed crew of roles. Each role has a narrow prompt/tool surface and its own ModelRouter task class, so cheap jobs stay cheap and hard jobs can escalate. Roles are code modules with a contract, not separate apps, and not user-visible bots.
+
+| Role | UID | Does | Model class (ModelRouter) |
+|---|---|---|---|
+| **Conductor** (user-facing) | session | Holds the voice turn, persona, and memory; dispatches to roles; speaks results | `chat_voice` |
+| **Planner** | session | Decomposes `do`/long goals, picks the ladder rung, decides escalation | `plan_long` (small → large) |
+| **Vision** | session | Reads redacted screenshots and proposes the next UI step | `vision_step` |
+| **Router** | session | ModelRouter itself: binds backends per role, caps spend | n/a (policy) |
+| **Operator** | actuator | Hands + Shell: taps, gestures, intents, routes, oracles | on-device only |
+| **Duplex** | actuator | AppAssistantDuplex: inject, capture, duck/restore (§3.3) | `app_duplex_plan` (session) + on-device VAD/AEC |
+| **Files** | actuator | Row 20 storage ops; destructive ops go to Announcer | none |
+| **Announcer** | actuator | TrustedPath: class table, house voice, guard window | `tts_house`, `offline_grammar`, `ocr_commit` (bundled) |
+
+- **Why a team.** Smaller context per role, per-role model choice, parallel work (Vision proposes while Duplex holds the audio), and clean seams for testing and audit. One face keeps the UX simple and keeps a single owner of the turn.
+- **Unchanged invariants.** Only actuator roles actuate; only session roles have network; no keys in the actuator; irreversible acts go through Announcer/trusted path whichever role asked; oracles, not role reports, decide "done".
+- **v0 shape (M1).** One session process and one actuator process; Conductor + Operator + Announcer real; Planner/Vision/Duplex/Files as stubs or thin wrappers that grow in M2–M4. M5 adds external VTB peer agents through `agent.goal`.
+- **Not in scope.** Roles spawning new roles, roles with their own keys or egress, user-visible multi-bot chat.
 
 ## 4. Platform choice
 
@@ -903,6 +934,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 - Session: realtime voice from the pipe, key store, egress allowlist, built-in Player, **ModelRouter v0** (§3.2.1: registry, policy table, `chat_voice` + `offline_grammar` selectable, Settings picker).
 - Actuator: Files row 20 read paths (MediaStore query/open, SAF tree grant) on Tier S.
 - Binder auth on both sides.
+- **Agent team v0** (§3.7): Conductor + Operator + Announcer roles on the `AgentMsg` envelope inside one session + one actuator; escalation through ModelRouter; cancel fan-out.
 - S-25 inventory started.
 
 | ID | Acceptance test | Pass |
@@ -920,6 +952,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M1-NOGOOG-01 | Full M1 test suite on Phone B running official Graphene with sandboxed Play absent | All M1 tests pass |
 | M1-MODEL-01 | Switch `chat_voice` between two registered backends and `offline_grammar` between two bundled variants from Settings, then by voice | Next turn uses the new backend (audited); a missing key/model falls back to the next policy entry with a spoken notice |
 | M1-MODEL-02 | Try to bind `offline_grammar` or `ocr_commit` to a cloud backend | Rejected by the router and by a static check; actuator still has 0 network flows |
+| M1-TEAM-01 | Session-side role sends an act `AgentMsg` straight to Operator for an irreversible class; then a role tries to call a cloud backend from the actuator | Act is classified and routed to Announcer (trusted path), never dispatched directly; actuator has 0 network flows; all messages audited with `from_role` |
+| M1-TEAM-02 | Spoken "stop" mid-task with Planner, Vision, and Operator busy | Every role on the `turnId` gets `cancel`; actuator roles stop in ≤500 ms without waiting on the session |
 | M1-FIELD | 3 workdays on Phone A | Daily log in `eval/field/` |
 
 ### M2 — Trusted path and everyday comms (target 2026-12-04)
@@ -1016,6 +1050,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 **Scope:**
 - Registry, VTB SDK (an AAR plus an annotation processor that generates the manifest JSON), and two reference providers: a VOS Notes demo, and a wrapper for one real service Caleb uses.
 - VTB manifest field `preferredModelClass`, honored by ModelRouter as a hint within owner policy.
+- **Multi-agent VTB peers:** external apps' agents join as peers on the same `AgentMsg`/`agent.goal` envelope (§3.4, §3.7).
 - Inbound `IVosAgent`, `agent.goal` delegation, AppFunctions adapter (P/F), read-only remote MCP, conformance kit, and `docs/VTB-SPEC.md` v0.
 
 | ID | Acceptance test | Pass |
@@ -1028,6 +1063,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M5-VTB-06 | Rate limit and "stop letting X ask" | Enforced; audited |
 | M5-VTB-07 | Conformance kit on both reference providers | Pass |
 | M5-VTB-08 | Provider declares `preferredModelClass: vision_step:large` while the owner profile caps cost tier at 1 | Owner cap wins; hint audited |
+| M5-TEAM-01 | Delegate a sub-goal to a reference peer agent; peer returns `ok` with a failing oracle, then asks for an irreversible act | `UNVERIFIED`; irreversible ask `DEFERRED` to trusted path; peer sees only its own goal |
 | M5-LAD-01 | "Make a note: milk" with and without the provider installed | Rung 2 vs rung 8; both verified |
 
 ### M6 — Many people (target 2027-05-14)
@@ -1179,4 +1215,4 @@ Each question has a default. The default holds unless you change it.
 18. **Default assistant role.** Keep VOS as `ROLE_ASSISTANT` even when exercising Maps' in-app Gemini (duplex Path A), rather than yielding the role to Google? *Default: keep VOS; never yield.*
 19. **Model picker defaults.** Which alternates go in the M1 registry for `chat_voice` (xAI default) and is the *Balanced* profile the default? *Default: xAI realtime as primary, one alternate vendor only if you name it; Balanced; caps per Q5.*
 20. **Files scope.** OK to pre-grant `MANAGE_EXTERNAL_STORAGE` to the actuator on Tier P (all shared storage, never app-private dirs)? *Default: yes on Tier P; Tier S uses MediaStore + SAF grants only.*
-
+21. **Named roles in v0.** Ship M1 with three real roles (Conductor, Operator, Announcer) and the rest as stubs, or all eight from day one? *Default: three real, rest stubs; one persona/voice for the user regardless.*
