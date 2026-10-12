@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Date | 2026-10-12 (vision-first UI; dual-device: panther primary, akita secondary) |
+| Date | 2026-10-12 (vision-first UI; on-device control_detect → coords+type; dual-device: panther primary, akita secondary) |
 | Owner | Caleb |
 | Name | **VOS**. Packages `com.vos.session` and `com.vos.actuator` (`com.vos.sandbox` at M7). Tool bus: **VOS Tool Bus (VTB)**. |
 | Replaces | The earlier target plan in `argoos/TARGET-PLAN.md` and every name in it. Its architecture is reused. Its platform choice (Google's Pixel factory OTA) is reversed. Nothing is carried forward for compatibility. |
@@ -509,7 +509,7 @@ The router stops at the first **oracle-verified** success. For UI goals it goes 
 | 7 | **UI task (default for in-app work)** — hybrid vision + a11y screenshot loop (§3.5.1) | ✔ | ✔ | Maps: search → pick place → Start; wrong-pin correction; settings trees; any unknown screen | end oracle. Success writes a route (→ 6) |
 | 8 | Honest stop | — | — | `NEEDS_USER` / `NEEDS_PLATFORM` / `NEEDS_GOOGLE` / `UNSUPPORTED` | spoken, audited |
 
-**How rung 7 observes (hybrid).** See §3.5.1. Short form: actuator screenshot + a11y marks → on-device `control_detect` proposes click targets → if confidence is high, Operator taps; if low or the step needs semantics, session sends a redacted screenshot to cloud `vision_step` via ModelRouter → Operator executes. Gestures via `dispatchGesture`; text via `ACTION_SET_TEXT`.
+**How rung 7 observes (hybrid).** See §3.5.1. Short form: actuator screenshot + a11y marks → on-device `control_detect` returns `{bbox|center coords, type, label?, confidence}` → high confidence → Operator taps at those coords (no cloud); low confidence or semantic step → session sends a redacted screenshot to cloud `vision_step` via ModelRouter → Operator executes. Gestures via `dispatchGesture`; text via `ACTION_SET_TEXT`.
 
 **How rung 6 records.** Routes are recorded **by the actuator** from runs it observed and verified: the step list, a UI signature per step, and the end oracle. The session can ask for a replay by id but **cannot author steps**, so a poisoned model cannot plant a persistent macro. A route is invalidated when a step signature fails twice or the end oracle fails — **not** because `versionCode` alone changed. Version is logged in eval results; freshness of the live app is the goal.
 
@@ -517,19 +517,21 @@ The router stops at the first **oracle-verified** success. For UI goals it goes 
 
 #### 3.5.1 Hybrid vision pipeline (on-device detect → cloud understand)
 
-UI control is a two-stage loop. On-device models do fast button/control detection; cloud multimodal does hard scene understanding. ModelRouter's thin policy binds `control_detect` (actuator, on-device only) and `vision_step` (session, cloud).
+UI control is a two-stage loop. On-device models do fast control detection and return **coordinates plus control type** (button, field, icon, link, toggle, …) with optional label and confidence; cloud multimodal does hard scene understanding. High-confidence on-device hits let the Operator tap without calling the cloud. ModelRouter's thin policy binds `control_detect` (actuator, on-device only) and `vision_step` (session, cloud).
 
 ```text
 Operator (actuator)
   takeScreenshot (downscaled) + a11y node marks + pruned tree
        │
        ▼
-  control_detect (on-device OCR / icon / button heads) ──► proposals {mark|xy, label?, conf}
+  control_detect (on-device) ──► proposals
+       │         each: {bbox|center coords, type, label?, confidence}
+       │         type ∈ {button, field, icon, link, toggle, other, …}
        │
-       ├─ conf ≥ τ_tap and goal is "tap/type known control" ──► dispatchGesture / SET_TEXT
-       │         (no image leaves the phone)
+       ├─ confidence ≥ τ_tap and type matches goal ──► Operator taps
+       │         (dispatchGesture / SET_TEXT at center coords; no cloud; no image leaves phone)
        │
-       └─ conf < τ_tap  OR  step needs semantics ("which entrance", "is Start enabled",
+       └─ confidence < τ_tap  OR  step needs semantics ("which entrance", "is Start enabled",
           "read this dialog", unfamiliar layout)
               │
               ▼
@@ -545,6 +547,9 @@ Operator (actuator)
               ▼
          Operator executes → end-step oracle → next frame or VERIFIED / honest stop
 ```
+
+
+**On-device `control_detect` output.** Each proposal is `{bbox|center coords, type, label?, confidence}`. `bbox` is pixel bounds on the screenshot (or `center` as tap point); `type` is the control kind (`button`, `field`, `icon`, `link`, `toggle`, `other`, …); `label` is optional OCR/a11y text; `confidence` is in [0,1]. When `confidence ≥ τ_tap` and `type` matches the goal (e.g. tap a button, focus a field), the Operator acts on those coordinates immediately — no cloud round-trip.
 
 **Latency budgets (M3 gates; measured on panther):**
 
