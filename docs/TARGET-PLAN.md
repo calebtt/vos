@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Date | 2026-10-12 (model choice open/TBD; audio cache; live-map look-around + Maps duplex Q&A; vision-first; dual-device panther/akita) |
+| Date | 2026-10-12 (on-device tool surface + scratchpad; human-like live-map look-around; model choice open/TBD; audio cache; Maps duplex; vision-first; dual-device panther/akita) |
 | Owner | Caleb |
 | Name | **VOS**. Packages `com.vos.session` and `com.vos.actuator` (`com.vos.sandbox` at M7). Tool bus: **VOS Tool Bus (VTB)**. |
 | Replaces | The earlier target plan in `argoos/TARGET-PLAN.md` and every name in it. Its architecture is reused. Its platform choice (Google's Pixel factory OTA) is reversed. Nothing is carried forward for compatibility. |
@@ -39,6 +39,7 @@
 12. **The agent can do about everything a person can on the phone, including files — without root.** "About everything" = Shell Contract completeness (§3.6, incl. row 20 Files) + VTB + capability ladder. The actuator reads/writes phone storage (MediaStore, SAF grants, app-visible shared storage) for tasks; the session manages only its own CE storage and declared egress; M7 skills stay isolated. Irreversible file acts (delete, overwrite, share out) go through the trusted path.
 13. **One user-facing agent, a small internal agent team.** The owner talks to exactly one agent (the voice/shell session). Under it, a small fixed set of specialist roles (Conductor, Planner, Vision, Router in the session; Operator, Duplex, Files, Announcer in the actuator) split along the session/actuator UID line and talk over Binder/VTB. Roles are internal, never separate user-visible bots. Security is unchanged: only actuator roles actuate, only session roles have network, irreversible acts still go through the trusted path, no keys in the actuator (§3.7).
 14. **Vision + accessibility is the default for in-app UI work; intents are a weak fallback.** Field experience: public intents and deep links are unreliable for real apps (Maps nav included). The default path for UI tasks is a screenshot → on-device control detect → (optional) cloud vision → `dispatchGesture` loop (§3.5). Typed rungs (built-ins, VTB, notifications, MediaBrowser) stay first for *non-UI* fast tools. Intents/AppFunctions may still be tried as a cheap probe but never gate success. Eval uses current up-to-date apps; version-pinning test apps is forbidden as the success criterion (§6 M3).
+15. **On-device tool surface lives in the actuator; the agent crew uses it like hands.** A named toolkit of actuator-local tools (screenshot, a11y tap/swipe/type, `control_detect`, audio duplex, file R/W, TTS cache, scratchpad/notes, timers, shell globals, …) is what Operator / Duplex / Files / Announcer call. Many are already implied by the Shell Contract and ladder; the toolkit makes them explicit for the crew and for later VTB exposure. Session roles never hold these tools — they ask over Binder. Live-map look-around is a first-class multi-step explore skill on this surface, and the bar is **human-like intelligence**, not scripted intents (§3.5.2).
 
 ### Names
 
@@ -76,6 +77,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 | (2026-10-12) Model choice for on-device UI detect is unsettled (fine-tuned YOLO may or may not cover buttons; a11y merge / OmniParser-style / other detectors need research); hold until Claude is back on the desktop | Leave concrete `control_detect` model **open**. Thin ModelRouter policy stays (decision 11, §3.2.1); do **not** lock YOLO vs a11y vs OmniParser. Research + pick with Claude when desktop is back; M3 binds whatever wins. |
 | (2026-10-12) Cache and lookup compressed audio messages instead of regenerating every time | Announcer / house-voice (and common prompts): cache compressed audio keyed by `(text, voice_id)`; replay on hit; synth on miss (§3.3 ANNOUNCE, §3.7 Announcer). |
 | (2026-10-12) For mid-drive nav Q&A, look around the live map; Maps has a built-in voice AI the team can question for route guidance | Mid-drive: Operator may screenshot/pan/zoom the **live navigation map** (vision loop, not intents) to answer; and/or Duplex may question Maps' **built-in voice AI** via AppAssistantDuplex when that is better for route guidance (§3.5.1 Maps nav, §3.3 duplex). |
+| (2026-10-12) On-device tools should be drafted; many are used by the current agent crew; add useful ones (scratchpad etc.); live-map look-around must be intelligent / human-like for complex tasks or it isn't useful | Decision 15 + §3.5.2: named **on-device tool surface** (actuator-local) covering screenshot, a11y gestures, `control_detect`, duplex, file R/W, TTS cache, **scratchpad/notes**, timers, shell globals; VTB may expose a subset later. Live-map look-around raised to a **multi-step human-like explore** (pan/zoom/read labels/reorient with oracles) — not scripted intents. Issue: *On-device tool kit draft* (M3). |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
 
@@ -576,9 +578,44 @@ Operator (actuator)
 **Maps nav (example).** No reliance on `google.navigation:` / `geo:` success. Open Maps (launch), then rung-7 loop: search field → type destination → pick result → Start → oracle = nav notification / guidance UI.
 
 **Mid-drive Q&A (live map look-around + optional Maps voice AI).** For questions like "can I get there if I turn right here?" or "that's the wrong entrance — I need the lot on the far side":
-1. **Live-map vision loop (default for spatial asks):** Operator keeps Maps in the foreground (or brings guidance UI up), **screenshots / pans / zooms the live navigation map** via the hybrid pipeline (§3.5.1) — not intents — so Vision/Conductor can answer from what is on the map. Pan/zoom are gestures; each step has an oracle (map moved, camera altitude/region changed, or new screenshot differs). Wrong-pin / other-side-of-property corrections re-aim the destination the same way (search alternate entrance, drag/pick other side, Start) and require a reroute/destination oracle before "got it, rerouting."
+1. **Live-map look-around (default for spatial asks) — human-like, multi-step explore:** Operator keeps Maps in the foreground (or brings guidance UI up) and **explores the live navigation map the way a person would** — not a fixed script and never nav intents. Typical steps: screenshot → read visible labels/roads/pins → pan toward the question's side → zoom for entrance/lot detail → re-screenshot → (optional) rotate/tilt if the UI allows → compare to the spoken ask. Each step uses the hybrid pipeline (§3.5.1) and an **oracle** (map moved, zoom level/region changed, new labels visible, or screenshot differs meaningfully). Conductor/Vision decide the next explore action from what was just seen; dead-ends (wrong side, obscured pin) trigger reorient, not a blind replay. Wrong-pin / other-side-of-property corrections re-aim the destination the same way (search alternate entrance, drag/pick other side, Start) and require a reroute/destination oracle before "got it, rerouting." **Bar:** if look-around is not intelligent enough to handle complex spatial asks, it is not useful — treat that as a product fail, not a "intent fallback" excuse.
 2. **Maps built-in voice AI via duplex:** when route guidance is better asked of Maps' own assistant (Gemini-in-Maps or equivalent), Conductor may hand Duplex an `app.assistant.duplex` turn: duck media, tap the in-app mic, inject the question, capture the spoken reply on the headset, restore (§3.3 AppAssistantDuplex). Oracle: reply energy / UI state / reroute confirmation — not the model's "done."
-3. Conductor chooses look-around vs duplex (or both) per turn; neither path uses nav intents as the success path.
+3. Conductor chooses look-around vs duplex (or both) per turn; neither path uses nav intents as the success path. Scratchpad (§3.5.2) may hold interim map observations ("far entrance is south lot") across explore steps within the turn.
+
+#### 3.5.2 On-device tool surface (actuator-local)
+
+The agent crew needs a named set of **hands** — tools that run only inside `com.vos.actuator` (no `INTERNET`), invoked by Operator / Duplex / Files / Announcer over the internal role envelope (§3.7). Session roles never call these APIs directly; they send goals and receive results over Binder. Many tools are already implied by the Shell Contract (§3.6) and the ladder (§3.5); this section makes the surface explicit so the crew can share them, tests can name them, and VTB can later expose a curated subset to peer apps (§3.4).
+
+| Tool id | What it does | Primary role | Notes |
+|---|---|---|---|
+| `screen.capture` | Screenshot (downscaled) + optional a11y tree/marks | Operator | Respects `FLAG_SECURE`; feed for `control_detect` / Vision |
+| `ui.gesture` | Tap / long-press / swipe / pinch-zoom / scroll via `dispatchGesture` | Operator | Live-map pan/zoom uses this |
+| `ui.type` | `ACTION_SET_TEXT` / paste into focused field | Operator | |
+| `ui.global` | Home, back, recents, notifications, QS, lock, split | Operator | Shell Contract row 2 |
+| `ui.control_detect` | On-device proposals `{coords, type, label?, conf}` | Operator | Backend TBD (§3.2.1); escalate on fail |
+| `ui.oracle` | End-step / end-task checks (notification, MediaSession, UI signature, screenshot delta) | Operator | Oracle-over-confession |
+| `audio.duplex` | AppAssistantDuplex: duck, inject, capture, restore | Duplex | §3.3; Paths A→B→C |
+| `audio.plane` | Pause / duck / route / volume / focus for any playback | Duplex / Operator | Tier P authoritative |
+| `audio.tts_cache` | Lookup/store compressed house-voice & common prompts by `(text, voice_id)` | Announcer | Replay hit; synth miss |
+| `audio.announce` | Trusted-path house voice + offline "stop" listen | Announcer | |
+| `file.read` / `file.write` / `file.list` / `file.move` / `file.delete` | Shared-storage ops (MediaStore, SAF grants, MES on P) | Files | Destructive → Announcer |
+| `notes.scratchpad` | Per-`goalId` / per-role scratch notes (structured KV + short text) in actuator CE storage | Any actuator role; Conductor may read summaries via Binder | **New crew aid:** interim observations ("south lot entrance"), failed coords, explore breadcrumbs. Cleared or archived when the goal ends. Not owner documents (those are `file.*`). Session may keep its own plan notes in CE; scratchpad is the actuator-side board the hands write on. |
+| `time.timer` / `time.alarm_query` | Timers; read next alarm/calendar peek when APIs allow | Operator | Fast tools |
+| `device.toggle` | Wifi/BT/DND/torch/brightness/… | Operator | QS tap on S; silent on P |
+| `comms.notify_*` / `comms.reply` | Read/act/reply notifications | Operator | Trusted path on send |
+| `app.launch` | Bring package/activity to foreground | Operator | |
+
+**Contracts.**
+- Every tool returns a typed result + oracle hint; failures are honest (`NEEDS_*`, `DENIED`, `TIMEOUT`), never silent.
+- Irreversible tool classes still go through Announcer before dispatch (§5.5).
+- Tools are **not** root and **not** other-apps' private storage.
+- Latency: gesture/capture tools aim for the §3.5.1 budgets; scratchpad R/W is local CE and should be negligible (≤5 ms).
+
+**Scratchpad (why).** Complex multi-step work (live-map explore, Spotify ambiguous titles, multi-file gather) needs a place for the crew to leave interim state without stuffing the voice context or pretending the model "remembers" pixel coords. Scratchpad entries are audited with `goalId`/`turnId`, size-capped, and never uploaded by the actuator (session may receive a redacted summary if Conductor asks).
+
+**VTB later.** A subset (`screen.capture` redacted, `ui.oracle` read-only, maybe `notes.scratchpad` scoped) may be offered to trusted peer agents over VTB in M5; default is internal-only. Full gesture/file/duplex stay actuator-private unless Caleb opens them.
+
+**Live-map look-around on this surface.** Look-around is not a separate binary — it is Conductor + Operator composing `screen.capture` → `ui.control_detect` / Vision → `ui.gesture` (pan/zoom) → `ui.oracle` → `notes.scratchpad`, looping until the spatial question is answered or an honest stop. The quality bar is **human-like explore**, not a canned pan script (§3.5.1 mid-drive).
 
 ### 3.6 The agent as the OS session: the Shell Contract
 
@@ -607,7 +644,7 @@ Operator (actuator)
 | 16 | A home surface: deferred queue, visual results shown at unlock, "what did you do today" | An optional `ROLE_HOME` activity in the actuator (offline, reads its own audit) | Same | — | Could |
 | 17 | Unlock a locked phone by voice | No | No | **F3:** a keyguard patch, only if Caleb answers §9 Q2 "yes". Recommended against. | Won't (default) |
 
-**Capability bar.** Caleb's bar is that the agent can do about everything required of it, including filesystem work. That is met by contract completeness, not privilege escalation: every Must row works on its tier, anything without a row goes through VTB or the ladder (§3.4–3.5; UI work defaults to vision+a11y, not intents), and gaps are reported as `NEEDS_PLATFORM` and become new rows. The actuator owns phone-storage access (row 20); the session reads/writes only its own CE storage (transcripts, hints, model files) and never touches shared storage directly; M7 sandboxed skills get no files. No root on any tier. Mid-drive nav Q&A (live-map look-around + optional Maps voice duplex) is ladder/duplex work under rows 4–5 / 18–19, not a separate contract row (§3.5.1).
+**Capability bar.** Caleb's bar is that the agent can do about everything required of it, including filesystem work. That is met by contract completeness, not privilege escalation: every Must row works on its tier, anything without a row goes through VTB or the ladder (§3.4–3.5; UI work defaults to vision+a11y, not intents), and gaps are reported as `NEEDS_PLATFORM` and become new rows. The actuator owns phone-storage access (row 20); the session reads/writes only its own CE storage (transcripts, hints, model files) and never touches shared storage directly; M7 sandboxed skills get no files. No root on any tier. Mid-drive nav Q&A (human-like live-map look-around + optional Maps voice duplex) is ladder/duplex work under rows 4–5 / 18–19, not a separate contract row (§3.5.1–3.5.2). The on-device tool surface (§3.5.2) is how the crew implements those rows.
 
 **On a locked phone:**
 - Fast tools work (media, volume, timers, time).
@@ -635,12 +672,12 @@ The owner talks to **one** agent. Behind it is a small, fixed crew of roles. Eac
 | **Planner** | session | Decomposes `do`/long goals, picks the ladder rung, decides escalation | `plan_long` (small → large) |
 | **Vision** | session | Hard scene understanding on redacted screenshots when on-device conf is low or semantics are needed (§3.5.1) | `vision_step` |
 | **Router** | session | ModelRouter itself: binds backends per role, caps spend | n/a (policy) |
-| **Operator** | actuator | Hands + Shell: screenshots, `control_detect`, taps/gestures (incl. **live-map pan/zoom** for mid-drive Q&A), weak intent probes, routes, oracles | `control_detect` + on-device only |
+| **Operator** | actuator | Hands + Shell via **on-device tool surface** (§3.5.2): screenshots, `control_detect`, taps/gestures (incl. **human-like live-map explore**), scratchpad notes, weak intent probes, routes, oracles | `control_detect` + on-device only |
 | **Duplex** | actuator | AppAssistantDuplex: inject, capture, duck/restore (§3.3) | `app_duplex_plan` (session) + on-device VAD/AEC |
 | **Files** | actuator | Row 20 storage ops; destructive ops go to Announcer | none |
 | **Announcer** | actuator | TrustedPath: class table, house voice, guard window; **compressed audio cache** keyed by `(text, voice_id)` — replay hit, synth miss (§3.3) | `tts_house`, `offline_grammar`, `ocr_commit` (bundled) |
 
-- **Why a team.** Smaller context per role, per-role model choice, parallel work (Vision proposes while Duplex holds the audio), and clean seams for testing and audit. One face keeps the UX simple and keeps a single owner of the turn.
+- **Why a team.** Smaller context per role, per-role model choice, parallel work (Vision proposes while Duplex holds the audio), and clean seams for testing and audit. One face keeps the UX simple and keeps a single owner of the turn. Roles share the **on-device tool surface** (§3.5.2) and a per-goal **scratchpad** so multi-step explores (live map, ambiguous UIs) stay coherent without stuffing the voice context.
 - **Unchanged invariants.** Only actuator roles actuate; only session roles have network; no keys in the actuator; irreversible acts go through Announcer/trusted path whichever role asked; oracles, not role reports, decide "done".
 - **v0 shape (M1).** One session process and one actuator process; Conductor + Operator + Announcer real; Planner/Vision/Duplex/Files as stubs or thin wrappers that grow in M2–M4. M5 adds external VTB peer agents through `agent.goal`.
 - **Not in scope.** Roles spawning new roles, roles with their own keys or egress, user-visible multi-bot chat.
@@ -1051,8 +1088,10 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 
 **Scope:**
 - Accessibility actuation + **hybrid vision pipeline** (§3.5.1): on-device `control_detect` for buttons/controls; cloud `vision_step` for hard scenes; commit-button detector with bundled OCR (`ocr_commit`).
+- **On-device tool surface** drafted and wired for the crew (§3.5.2, decision 15): screenshot, gestures, `control_detect`, duplex hooks, file R/W, TTS cache, **scratchpad**, timers, shell globals; VTB exposure deferred.
 - ModelRouter: `control_detect` (on-device only), `vision_step` (small→large, one-step escalate, spend in audit), `ocr_commit` variant pick (on-device only).
 - **Vision-first UI path;** intents/AppFunctions demoted to weak fallback (decision 14). Maps nav and similar flows are screenshot-loop tasks, not intent success.
+- **Human-like live-map look-around** for mid-drive spatial Q&A (multi-step pan/zoom/read/reorient with oracles + scratchpad); optional Maps voice duplex.
 - Files row 20 write paths (create/move/copy; delete/overwrite/share-out via trusted path).
 - Takeover detection (S-09), route record and replay (invalidate on UI drift, not pinned version), ladder memory.
 - Screenshot minimization / redact (IME, `FLAG_SECURE`), honest stops including `NEEDS_GOOGLE`.
@@ -1075,6 +1114,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M3-SHELL-S | Shell Contract Tier S rows (1–7, 9–11), one scripted test each | All pass on Phone A and Phone C |
 | M3-MODEL-01 | Top-N UI tasks under thin policy *cheap* vs *best* `vision_step` bindings | Success and cost per task logged; escalations audited |
 | M3-FILE-01 | "Find the PDF I downloaded yesterday and share it to Signal"; "delete last week's screenshots" | Correct files found; share and delete go through the trusted path; 0 access outside granted storage |
+| M3-TOOL-01 | On-device tool surface (§3.5.2): each tool id invoked from Operator/Duplex/Files/Announcer with typed result; scratchpad write/read across a multi-step goal; session cannot call tools directly | All Must tools return honest results; scratchpad entries audited with goalId; 0 session→tool API calls; actuator 0 network |
+| M3-MAP-01 | Mid-drive spatial asks on **current** Maps/Organic Maps: "can I turn right here?"; wrong-pin / other-side-of-property correction via **human-like look-around** (multi-step pan/zoom/read labels + oracle), optional duplex | Oracle-backed answers/reroutes ≥70%; no nav-intent success path; explore steps logged; scratchpad shows interim observations |
 | M3-FIELD | 5 workdays on current apps | Fast ≥95%, UI ≥70%, unannounced irreversible acts = 0 |
 
 ### M4 — VOS Image: the agent owns the session and the audio (Tier P on Phone B; target 2027-02-19)
