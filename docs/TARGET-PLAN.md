@@ -2,12 +2,12 @@
 
 | Field | Value |
 |-------|-------|
-| Date | 2026-10-11 (audio duplex revision) |
+| Date | 2026-10-12 (dual-device: panther primary, akita secondary) |
 | Owner | Caleb |
 | Name | **VOS**. Packages `com.vos.session` and `com.vos.actuator` (`com.vos.sandbox` at M7). Tool bus: **VOS Tool Bus (VTB)**. |
 | Replaces | The earlier target plan in `argoos/TARGET-PLAN.md` and every name in it. Its architecture is reused. Its platform choice (Google's Pixel factory OTA) is reversed. Nothing is carried forward for compatibility. |
 | Inputs | Caleb's feedback of 2026-10-10–11 (below). Audio duplex research in `AUDIO-DUPLEX-RESEARCH.md`. `review-2026-10-10/IMPROVED-PLAN.md`, used only as a list of problems. |
-| Reference device | Pixel 7 (`panther`), changed from Pixel 8a (`akita`) on 2026-10-12. Google's guaranteed security updates run to about Oct 2027 [verify]; GrapheneOS supports panther [verify its end-of-support date]. Plan around a shorter window than the 8a's 2031. Phone A (daily) stays an 8a. |
+| Reference devices | **Primary (Phone B, main flash/dev rig):** Pixel 7 (`panther`). **Also first-class (Phone A path / second target):** Pixel 8a (`akita`). Both get Tier P image recipes, firmware trees, and device-specific spikes; default smoke and S-01 flash land on panther. Support windows: panther ~Oct 2027 Google [verify] / Graphene panther EoS [verify]; akita ~2031 Google [verify]. Dual-device policy set 2026-10-12. |
 | Status | Plan only. No code exists under this plan yet. Audio duplex research: `AUDIO-DUPLEX-RESEARCH.md`. |
 
 **Tags used below.**
@@ -24,7 +24,7 @@
 2. **The actuator owns all audio — intercept, redirect, manage, and duplex.** Only the actuator holds `RECORD_AUDIO` and decides focus, routing, mode, capture, and injection. It can pause/duck/route any playback, hear system output (Tier P), inject PCM into another app's microphone, and capture that app's spoken reply so VOS holds a **duplex channel with in-app assistants** (Maps Gemini button, etc.), not only UI taps. The session receives PCM through pipes only while a turn or `APP_ASSIST` session is open. Details: §3.3, `AUDIO-DUPLEX-RESEARCH.md`.
 3. **The actuator enforces irreversible acts, not the model.** Before an irreversible act, the actuator builds the announcement from the args it will dispatch and speaks it in a fixed "house voice". It listens locally for "stop". If the owner is not present, the act is deferred.
 4. **GrapheneOS is the machine layer, and VOS is the session layer on top of it.**
-   - **Tier P (default):** Graphene's official panther OTA plus the VOS product overlay, re-signed with the owner's AVB key by avbroot (rootless), with the bootloader relocked. Graphene's code is unmodified and nothing is built from source.
+   - **Tier P (default):** Graphene's official OTA for the target device (`panther` first, `akita` also supported) plus the VOS product overlay, re-signed with the owner's AVB key by avbroot (rootless), with the bootloader relocked. Graphene's code is unmodified and nothing is built from source.
    - **Google Play:** absent by default. Graphene's sandboxed Play stays an optional, unprivileged app that the owner may install. VOS never depends on it.
    - **Tier F:** a source soft-fork of Graphene with ≤5 named patches (F6 reserved for AudioPolicy duplex if spikes fail). It is built only when the agent shell or audio duplex needs it.
    - **Hatch L (LineageOS, microG off):** used only if Graphene fights the agent shell, by the measured triggers in §4.7.
@@ -33,7 +33,7 @@
 6. **The phone is never unlocked by voice alone.** Since Android 10, trust agents can only extend an unlock. VOS keeps an unlocked phone unlocked while the owner is present, and shows queued visual results at the next human unlock. Voice unlock would be a Tier F keyguard patch, and only if Caleb asks for it (§9 Q2).
 7. **VOS Tool Bus (VTB)** is a Binder protocol shaped like MCP. Apps use it to offer tools and to ask the OS agent for help. Android 16 AppFunctions and remote MCP servers mount into the same registry.
 8. **Reach comes from Tier S.** It runs on any Android 14+ phone, including Caleb's current GrapheneOS daily phone, with setup in 10 minutes and no ADB. Tier P is the full-power reference build.
-9. **Phone B is the Pixel 7 (`panther`) dev rig. UStor2 is enough disk.** The disk is mounted today at `/media/caleb/UStor21`, and that path gets pinned in fstab (§7). Tier P needs no source tree. Tier F needs about 250 GB, which fits.
+9. **Phone B (Pixel 7 `panther`) is the main flash/dev rig; Pixel 8a (`akita`) stays a first-class supported target (Phone A / second image). UStor2 is enough disk.** The disk is mounted today at `/media/caleb/UStor21`, and that path gets pinned in fstab (§7). Firmware trees for both `panther` and `akita`. Tier P needs no source tree. Tier F needs about 250 GB, which fits.
 10. **Everything lives in git from the first hour,** with CI and static security checks on every push. The repo is `/home/caleb/vos`.
 
 ### Names
@@ -75,7 +75,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 | Nobody owned the audio | The actuator's AudioPlane is the only owner; intercept/redirect/manage + app-assistant duplex (§3.3). |
 | No app↔OS interop | VTB v0 (§3.4) plus the capability ladder (§3.5). |
 | Fork scope had no limit | Tier P has zero patches. Tier F is capped at 5 named patches, each tied to a Shell Contract row (§4.6). |
-| One phone; flashing risked the daily driver | Phone B (Pixel 7 `panther` dev rig) takes every flash. Phone A migrates only after a 14-day soak (M4). |
+| One phone; flashing risked the daily driver | Phone B (Pixel 7 `panther` main flash/dev rig) takes every flash. Phone A (Pixel 8a `akita` path, or another Graphene daily) migrates only after a 14-day soak (M4). Both device trees stay supported. |
 | Work was not in git | M0-01, day 1. |
 | xAI key and VPS token compiled into the old APK | Rotated on Day 0 (§8). |
 | The model decides what is irreversible; silence means proceed | Actuator class table, trusted path, presence, and defer (§5.5). |
@@ -824,8 +824,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 
 | ID | Claim to prove on a device | Pass | Fallback | Needed by |
 |---|---|---|---|---|
-| S-01 | avbroot `--rootless --replace product` on the current **GrapheneOS** panther OTA, with a hello priv-app that requests `MODIFY_AUDIO_ROUTING`, boots and relocks with the owner's `avb_custom_key` | Boots locked (yellow state, owner key); the permission is granted (`dumpsys package`) | Tier F with zero patches (§4.6 a) | M0 decision |
-| S-02 | The filesystem type of Graphene's panther product partition, and whether super has headroom for +100 MB | `lpdump` free space ≥ the overlay size | Put the overlay in `system_ext`; slim the APKs | M0 |
+| S-01 | avbroot `--rootless --replace product` on the current **GrapheneOS** OTA — **default smoke on Phone B `panther`**; same recipe must build for `akita` (Phone A path). Hello priv-app requests `MODIFY_AUDIO_ROUTING`; boots and relocks with the owner's `avb_custom_key` | Boots locked (yellow state, owner key); the permission is granted (`dumpsys package`) | Tier F with zero patches (§4.6 a) | M0 decision |
+| S-02 | The filesystem type of Graphene's product partition and whether super has headroom for +100 MB — measure on **`panther` first**, confirm on **`akita`** (sizes can differ) | `lpdump` free space ≥ the overlay size on each target | Put the overlay in `system_ext`; slim the APKs | M0 |
 | S-03 | `ro.control_privapp_permissions=enforce` on Graphene accepts the VOS allowlist from `/product/etc/permissions` | system_server boots; no allowlist exceptions | Move a permission to a different partition XML | M0 |
 | S-03b | In-OS updates: a Custota-style updater as a product priv-app with an `update_engine` SELinux rule; Graphene's updater fails closed against the replaced certificates and can be disabled at setup | A/B OTA applies from the app; Graphene's updater installs nothing | Monthly recovery sideload (default) | M4 |
 | S-04 | A product priv-app can register an `AudioPolicy` focus policy on Graphene panther, and focus requests from the owner's media apps reach it | Listener sees the requests; a delayed grant works | Cooperative focus only. Report the gap. | M4 |
@@ -837,15 +837,15 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | S-10 | `takeScreenshot` rate limit and `FLAG_SECURE` behavior | ≥1 capture/s, secure windows detectable | Throttle the loop | M3 |
 | S-11 | The accessibility shortcut (both volume keys, 3 s) bound to the actuator turns it off | `ENABLED_ACCESSIBILITY_SERVICES` readback | QS tile and power press only; F2 candidate | M1 |
 | S-12 | A priv-app `TrustAgentService` can extend unlock on Graphene while presence holds (and, as expected, cannot unlock); Graphene has not disabled the trust-agent framework | Stays unlocked; relocks on headset disconnect | Normal timeout | M4 |
-| S-13 | `EXECUTE_APP_FUNCTIONS` can be granted to a product priv-app on Graphene panther; list the installed apps that expose AppFunctions | Execute one function, or record "no providers on a de-Googled phone" | Skip rung 3 on P | M5 |
+| S-13 | `EXECUTE_APP_FUNCTIONS` can be granted to a product priv-app on Graphene (`panther` smoke, `akita` confirm); list the installed apps that expose AppFunctions | Execute one function, or record "no providers on a de-Googled phone" | Skip rung 3 on P | M5 |
 | S-14 | `createHotwordDetector` + `HotwordDetectionService` for a product priv-app voice interaction service | Detects in an isolated process | Foreground-service wake word (opt-in) | M4 (optional) |
-| S-15 | The bundled sherpa-onnx small-vocabulary model on panther (Graphene) and Phone C; `createOnDeviceSpeechRecognizer` where it exists | ≥95% on stop/pause/yes/no fixtures, in quiet and on a noisy floor | A larger bundled model; push-to-confirm on the headset button | M1 |
+| S-15 | The bundled sherpa-onnx small-vocabulary model on Phone B Graphene (`panther` default; `akita` when available) and Phone C; `createOnDeviceSpeechRecognizer` where it exists | ≥95% on stop/pause/yes/no fixtures, in quiet and on a noisy floor | A larger bundled model; push-to-confirm on the headset button | M1 |
 | S-16 | Tier S setup on stock GrapheneOS, Pixel stock Android 14/15/16, and Samsung: the restricted-settings path for accessibility and NLS on a sideloaded APK versus a store install (Accrescent); Advanced Protection behavior with `isAccessibilityTool` | Exact taps documented per OS | Ship through a store that uses session installs | M1 |
 | S-17 | Silent wifi/BT/mobile data/airplane toggles from a preinstalled app on Graphene | Readback matches | Accessibility tap on the QS tile (the Tier S path) | M4 |
 | S-18 | NLS `RemoteInput` reply works for Signal, Graphene's Messaging app, and WhatsApp (if used) | Message appears in the thread | Rung 7/8 | M2 |
 | S-19 | MediaBrowser connection to Spotify and AntennaPod from our package (are callers allowlisted?) | Browse + play by id | `MEDIA_PLAY_FROM_SEARCH`, route, vision | M1 |
 | S-20 | A static RRO sets `config_defaultAssistant` and power long-press → assistant on Graphene; MFB long-press reaches our voice interaction service | The role holder is the actuator after the flash; power long-press summons VOS | One setup tap per item | M4 |
-| S-21 | `/product/etc/default-permissions` pre-grants apply on Graphene panther | `dumpsys package` shows the grants | Setup screen | M4 |
+| S-21 | `/product/etc/default-permissions` pre-grants apply on Graphene (`panther` smoke, `akita` confirm) | `dumpsys package` shows the grants | Setup screen | M4 |
 | S-22 | House voice: GrapheneOS Speech Services offline voice is selectable by the actuator and clearly differs from the vendor's voice; the bundled Piper fallback works with no network | Owner identifies the house voice in 20/20 blind trials | Bundled Piper voice as the default | M1 |
 | S-23 | Commit-region OCR with a bundled model, no Play services, no network: PP-OCR (ONNX Runtime) versus ML Kit's bundled model | ≥95% word accuracy on the fixture buttons; 0 network attempts | Tesseract; or announce every tap in unknown apps | M3 |
 | S-24 | VOS native libraries (sherpa-onnx, ONNX Runtime, OCR) run clean under Graphene's hardened_malloc and MTE | 0 crashes in 1,000 inferences each; no tag faults in `logcat` | Fix the library; else ship the memory-safe fallback; else Hatch L trigger 4 | M1 |
@@ -856,7 +856,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | S-28 | **UID reply capture:** privileged loopback captures the same target UID's spoken reply (usages actually used by Maps/Gemini and by the fixture) with headset-playable latency; `ALLOW_CAPTURE_BY_NONE` → honest refusal | Dual-channel recording of injector + sink; owner rates intelligibility 18/20; p95 sink latency logged | Capture MEDIA only + UI oracle; or Path B/C | M4 |
 | S-29 | **Computer Control on Graphene 17:** `ACCESS_COMPUTER_CONTROL` grantable to product VIS; session hosts Maps; audio intercept flag enables capture/injection; consent pre-grantable via sysconfig or one-time setup (P6) | Launch + screenshot + tap work; audio flag on or gap documented | Skip Path B; use A/C | M4 |
 | S-30 | **VirtualAudioDevice without accessory:** `CREATE_VIRTUAL_DEVICE` + `VirtualAudioDevice` start injection/capture for a virtual display hosting a fixture app, without a physical CDM companion | Duplex works for fixture on vdisplay | Skip Path C; F6 or Hatch L only if A+B fail | M4 |
-| S-31 | **Concurrent capture during APP_ASSIST:** actuator keeps offline "stop" mic (or VIS capture) while target UID records; `CONCURRENT_AUDIO_RECORD_BYPASS` / `CAPTURE_AUDIO_OUTPUT` on Tensor G3 / Graphene | Spoken "stop" ends APP_ASSIST in ≤300 ms while Maps is recording | Headset MFB / QS only during APP_ASSIST | M4 |
+| S-31 | **Concurrent capture during APP_ASSIST:** actuator keeps offline "stop" mic (or VIS capture) while target UID records; `CONCURRENT_AUDIO_RECORD_BYPASS` / `CAPTURE_AUDIO_OUTPUT` on Tensor (G2 on panther / G3 on akita) / Graphene — smoke on Phone B (`panther`) | Spoken "stop" ends APP_ASSIST in ≤300 ms while Maps is recording | Headset MFB / QS only during APP_ASSIST | M4 |
 | S-32 | **Amazing demo (integration):** LE or classic BT headset; podcast playing; "ask Maps what the traffic is like on the way home"; VOS ducks media, opens duplex (Path A preferred), hears Maps/Gemini reply on headset, restores podcast; sandboxed Play present on Phone B | Median feel-native; budgets in §3.3 met; audit shows APP_ASSIST→RESTORE; 0 uncommanded volume changes | Document failing path; Must row 19 open until fixed | M4 exit |
 | S-33 | `PlayerProxy` pause/setVolume on active non-MediaSession players from a product priv-app | Proxy controls a fixture `AudioTrack` player | MediaSession/NLS only | M4 |
 
@@ -871,7 +871,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M0-03 | Old secrets are dead | Old xAI key → 401. VPS token rejected. The phone's USB-debugging authorizations revoked. The VPS copy of the key deleted. |
 | M0-04 | Platform decision | S-01/02/03 reports in `docs/spikes/`. `docs/DECISIONS.md` records "VOS Image on Graphene OTA", or "Tier F build path" with the reason, and the date. |
 | M0-05 | Audio decision | S-07/08 reports. Actuator-owned mic confirmed, or the fallback recorded. Desk plan for AppAssistantDuplex accepted (`AUDIO-DUPLEX-RESEARCH.md`); S-27+ scheduled on Phone B after S-01. |
-| M0-06 | Devices | Phone B (Pixel 7 `panther`, `fastboot flashing get_unlock_ability` = 1) and Phone C (non-Pixel, Android 15+) enrolled in `docs/DEVICES.md` |
+| M0-06 | Devices | Phone B (Pixel 7 `panther` main flash/dev rig, `fastboot flashing get_unlock_ability` = 1), Phone A path noted as Pixel 8a (`akita`) first-class supported target (or other Graphene daily), and Phone C (non-Pixel, Android 15+) enrolled in `docs/DEVICES.md`. Firmware dirs for both `panther` and `akita` present under UStor2. |
 
 ### M1 — Talk and it happens (Tier S on Graphene and on stock; target 2026-11-13)
 
@@ -1067,7 +1067,8 @@ Measure the loop volume once with `fio` (random 4 KiB, iodepth 32). If random wr
 
 /media/caleb/UStor21/vos/              (NTFS: blobs only)
   README.md  TARGET-PLAN.md            copies of the repo's files
-  firmware/panther/grapheneos/<build>/ (add firmware/akita/ later for Phone A's M4 move)   Graphene full OTA + factory zip + signatures (keep last 3)  ~10 GB
+  firmware/panther/grapheneos/<build>/   Phone B (main) Graphene full OTA + factory + sigs (keep last 3)     ~10 GB
+  firmware/akita/grapheneos/<build>/     Phone A path / second target — same layout for Pixel 8a             ~10 GB
   out/images/<YYYY-MM>/                VOS-signed OTAs, avb_pkmd.bin, overlay manifest, logs       ~10 GB/qtr
   eval/runs/<date>/                    eval + field logs, PCAPs, audio fixtures, redacted shots    ~50 GB
   backup/phones/<device>/<date>/       pre-flash exports (Seedvault, Signal backup, photos)        ~100 GB
@@ -1093,8 +1094,8 @@ Budget: about 250 GB used in normal operation, about 500 GB with Tier F, or abou
 
 | Device | Role | Rule |
 |---|---|---|
-| Phone A: Caleb's 8a | Daily phone. Runs official GrapheneOS today, and Tier S on it from M1. Moves to the VOS Image only after M4-EXIT. | Never the first device for any flash. Back it up (Seedvault + per-app exports) before M4; the key change wipes it. |
-| **Phone B: Pixel 7 (`panther`)** (already owned) | Dev. All spikes, every flash, the debug build. Runs official Graphene for M1-NOGOOG-01 and S-25, then the VOS Image. | Must be the Google Store/unlocked variant (not Verizon): `fastboot flashing get_unlock_ability` returns 1. OEM unlocking stays on. |
+| Phone A: Pixel 8a (`akita`) path (or current Graphene daily) | Daily phone. Runs official GrapheneOS today, and Tier S on it from M1. Moves to the VOS Image only after M4-EXIT. **First-class Tier P target** — same image recipe as panther, separate `firmware/akita/` tree. | Never the first device for any flash. Back it up (Seedvault + per-app exports) before M4; the key change wipes it. Confirm device-specific spikes on `akita` after panther smoke. |
+| **Phone B: Pixel 7 (`panther`)** (already owned) — **main flash/dev rig** | Dev. Default for all spikes, every flash, the debug build, and CI smoke. Runs official Graphene for M1-NOGOOG-01 and S-25, then the VOS Image. | Must be the Google Store/unlocked variant (not Verizon): `fastboot flashing get_unlock_ability` returns 1. OEM unlocking stays on. Shorter support window than akita (~2027 [verify]). |
 | **Phone C: mainstream non-Pixel** (e.g. Samsung Galaxy A-series, Android 15+, ~$200) | Tier S reach from M1 | Portability bugs are found early, not in M6 |
 | Headsets | Current classic BT + one LE Audio reference (from M4) | Route type logged on every turn |
 | Workstation | Build, CI runner, emulators, image builds, Wi-Fi AP for edge captures | No phone control in production. ADB is for development only. |
@@ -1106,13 +1107,13 @@ Budget: about 250 GB used in normal operation, about 500 GB with Tier F, or abou
 
 | Day | Work | Done when |
 |---|---|---|
-| **Sat 10-10 (Day 0, ≈1.5 h)** | Rotate the xAI key and the VPS `SERVER_TOKEN`. On Phone A: "Revoke USB debugging authorizations", turn wireless debugging off, delete the key from the VPS `.env`. Confirm Phone B (Pixel 7 `panther`) is unlockable; order Phone C. Pin UStor2 at `/media/caleb/UStor21` in fstab. Write the one-time archive tarball of old work. Start downloading Graphene's panther factory image and full OTA into `firmware/` and verify their signatures. | Old key → 401; orders placed; mount pinned; archive SHA-256 recorded |
+| **Sat 10-10 (Day 0, ≈1.5 h)** | Rotate the xAI key and the VPS `SERVER_TOKEN`. On Phone A: "Revoke USB debugging authorizations", turn wireless debugging off, delete the key from the VPS `.env`. Confirm Phone B (Pixel 7 `panther` main flash/dev rig) is unlockable; order Phone C. Pin UStor2 at `/media/caleb/UStor21` in fstab. Write the one-time archive tarball of old work. Start downloading Graphene factory + full OTA for **both** `panther` (Phone B) and `akita` (Phone A / second target) into `firmware/<codename>/` and verify signatures. | Old key → 401; Phone C ordered; mount pinned; archive SHA-256 recorded; both firmware trees started |
 | **Mon 10-12** | `git init` in `~/vos` (the plan and README are already there) and create the private remote. Gradle multi-module skeleton (`actuator`, `session`, `vtb-sdk`). Release and debug signing configs with **different certs**. CI: unit tests, `aapt2` permission checks, exported-component check, dependency check (no Play/Firebase/ML Kit download), retired-names check, gitleaks. Create and mount the ext4 volume; run `fio`. | M0-01, M0-02 green |
 | **Tue 10-13** | Binder auth on both sides: `SESSION`/`ACTUATOR` signature permissions, UID + cert guard, grant table, `linkToDeath`, `UNAUTHORIZED` audit. Foreign-signed fixture APK plus an instrumentation test on the emulator. | M1-AUTH-01 green on the emulator |
 | **Wed 10-14** | **S-07 + S-08** on Phone A (stock Graphene) with throwaway test APKs (non-destructive): actuator voice interaction service + `microphone` foreground service, pipe to the session, latency and AEC measurements on the speaker and BT. Same on the emulator. **S-22** house-voice check with Graphene Speech Services. | `docs/spikes/S-07.md`, `S-08.md`, `S-22.md`; M0-05 decided |
 | **Thu 10-15** | AudioPlane skeleton: state machine, transition audit, RESTORE logic, `turnId` minting, mic/speaker pipes. Session `VoicePlane` (xAI realtime) reading from the pipe. Talk to the model from Phone A through the new stack (no tools yet). | A spoken round trip works; M1-AUD-02 green |
 | **Fri 10-16** | **S-09, S-11, S-15, S-16, S-24, S-26** on Phone A and the emulator (and Phone C if it has arrived). S-15 and S-24 share one build: sherpa-onnx grammar under hardened_malloc + MTE. Write the spike reports. | Six reports; M1 risks updated |
-| **Mon 10-19** | Unlock Phone B (Pixel 7). **S-01/S-02/S-03:** avbroot `--rootless --replace product` on Graphene's panther OTA with a hello priv-app asking for `MODIFY_AUDIO_ROUTING` + `CAPTURE_AUDIO_OUTPUT`; flash; boot; check grants; flash `avb_custom_key`; relock; reboot. | Phone B boots locked with the grants, or the Tier F build path is triggered |
+| **Mon 10-19** | Unlock Phone B (Pixel 7 `panther`). **S-01/S-02/S-03:** avbroot `--rootless --replace product` on Graphene's **panther** OTA (default smoke) with a hello priv-app asking for `MODIFY_AUDIO_ROUTING` + `CAPTURE_AUDIO_OUTPUT`; flash; boot; check grants; flash `avb_custom_key`; relock; reboot. Keep `image/build.sh` parameterized by device codename so the same recipe builds for `akita` later. | Phone B boots locked with the grants, or the Tier F build path is triggered |
 | **Tue 10-20** | **S-04/S-05** quick probes with the hello priv-app on Phone B: register a focus policy; capture loopback of a media app. **S-27 smoke:** UID injector against a one-file fixture `AudioRecord` app (not Maps yet). **S-20** RRO probe (default assistant, power long-press). Commit `image/build.sh` v0 from the S-01 steps. | M0-04 decided in `docs/DECISIONS.md`; S-27 smoke noted |
 | **Wed 10-21** | Fast tools in the actuator: `media.control` and `volume.set` via NLS/MediaController, `app.open`, `shell.nav` (global actions), `time.get`, own timers through `AlarmManager`. Oracles and earcons. Session fixed tool surface. | "Pause", "volume 30", "open Maps", "go home" verified on Phone A |
 | **Thu 10-22** | Session key store (Keystore AES-GCM, QR entry from the workstation), egress allowlist interceptor with a request log, audit v1 in the actuator. | M1-KEY-01; request log populated |
@@ -1137,7 +1138,7 @@ Each question has a default. The default holds unless you change it.
 9. **Distribution.** GitHub Releases + Obtainium, Accrescent (available from Graphene's App Store, and its session installs avoid the restricted-settings step), F-Droid, or Play? *Default: GitHub Releases + Obtainium for M1–M5; Accrescent for M6; Play only after a review of its accessibility-API policy.*
 10. **Open source and namespace.** Publish the actuator, the VTB spec, and the SDK under Apache-2.0? `com.vos` is not a domain you own, and "VOS" is already the name of an existing operating system (Stratus OpenVOS). That is fine privately, but check before publishing. *Default: Apache-2.0; `com.vos` until a public release; a name and trademark check before M6.*
 11. **Apps that need Google.** Install sandboxed Play at all? If yes, it goes in the Owner profile as an ordinary app (VOS cannot see other profiles), and only the apps that need it use it. Banking apps that pin Graphene's key will break on your key regardless. *Default: Play absent; decide per app from S-25.*
-12. **Hardware spend.** Approve Phone B (~$300), Phone C (~$200), and an LE Audio headset (~$150) now? *Default: yes. Phone B gates S-01.*
+12. **Hardware spend.** Phone B is already owned (Pixel 7 `panther`). Approve Phone C (~$200) and an LE Audio headset (~$150) now? *Default: yes. Phone B (panther) gates S-01; akita firmware is downloaded for the Phone A path.*
 13. **Wake word.** Stay summon-only, or do you want hands-free at the desk? If you want it, a custom-trained word is needed (the old bundled model was CC-BY-NC-SA). *Default: summon-only.*
 14. **Local models.** The workstation holds Qwen3.8/GLM weights on UStor2. Use one as a private vision fallback? That puts a home server back in the path, against the non-goal. *Default: no; offline eval only.*
 15. **Agent control of permissions.** May the agent change other apps' permissions and Graphene's Network and Sensors toggles? Through the Settings UI with a catastrophic "yes" it is possible on every tier. A direct API (Tier F patch F4) is faster but gives an injected agent a permission lever. *Default: UI rung only, with a catastrophic "yes".*
