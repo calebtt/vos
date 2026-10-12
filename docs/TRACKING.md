@@ -1,6 +1,10 @@
 # Tracking
 
-Work is tracked with GitHub issues, labels, and parent/child (sub-issue) links. Native GitHub Milestones are intentionally not used.
+## Source of truth
+
+**GitHub `calebtt/vos` is the source of truth** for the plan (`docs/`), issues, milestones, and decisions. Every other copy — `~/vos` on the desktop, `/media/caleb/data-disk1/vos`, and agent box copies under `/workspace/vos` — is a cache. Edit by committing to `main` (git push or the GitHub API), then pull the caches. If a cache and GitHub disagree, GitHub wins; never hand-merge a stale cache back over `main`.
+
+Work is tracked with GitHub issues, labels, parent/child (sub-issue) links, and **native GitHub Milestones M0–M7** (every issue is attached to one, so the Milestone filter works). The `milestone:Mn` labels are kept as secondary tags.
 
 ## Structure
 
