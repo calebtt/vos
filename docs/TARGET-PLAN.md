@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Date | 2026-10-12 (app-agent contact order: typed interop → duplex voice → screenshot vision; M3-SPOT; M3-MAP GPS spoof; unprompted pan/zoom; on-device tools + scratchpad; live-map look-around; model choice open; audio cache; Maps duplex; vision-first UI; dual-device panther/akita) |
+| Date | 2026-10-12 (unlock→wake-word listening default; long-press optional fallback; app-agent typed→duplex→vision; M3-SPOT; M3-MAP GPS spoof; unprompted pan/zoom; on-device tools + scratchpad; live-map look-around; model choice open; audio cache; Maps duplex; vision-first UI; dual-device panther/akita) |
 | Owner | Caleb |
 | Name | **VOS**. Packages `com.vos.session` and `com.vos.actuator` (`com.vos.sandbox` at M7). Tool bus: **VOS Tool Bus (VTB)**. |
 | Replaces | The earlier target plan in `argoos/TARGET-PLAN.md` and every name in it. Its architecture is reused. Its platform choice (Google's Pixel factory OTA) is reversed. Nothing is carried forward for compatibility. |
@@ -41,6 +41,7 @@
 14. **Vision + accessibility is the default for in-app UI work; intents are a weak fallback.** Field experience: public intents and deep links are unreliable for real apps (Maps nav included). The default path for UI tasks is a screenshot → on-device control detect → (optional) cloud vision → `dispatchGesture` loop (§3.5). Typed rungs (built-ins, VTB, notifications, MediaBrowser) stay first for *non-UI* fast tools. Intents/AppFunctions may still be tried as a cheap probe but never gate success. Eval uses current up-to-date apps; version-pinning test apps is forbidden as the success criterion (§6 M3).
 15. **On-device tool surface lives in the actuator; the agent crew uses it like hands.** A named toolkit of actuator-local tools (screenshot, a11y tap/swipe/type, `control_detect`, audio duplex, file R/W, TTS cache, scratchpad/notes, timers, shell globals, …) is what Operator / Duplex / Files / Announcer call. Many are already implied by the Shell Contract and ladder; the toolkit makes them explicit for the crew and for later VTB exposure. Session roles never hold these tools — they ask over Binder. Live-map look-around is a first-class multi-step explore skill on this surface, and the bar is **human-like intelligence**, not scripted intents (§3.5.2).
 16. **Talk to an app's own agent in this order: typed interop → duplex voice → screenshot vision.** When the goal is to communicate with an in-app agent (Maps Gemini, Spotify voice, any VTB/`assistant.*` peer), Conductor tries **typed** channels first if available (VTB tools, AppFunctions, in-app text/chat APIs — Path D / rung 2). If typed is absent or fails the oracle, escalate to **AppAssistantDuplex** (audio). If duplex is unavailable or fails, fall through to the **screenshot → control_detect → (optional cloud) → tap** vision loop. Public intents remain a weak probe, never the success path. Vision stays the default for ordinary UI work when there is no app agent to talk to (§3.3, §3.5).
+17. **Unlock starts wake-word listening; long-press is an optional fallback.** Caleb rejects long-press-to-listen as the default summon UX. After a human unlock (CE available, interactive), the actuator starts sandboxed wake-word listening (`HotwordDetectionService` / S-14) by default so the owner can talk hands-free. Listening **stops on lock** and stays off before first unlock — this is not always-on while locked and does not unlock the phone (decision 6). Headset MFB, assist gesture, and QS tile remain summon paths; power / MFB long-press stays available as an **optional** fallback, not the primary workflow (§3.1, §3.6 row 1, §5.7, Q13).
 
 ### Names
 
@@ -83,6 +84,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 | (2026-10-12) A test fixture could simulate GPS coord changes to simulate a live map use scenario | **M3-MAP GPS/heading spoof fixture**: replayable live-nav tests drive mock location + heading (and speed when useful) so M3-MAP-01/02 run without a real drive; fixture feeds Maps/Organic Maps via mock-location / test provider under actuator control; logged trajectory is part of the trial record (§6 M3). |
 | (2026-10-12) Other tasks to test: Spotify (has a built-in voice agent); search for a new AI-related podcast show or periodical | **M3-SPOT-01/02**: on **current** Spotify (no version pin), search an AI-related podcast show or periodical; path order for app-agent goals = **typed interop → duplex → vision** (decision 16); oracle = play and/or subscribe/follow state (notification / Now Playing / library), not an intent confession (§6 M3). |
 | (2026-10-12) The agent should first try communication with app agents via text if available | Decision 16 + §3.3 / §3.5: for app-agent contact, **typed interop first** (VTB `assistant.*` / AppFunctions / text APIs), then **duplex voice**, then **screenshot vision**. Maps mid-drive and Spotify evals use the same order. |
+| (2026-10-12) Dislikes long-press-to-listen; start wake-word listening when the phone unlocks | Decision 17: **unlock → wake-word listening (default)**; stop on lock / before first unlock; long-press (power/MFB) = **optional fallback**. Shell Contract row 1, S-14, presence/origin, Q13 updated. Not voice unlock (decision 6). |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
 
@@ -161,7 +163,7 @@ Who this is for, in order of impact:
 | Capturing or summarizing call audio | Legal exposure, and loopback mixes do not carry modem audio anyway. `CALL_AUDIO_INTERCEPTION` is not requested. See §9 Q7. |
 | Yielding `ROLE_ASSISTANT` to Google so Maps' button "just works" | VOS is the OS session. Maps is driven by duplex Paths A–C while VOS keeps the role (§3.3, §9 Q18). |
 | Running code the model wrote (before M7) | It is the largest path from injection to persistent compromise. The ladder covers the need without it. |
-| Always-on wake word as the default | Summon-first. A wake word is opt-in, needs its own license, and costs battery. |
+| Always-on wake word **while locked** (or before first unlock) | Unlock-gated wake word is the default (decision 17). Listening starts after human unlock and stops on lock — battery and privacy stay bounded. Voice still does not unlock the phone (decision 6). A custom-trained word / license still required (S-14, Q13). |
 | Android < 14, multi-user, work profiles, Graphene secondary profiles, tablets | Not until M6 is done. VOS runs in the Owner profile. If sandboxed Play is installed, it goes in the Owner profile too, so the agent can see those apps. |
 | Tier P images for non-Pixel devices | The recipe needs Graphene support and `avb_custom_key`. Reach comes from Tier S. |
 | Redistributing Graphene binaries | VOS ships an overlay and a build script. Each owner builds their own image from Graphene's official OTA with their own keys (§4.4). |
@@ -197,7 +199,7 @@ Each principle has a test. A principle without a test does not count.
 ### 3.1 Process map
 
 ```text
-   headset MFB / assist gesture / power long-press (P) / QS tile / (opt-in) wake word
+   wake word (default after unlock) / headset MFB / assist gesture / QS tile / (optional) power long-press
                               │
 ┌─────────────────────────────▼──────────────────────────────────────────────┐
 │ ACTUATOR  com.vos.actuator   — trusted base, NO INTERNET permission         │
@@ -346,7 +348,7 @@ Policies:
 | **Capture that app's spoken reply (duplex downlink)** | No | Yes | UID/usage-matched loopback; may need `CAPTURE_VOICE_COMMUNICATION_OUTPUT` for voice-comm usages **[spike S-28]** |
 | **App-assistant duplex** (Maps Gemini button, etc.) | Tap-only + honest limits | Yes (primary paths below) | `AppAssistantDuplex` + optional Computer Control / VirtualAudioDevice **[S-27–S-32]** |
 | Mic while another app records | Partial: Android 10+ concurrent-capture rules favor the assistant | Same, plus `CAPTURE_AUDIO_OUTPUT` / `CONCURRENT_AUDIO_RECORD_BYPASS` | **[spike S-07, S-31]** |
-| Low-power or sandboxed wake word | Software wake word in a foreground service | `VoiceInteractionService.createHotwordDetector()` → `HotwordDetectionService` in an isolated, no-network process **[spike S-14]**. Assume the Pixel DSP is not available to third-party models. | Opt-in only |
+| Low-power or sandboxed wake word | Software wake word in a foreground service (fallback) | `VoiceInteractionService.createHotwordDetector()` → `HotwordDetectionService` in an isolated, no-network process **[spike S-14]**. **Default: start on human unlock, stop on lock** (decision 17). Assume the Pixel DSP is not available to third-party models. | Default on unlock; long-press optional fallback |
 | Calls: answer, end, place, speaker | Yes, with runtime perms | Yes, pre-granted | `TelecomManager.acceptRingingCall()/endCall()` (`ANSWER_PHONE_CALLS`), `placeCall()` (`CALL_PHONE`) |
 | Call audio content | No | No (modem audio is not in media loopback mixes; redirect APIs exist but are a non-goal) | Non-goal |
 | Inject agent speech into a cellular uplink | No | No | Not a milestone |
@@ -641,7 +643,7 @@ The agent crew needs a named set of **hands** — tools that run only inside `co
 
 | # | Shell action | Tier S | Tier P (VOS Image) | Tier F patch (only if needed) | Level |
 |---|---|---|---|---|---|
-| 1 | Summon from anywhere: headset MFB, assist gesture, QS tile, lock screen | Assistant role + QS tile | Same, plus an RRO that sets the default assistant and maps power long-press to it **[S-20]** | — | Must |
+| 1 | Summon: **wake word after unlock (default)**; headset MFB; assist gesture; QS tile; lock-screen affordances; **optional** power/MFB long-press fallback | Assistant role + QS tile; wake-word listening starts on unlock when HotwordDetectionService or FGS fallback is available **[S-14]** | Same, plus RRO default assistant; power long-press mapped as **optional** fallback summon **[S-20]**; unlock→start / lock→stop wake-word **[S-14]** | — | Must |
 | 2 | Navigate: home, back, recents, notification shade, Quick Settings, power menu, lock, screenshot, split screen | `AccessibilityService.performGlobalAction` | Same | — | Must |
 | 3 | Launch any app or activity from the background | Bound `VoiceInteractionService`/`AccessibilityService` exemption from background-activity-start limits **[S-26]** | Same | — | Must |
 | 4 | Read the screen | Node tree + `takeScreenshot`. `FLAG_SECURE` windows are respected. | Same | Never: no bypass of `FLAG_SECURE` | Must |
@@ -957,7 +959,7 @@ Honest residual: a commit button drawn only as pixels, with no text, in an unkno
 ### 5.6 Origin, determined by the actuator
 
 The actuator, not the session, decides origin from its own state:
-- `owner_turn:<turnId>`: a turn the actuator opened from a physical summon (MFB, assist gesture, power long-press, QS tile) or from the opt-in wake word, and that is still open.
+- `owner_turn:<turnId>`: a turn the actuator opened from a wake-word hit (default after unlock), a physical summon (MFB, assist gesture, QS tile, or optional power/MFB long-press), and that is still open.
 - `goal:<pkg>:<goalId>`: an inbound VTB goal. While any goal is being processed, owner summons pre-empt it.
 - `schedule:<id>`: a task the owner created earlier. It runs read and reversible tools only. Irreversible acts are deferred.
 - `none`: anything else. Read-only.
@@ -972,9 +974,15 @@ A session call that carries a `turnId` the actuator did not issue, or one that i
 
 Presence gates irreversible acts, private reads on a locked phone, and Extend Unlock. It does **not** unlock a locked phone.
 
+**Wake-word listening vs presence (decision 17):**
+- **After human unlock:** the actuator starts sandboxed wake-word listening by default (`HotwordDetectionService` / S-14). A wake-word hit opens an `owner_turn` the same as MFB/assist/QS. Listening may continue while presence (a) keeps Extend Unlock active (hands-busy / headset), still without unlocking a locked phone.
+- **On lock / screen off to keyguard:** stop wake-word listening. No hotword path while locked.
+- **Before first unlock** (after a reboot, including Graphene's auto-reboot): wake-word stays off with the rest of full VOS; only the direct-boot plane runs.
+- Long-press (power / MFB) remains an **optional** summon fallback when wake-word is unavailable or the owner prefers a button.
+
 - **Tier P/F:** the actuator's `TrustAgentService` calls `grantTrust` only while presence (a) holds, so an unlocked phone stays unlocked during hands-busy work **[spike S-12]**.
 - **Locked phone with a visual request:** "I'll show it when you unlock." The result appears on the next human unlock, on the VOS home surface if enabled (§3.6 row 16).
-- **Before first unlock** (after a reboot, including Graphene's auto-reboot): only the direct-boot plane runs (stop, time, alarms). VOS says "phone restarted, unlock once" when summoned.
+- **Before first unlock** (after a reboot, including Graphene's auto-reboot): only the direct-boot plane runs (stop, time, alarms). VOS says "phone restarted, unlock once" when summoned. Wake-word listening does not start until after that unlock.
 
 ### 5.8 Egress and data
 
@@ -1017,13 +1025,13 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | S-11 | The accessibility shortcut (both volume keys, 3 s) bound to the actuator turns it off | `ENABLED_ACCESSIBILITY_SERVICES` readback | QS tile and power press only; F2 candidate | M1 |
 | S-12 | A priv-app `TrustAgentService` can extend unlock on Graphene while presence holds (and, as expected, cannot unlock); Graphene has not disabled the trust-agent framework | Stays unlocked; relocks on headset disconnect | Normal timeout | M4 |
 | S-13 | `EXECUTE_APP_FUNCTIONS` can be granted to a product priv-app on Graphene (`panther` smoke, `akita` confirm); list the installed apps that expose AppFunctions | Execute one function, or record "no providers on a de-Googled phone" | Skip rung 3 on P | M5 |
-| S-14 | `createHotwordDetector` + `HotwordDetectionService` for a product priv-app voice interaction service | Detects in an isolated process | Foreground-service wake word (opt-in) | M4 (optional) |
+| S-14 | `createHotwordDetector` + `HotwordDetectionService` for a product priv-app voice interaction service; **start listening on human unlock, stop on lock** (decision 17); custom-trained word / license path noted | Detects in an isolated process; unlock→listen and lock→stop verified; false-accept rate logged on a desk fixture | Foreground-service wake word with the same unlock/lock gating; long-press remains optional summon fallback | M4 (Must for default summon UX) |
 | S-15 | The bundled sherpa-onnx small-vocabulary model on Phone B Graphene (`panther` default; `akita` when available) and Phone C; `createOnDeviceSpeechRecognizer` where it exists | ≥95% on stop/pause/yes/no fixtures, in quiet and on a noisy floor | A larger bundled model; push-to-confirm on the headset button | M1 |
 | S-16 | Tier S setup on stock GrapheneOS, Pixel stock Android 14/15/16, and Samsung: the restricted-settings path for accessibility and NLS on a sideloaded APK versus a store install (Accrescent); Advanced Protection behavior with `isAccessibilityTool` | Exact taps documented per OS | Ship through a store that uses session installs | M1 |
 | S-17 | Silent wifi/BT/mobile data/airplane toggles from a preinstalled app on Graphene | Readback matches | Accessibility tap on the QS tile (the Tier S path) | M4 |
 | S-18 | NLS `RemoteInput` reply works for Signal, Graphene's Messaging app, and WhatsApp (if used) | Message appears in the thread | Rung 7/8 | M2 |
 | S-19 | MediaBrowser connection to Spotify and AntennaPod from our package (are callers allowlisted?) | Browse + play by id | `MEDIA_PLAY_FROM_SEARCH`, route, vision | M1 |
-| S-20 | A static RRO sets `config_defaultAssistant` and power long-press → assistant on Graphene; MFB long-press reaches our voice interaction service | The role holder is the actuator after the flash; power long-press summons VOS | One setup tap per item | M4 |
+| S-20 | A static RRO sets `config_defaultAssistant` and maps power long-press → assistant on Graphene as an **optional** summon fallback (decision 17); MFB long-press still reaches our voice interaction service when enabled | The role holder is the actuator after the flash; long-press summons VOS when the owner uses the fallback | One setup tap per item; wake-word (S-14) is the default summon after unlock | M4 |
 | S-21 | `/product/etc/default-permissions` pre-grants apply on Graphene (`panther` smoke, `akita` confirm) | `dumpsys package` shows the grants | Setup screen | M4 |
 | S-22 | House voice: GrapheneOS Speech Services offline voice is selectable by the actuator and clearly differs from the vendor's voice; the bundled Piper fallback works with no network | Owner identifies the house voice in 20/20 blind trials | Bundled Piper voice as the default | M1 |
 | S-23 | Commit-region OCR with a bundled model, no Play services, no network: PP-OCR (ONNX Runtime) versus ML Kit's bundled model | ≥95% word accuracy on the fixture buttons; 0 network attempts | Tesseract; or announce every tap in unknown apps | M3 |
@@ -1146,7 +1154,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 
 **Scope:**
 - `image/build.sh`, first flash and relock, update drill against a real Graphene release.
-- Privileged actuator: focus policy, loopback reference and capture, per-app routing, **AppAssistantDuplex (Paths A→B→C)**, PlayerProxy, silent toggles, Extend Unlock, pre-granted roles and permissions, power long-press summon, AppFunctions probe.
+- Privileged actuator: focus policy, loopback reference and capture, per-app routing, **AppAssistantDuplex (Paths A→B→C)**, PlayerProxy, silent toggles, Extend Unlock, pre-granted roles and permissions, **unlock→wake-word listening (default)** + optional power/MFB long-press summon fallback, AppFunctions probe.
 - Shell Contract on Tier P, including Must rows 18–19 (in-app assistant + duplex).
 - S-27–S-33 spike reports; S-32 amazing demo required for M4-EXIT.
 - Tier F go/no-go (including F6 if duplex blocked).
@@ -1159,7 +1167,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M4-IMG-03 | Next Graphene release with security fixes → VOS OTA | Installed on Phone B ≤72 h after Graphene's release; data intact |
 | M4-IMG-04 | Rollback drill on Phone B: unlock → official GrapheneOS through Graphene's installer | Practiced and timed; runbook in `docs/` |
 | M4-PRIV-01 | Allowlist audit | Every privileged permission maps to a test-covered capability |
-| M4-SET-01 | Fresh flash → first use | Only key entry and headset pairing; the role, a11y, NLS, and power long-press are already set (S-20/21) |
+| M4-SET-01 | Fresh flash → first use | Only key entry, headset pairing, and wake-word enrollment if needed; the role, a11y, NLS, unlock→wake-word (S-14), and optional power long-press fallback (S-20/21) are already set |
 | M4-GOOG-01 | 24 h idle soak, then a field day, sandboxed Play absent; edge capture | 0 flows to Google-owned hosts, or each one explained in `docs/EGRESS.md`; no Google package in `pm list packages` |
 | M4-SHELL-nn | One test per Shell Contract row 1–14 and 18–19 on Tier P | Every Must row passes (including duplex 18–19). Each failing Should row is recorded with a Tier F decision (F6 for audio if needed). |
 | M4-AUD-01 | A third-party focus request during ANNOUNCE | Delayed until the announcement ends (S-04) |
@@ -1173,6 +1181,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M4-AUD-09 | Concurrent "stop" during APP_ASSIST (S-31) | Turn ends ≤300 ms; mixes gone; privacy indicator off |
 | M4-AUD-10 | Computer Control / VirtualAudioDevice probe (S-29/S-30) | Pass, or Path B/C marked unavailable with evidence |
 | M4-UNL-01 | Presence on → no relock while working; headset off → normal timeout; locked + visual request → shown at the next unlock | Matches |
+| M4-WAKE-01 | Unlock → wake-word listening starts (S-14); speak wake word → `owner_turn` opens; lock → listening stops; before first unlock → no wake-word; optional long-press still summons when enabled | Matches decision 17; 0 wake-word accepts while locked in a 50-trial lock fixture |
 | M4-BFU-01 | Reboot (and Graphene auto-reboot) → summon before the first unlock | Stop, time, and alarms work; everything else says "unlock once" |
 | M4-F-DECIDE | Tier F go/no-go from the M4-SHELL results and §9 Q2/Q15 | Recorded in `docs/DECISIONS.md` |
 | M4-EXIT | Phone B used as the daily phone for 14 days with no fallback | Then back up Phone A (Seedvault + per-app exports, §7), unlock (wipe), flash, restore |
@@ -1347,7 +1356,7 @@ Each question has a default. The default holds unless you change it.
 10. **Open source and namespace.** Publish the actuator, the VTB spec, and the SDK under Apache-2.0? `com.vos` is not a domain you own, and "VOS" is already the name of an existing operating system (Stratus OpenVOS). That is fine privately, but check before publishing. *Default: Apache-2.0; `com.vos` until a public release; a name and trademark check before M6.*
 11. **Apps that need Google.** Install sandboxed Play at all? If yes, it goes in the Owner profile as an ordinary app (VOS cannot see other profiles), and only the apps that need it use it. Banking apps that pin Graphene's key will break on your key regardless. *Default: Play absent; decide per app from S-25.*
 12. **Hardware spend.** Phone B is already owned (Pixel 7 `panther`). Approve Phone C (~$200) and an LE Audio headset (~$150) now? *Default: yes. Phone B (panther) gates S-01; akita firmware is downloaded for the Phone A path.*
-13. **Wake word.** Stay summon-only, or do you want hands-free at the desk? If you want it, a custom-trained word is needed (the old bundled model was CC-BY-NC-SA). *Default: summon-only.*
+13. **Wake word.** Default is **unlock → wake-word listening** (hands-free after unlock); long-press is optional fallback. Confirm the custom-trained word / license path (the old bundled model was CC-BY-NC-SA). Always-on while locked stays rejected. *Default: unlock-gated wake word on; long-press optional.*
 14. **Local models.** The workstation holds Qwen3.8/GLM weights on UStor2. Use one as a private vision fallback? That puts a home server back in the path, against the non-goal. *Default: no; offline eval only.*
 15. **Agent control of permissions.** May the agent change other apps' permissions and Graphene's Network and Sensors toggles? Through the Settings UI with a catastrophic "yes" it is possible on every tier. A direct API (Tier F patch F4) is faster but gives an injected agent a permission lever. *Default: UI rung only, with a catastrophic "yes".*
 16. **Tier F timing.** Build the soft fork only when a Must row fails or M4 data asks for F1/F2/F6, or start it right after M4 regardless? *Default: only by trigger.*
