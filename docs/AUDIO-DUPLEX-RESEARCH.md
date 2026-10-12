@@ -35,7 +35,7 @@ VOS must do the same without looking like a bot: one AudioPlane owns the path, t
 | Voice-comm playback capture | Mix flag `voiceCommunicationCaptureAllowed` + often `CAPTURE_VOICE_COMMUNICATION_OUTPUT` | Privileged | Needed if Maps / Gemini replies use `USAGE_VOICE_COMMUNICATION` or similar. Loopback-render public mixes only match UNKNOWN/MEDIA/GAME/VOICE_COMMUNICATION under restrictions; ASSISTANT / system usages need privileged rules. |
 | Concurrent-record bypass | `CAPTURE_AUDIO_OUTPUT` (legacy) or `CONCURRENT_AUDIO_RECORD_BYPASS` (Android 16+) | Privileged | Lets the actuator keep the mic while another app records (Maps listening). |
 
-**Unverified on Graphene akita:** whether a product priv-app's registered AudioPolicy receives focus callbacks, whether UID injector replaces (vs mixes with) the hardware mic, and latency for AEC. Spikes **S-04, S-05, S-27, S-28, S-31**.
+**Unverified on Graphene panther:** whether a product priv-app's registered AudioPolicy receives focus callbacks, whether UID injector replaces (vs mixes with) the hardware mic, and latency for AEC. Spikes **S-04, S-05, S-27, S-28, S-31**.
 
 ### 2.2 VirtualAudioDevice (isolate an app's I/O)
 
@@ -53,7 +53,7 @@ VOS must do the same without looking like a bot: one AudioPlane owns the path, t
 - System creates a trusted virtual display; assistant gets screenshots + injected taps/swipes/text.
 - User consent dialog per target app (conflicts with P6 unless pre-granted on Tier P via sysconfig / one-time setup).
 - AOSP flags include `computer_control_intercept_audio` → custom audio policy with capture/injection for the session.
-- GrapheneOS ships Android 17 on Pixel 8a as of mid-2026 (stable ~202607), so the framework may exist; Graphene may disable or not expose OEM-only surfaces. Spike **S-29**.
+- GrapheneOS ships Android 17 on Pixel 7 (panther) [verify panther's current Graphene Android version] as of mid-2026 (stable ~202607), so the framework may exist; Graphene may disable or not expose OEM-only surfaces. Spike **S-29**.
 
 **Fit for VOS:** best platform-native path for "operate Maps in the background with its own audio." Prefer this over inventing a parallel virtual-display stack **if** Graphene allows the permission on a product priv-app VoiceInteractionService. Fallback: own VirtualDevice stack (S-30) or foreground UID inject (S-27/S-28).
 
@@ -166,7 +166,7 @@ APP_ASSIST ──end/stop/timeout──► RESTORE
 
 | Fact | Impact |
 |---|---|
-| Graphene = Android 17 on akita (2026) | Computer Control / VirtualDevice code may be present; OEM permissions still need product allowlist. |
+| Graphene = Android 17 on panther (2026) | Computer Control / VirtualDevice code may be present; OEM permissions still need product allowlist. |
 | Sandboxed Play optional, unprivileged | Maps Gemini needs Play + Google/Gemini apps; VOS never depends on them. |
 | VOS holds `ROLE_ASSISTANT` | Do not yield the role to Google. Drive Maps' button; duplex the resulting record/play. |
 | No "Hey Google" DSP path for third parties | Summon-first; software hotword opt-in only. |
