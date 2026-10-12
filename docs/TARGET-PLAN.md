@@ -34,7 +34,9 @@
 7. **VOS Tool Bus (VTB)** is a Binder protocol shaped like MCP. Apps use it to offer tools and to ask the OS agent for help. Android 16 AppFunctions and remote MCP servers mount into the same registry.
 8. **Reach comes from Tier S.** It runs on any Android 14+ phone, including Caleb's current GrapheneOS daily phone, with setup in 10 minutes and no ADB. Tier P is the full-power reference build.
 9. **Phone B (Pixel 7 `panther`) is the main flash/dev rig; Pixel 8a (`akita`) stays a first-class supported target (Phone A / second image). UStor2 is enough disk.** The disk is mounted today at `/media/caleb/UStor21`, and that path gets pinned in fstab (§7). Firmware trees for both `panther` and `akita`. Tier P needs no source tree. Tier F needs about 250 GB, which fits.
-10. **Everything lives in git from the first hour,** with CI and static security checks on every push. The repo is `/home/caleb/vos`.
+10. **Everything lives in git from the first hour,** with CI and static security checks on every push. **GitHub `calebtt/vos` is the source of truth** for the plan, issues, and milestones; `/home/caleb/vos`, UStor2, and box copies are caches synced from it (`docs/TRACKING.md`).
+11. **ModelRouter picks the model per task class, not one model for everything.** A session-owned registry of pluggable backends (LLMs *and* non-LLM models: ASR, TTS, OCR, wake word, VAD/AEC, vision, embeddings) bound per task class by a policy table, with cost/latency tiers, offline vs cloud, and a Settings picker. Simple jobs get small/fast/offline models; hard jobs get advanced ones. Provider-API juggling stays in the session (§3.2.1).
+12. **The agent can do about everything a person can on the phone, including files — without root.** "About everything" = Shell Contract completeness (§3.6, incl. row 20 Files) + VTB + capability ladder. The actuator reads/writes phone storage (MediaStore, SAF grants, app-visible shared storage) for tasks; the session manages only its own CE storage and declared egress; M7 skills stay isolated. Irreversible file acts (delete, overwrite, share out) go through the trusted path.
 
 ### Names
 
@@ -64,6 +66,9 @@ Every earlier product, package, permission, interface, and path name is retired.
 | Drive in-app assistants with own duplex audio, not only taps | `AppAssistantDuplex` + Shell Contract rows 18–19; spikes S-27–S-32 (§3.3, §3.6). |
 | It has to be amazing | Latency budgets, headset-native feel, music duck/restore, S-32 end-to-end demo as the bar. |
 | Justify Graphene against Lineage+microG; give an escape hatch | §4.3 comparison, §4.7 hatch. |
+| (2026-10-12) A model choice picker; simpler vs more advanced models per task, not only AI models | ModelRouter + registry + policy table + Settings picker (§3.2.1, decision 11). M1 ships v0; M3 vision pick; M5 VTB tools declare a preferred model class. Issue: *ModelPicker / ModelRouter* (M1). |
+| (2026-10-12) The agent should have filesystem access and be able to do about everything required of it | Shell Contract row 20 (Files) + VTB + ladder; actuator owns phone-storage access, session only its own CE storage; trusted path on destructive file acts; no root (decision 12, §3.6). |
+| (2026-10-12) Treat GitHub as the source of truth | `calebtt/vos` wins; local copies are caches (`docs/TRACKING.md`, decision 10). |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
 
@@ -193,6 +198,7 @@ Each principle has a test. A principle without a test does not count.
 │  Shell        Shell Contract executor (§3.6); "VOS acting" overlay chip      │
 │  Oracles      media state, foreground pkg, provider readback, settings       │
 │  Routes       records verified UI trajectories; replays by id (§3.5 rung 7)  │
+│  Files        MediaStore / SAF grants / shared storage ops (§3.6 row 20)     │
 │  ToolBus      VTB registry + provider binding + inbound goals (§3.4)         │
 │  Audit        hash-chained, CE storage; undo journal                         │
 └──────▲─────────────────────────────┬────────────────────────────────────────┘
@@ -207,6 +213,7 @@ Each principle has a test. A principle without a test does not count.
 │  Keys         Keystore-wrapped (StrongBox if present); entered at runtime   │
 │  Egress       OkHttp host allowlist; every request logged                   │
 │  Hints        per-app notes (low trust, editable)                           │
+│  ModelRouter  registry + per-task-class policy + Settings picker (§3.2.1)   │
 └─────────────────────────────────────────────────────────────────────────────┘
        Actuator ──Binder, BIND_VTB_PROVIDER──► third-party VTB providers
        Apps ──Binder, REQUEST_VOS (normal)──► actuator IVosAgent (inbound goals)
@@ -247,6 +254,19 @@ The assistant role belongs to the actuator, not the session, for two reasons:
 - **Observations are data.** Screen text, notifications, tool results, and app goals reach the model wrapped as quoted data with an `origin` tag. This framing is advisory only. P4 and §5.6 do the enforcing.
 - **Built-in player.** "Play <podcast>" resolves through public RSS or podcast-index search and plays in the session's own Media3 player. This gives a direct oracle on our own player, and it makes the most common audio request independent of any third-party app or Google service. Spotify, AntennaPod, and other players stay on the intent, MediaBrowser, route, and vision rungs **[spike S-19]**.
 - **Vendor seams.** `VoicePlane` and `VisionClient` are interfaces. xAI is the default voice vendor. The vision vendor is open (§9 Q5). The vendors are the only off-device AI, and they are reached only from the session.
+
+#### 3.2.1 ModelRouter and the model picker
+
+Different jobs deserve different models. A wake-word check and "volume up" should not pay for a frontier LLM; a 12-step UI task in an unfamiliar app should not run on a tiny on-device model. The **ModelRouter** is a session component that chooses, per task class, which backend runs the job. "Model" is broad: any pluggable backend with a declared input/output contract, LLM or not.
+
+- **Model registry.** Each entry: `id`, `kind` (`realtime_voice`, `llm_text`, `vision`, `asr`, `tts`, `ocr`, `wake`, `vad_aec`, `embed`, `grammar`), `where` (`on_device_actuator`, `on_device_session`, `cloud:<vendor>`), `cost_tier` (0 free/local … 3 premium), `latency_tier` (p50 budget), `capabilities` (tools, images, languages, max context), `egress_hosts` (must be in the session allowlist), and `available` (key present, network, model file present).
+- **Task classes.** `fast_tool` (fixed fast surface), `chat_voice` (realtime turn), `plan_long` (multi-step planning / `do` decomposition), `vision_step` (UI-task loop), `app_duplex_plan` (APP_ASSIST utterance + reply interpretation), `ocr_commit` (commit-button detector), `offline_grammar` (stop/pause/volume/yes/no), `asr_local`, `tts_house`, `summarize`, `embed_search`.
+- **Policy table.** `task_class → ordered list of model ids + constraints` (max cost tier, max latency, offline-required, allowed vendors). The router walks the list, skipping unavailable entries; failure falls to the next entry, then to an honest `NEEDS_NETWORK`/`UNAVAILABLE`. Escalation is explicit: a task may move up a tier once (e.g. `vision_step` small → large after two failed steps), and every escalation is audited with cost.
+- **Security invariants (unchanged by the router).** The actuator-side classes (`offline_grammar`, `ocr_commit`, house `tts_house`, `vad_aec`, `wake`) run **only** on-device models bundled in the actuator APK; the router cannot point them at a cloud backend, because the actuator has no network and the trusted path must not depend on a vendor. Cloud backends are reached only from the session, under the egress allowlist, with keys in session Keystore. The router never changes *what* is allowed, only *which model* does an allowed job.
+- **Cost and spend.** Per-vendor monthly caps and the 80% spoken warning from §9 Q5 apply across all classes; the router downgrades (or defers non-urgent `summarize`) when a cap is near.
+- **Settings picker.** A session Settings screen lists task classes with their current model, cost/latency tier badges, and an override picker ("Auto" default). Voice: "use the smaller model for UI tasks" maps to the same table. Changes are audited. Profiles: *Fast/cheap*, *Balanced* (default), *Best*.
+- **VTB hook (M5).** A VTB tool manifest may declare `preferredModelClass` (e.g. `vision_step`, `llm_text:small`); the router treats it as a hint within the owner's policy, never as an override.
+- **Milestones.** M1: ModelRouter v0 — registry + policy table, `chat_voice` and `offline_grammar` selectable (cloud voice vendor vs alternates; bundled grammar variants), Settings picker read/write. M3: `vision_step` and `ocr_commit` selection with escalation and spend tracking. M5: VTB `preferredModelClass`.
 
 ### 3.3 Audio plane (owned by the actuator)
 
@@ -495,6 +515,7 @@ The router tries rungs in order and stops at the first **oracle-verified** succe
 | 8 | Own all audio: focus, routing, loopback, per-app mute/route, intercept/redirect/manage playback & recording | Cooperative transport + volumes (§3.3) | Authoritative AudioPolicy + PlayerProxy (§3.3) | **F6** if Graphene blocks priv-app AudioPolicy inject/capture | Must (P) |
 | 18 | Drive an in-app assistant control (Maps Gemini / mic button, etc.) | A11y tap only | A11y tap + Path B/C host if needed | — | Must (P) |
 | 19 | **Own duplex audio with that app** (inject into its mic, capture its reply on the headset) | No (`NEEDS_PLATFORM`) | Path A (UID mixes) then B then C (§3.3); S-32 demo | **F6** if A–C fail on Graphene | Must (P) |
+| 20 | **Files:** find, open, read, create, move/rename, copy, share, delete documents, photos, downloads, recordings | `MediaStore` (own + `READ_MEDIA_*`), SAF `ACTION_OPEN_DOCUMENT_TREE` grants the owner made once, Files UI rung; delete/overwrite/share-out = trusted path | Same, plus privileged `MANAGE_EXTERNAL_STORAGE` pre-grant on the actuator for shared storage; never other apps' private dirs | — (no root, no bypass of app sandboxes) | Must |
 | 9 | Behave correctly after reboot: before first unlock, stop, time, and alarms only; full VOS after the first unlock; Graphene's auto-reboot kept on | Actuator `directBootAware` for the minimal plane; session keys are in CE storage | Same | — | Must |
 | 10 | Device toggles: wifi, BT, mobile data, airplane, location, NFC, DND, brightness, dark theme | QS tile taps via accessibility, `Settings.Panel` | Silent privileged APIs + `WRITE_SECURE_SETTINGS` **[S-17]** | — | Should |
 | 11 | Install, update, and uninstall apps | UI rung on the installer dialogs (class `app.install`/`app.uninstall`, trusted path) | `INSTALL_PACKAGES`/`DELETE_PACKAGES`, trusted path | — | Should |
@@ -504,6 +525,8 @@ The router tries rungs in order and stops at the first **oracle-verified** succe
 | 15 | Change other apps' permissions and Graphene's Network/Sensors toggles | UI rung in Settings, class `settings.security` (catastrophic "yes") | Same | **F4:** a direct API, only if Caleb asks (§9 Q15) | Could |
 | 16 | A home surface: deferred queue, visual results shown at unlock, "what did you do today" | An optional `ROLE_HOME` activity in the actuator (offline, reads its own audit) | Same | — | Could |
 | 17 | Unlock a locked phone by voice | No | No | **F3:** a keyguard patch, only if Caleb answers §9 Q2 "yes". Recommended against. | Won't (default) |
+
+**Capability bar.** Caleb's bar is that the agent can do about everything required of it, including filesystem work. That is met by contract completeness, not privilege escalation: every Must row works on its tier, anything without a row goes through VTB or the ladder (§3.4–3.5), and gaps are reported as `NEEDS_PLATFORM` and become new rows. The actuator owns phone-storage access (row 20); the session reads/writes only its own CE storage (transcripts, hints, model files) and never touches shared storage directly; M7 sandboxed skills get no files. No root on any tier.
 
 **On a locked phone:**
 - Fast tools work (media, volume, timers, time).
@@ -877,7 +900,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 
 **Scope:**
 - Actuator: voice interaction service, AudioPlane v1, NLS media control, fast tools including `shell.nav`, oracles, earcons, audit v1, bundled offline grammar, house voice, stop controls.
-- Session: realtime voice from the pipe, key store, egress allowlist, built-in Player.
+- Session: realtime voice from the pipe, key store, egress allowlist, built-in Player, **ModelRouter v0** (§3.2.1: registry, policy table, `chat_voice` + `offline_grammar` selectable, Settings picker).
+- Actuator: Files row 20 read paths (MediaStore query/open, SAF tree grant) on Tier S.
 - Binder auth on both sides.
 - S-25 inventory started.
 
@@ -894,6 +918,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M1-ORC-01 | `media.play` for a nonexistent show | `UNVERIFIED` earcon; the session says it could not confirm; the "done" earcon never plays |
 | M1-EGR-01 | Field day with PCAPdroid plus an edge capture | Only declared hosts; 0 flows from the actuator UID; 0 Google hosts from VOS UIDs |
 | M1-NOGOOG-01 | Full M1 test suite on Phone B running official Graphene with sandboxed Play absent | All M1 tests pass |
+| M1-MODEL-01 | Switch `chat_voice` between two registered backends and `offline_grammar` between two bundled variants from Settings, then by voice | Next turn uses the new backend (audited); a missing key/model falls back to the next policy entry with a spoken notice |
+| M1-MODEL-02 | Try to bind `offline_grammar` or `ocr_commit` to a cloud backend | Rejected by the router and by a static check; actuator still has 0 network flows |
 | M1-FIELD | 3 workdays on Phone A | Daily log in `eval/field/` |
 
 ### M2 — Trusted path and everyday comms (target 2026-12-04)
@@ -921,6 +947,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 
 **Scope:**
 - Accessibility actuation, hybrid observation, vision vendor, commit-button detector with bundled OCR.
+- ModelRouter: `vision_step` model pick (small vs large) with one-step escalation and per-task spend in the audit; `ocr_commit` variant pick (on-device only).
+- Files row 20 write paths (create/move/copy; delete/overwrite/share-out via trusted path).
 - Takeover detection (S-09), route record and replay, ladder memory.
 - Screenshot minimization, honest stops including `NEEDS_GOOGLE`.
 - Shell Contract rows 1–7 and 9–11 on Tier S.
@@ -936,6 +964,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M3-PRIV-01 | Upload audit for M3-UI-01 | Every image audited; no `FLAG_SECURE` window uploaded; IME region masked |
 | M3-HONEST-01 | Tasks that hit a biometric, CAPTCHA, login, or an app that needs Play | `NEEDS_USER` / `NEEDS_GOOGLE` spoken; never `VERIFIED` |
 | M3-SHELL-S | Shell Contract Tier S rows (1–7, 9–11), one scripted test each | All pass on Phone A and Phone C |
+| M3-MODEL-01 | Top-20 UI tasks under *Fast/cheap* vs *Best* profiles | Success and cost per task logged for both; escalations audited |
+| M3-FILE-01 | "Find the PDF I downloaded yesterday and share it to Signal"; "delete last week's screenshots" | Correct files found; share and delete go through the trusted path; 0 access outside granted storage |
 | M3-FIELD | 5 workdays | Fast ≥95%, UI ≥70%, unannounced irreversible acts = 0 |
 
 ### M4 — VOS Image: the agent owns the session and the audio (Tier P on Phone B; target 2027-02-19)
@@ -985,6 +1015,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 
 **Scope:**
 - Registry, VTB SDK (an AAR plus an annotation processor that generates the manifest JSON), and two reference providers: a VOS Notes demo, and a wrapper for one real service Caleb uses.
+- VTB manifest field `preferredModelClass`, honored by ModelRouter as a hint within owner policy.
 - Inbound `IVosAgent`, `agent.goal` delegation, AppFunctions adapter (P/F), read-only remote MCP, conformance kit, and `docs/VTB-SPEC.md` v0.
 
 | ID | Acceptance test | Pass |
@@ -996,6 +1027,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M5-VTB-05 | Inbound goal: read/reversible vs irreversible | Read/reversible run; irreversible `DEFERRED` until an owner turn + trusted path; the requester sees only its own result |
 | M5-VTB-06 | Rate limit and "stop letting X ask" | Enforced; audited |
 | M5-VTB-07 | Conformance kit on both reference providers | Pass |
+| M5-VTB-08 | Provider declares `preferredModelClass: vision_step:large` while the owner profile caps cost tier at 1 | Owner cap wins; hint audited |
 | M5-LAD-01 | "Make a note: milk" with and without the provider installed | Rung 2 vs rung 8; both verified |
 
 ### M6 — Many people (target 2027-05-14)
@@ -1145,4 +1177,6 @@ Each question has a default. The default holds unless you change it.
 16. **Tier F timing.** Build the soft fork only when a Must row fails or M4 data asks for F1/F2/F6, or start it right after M4 regardless? *Default: only by trigger.*
 17. **Maps Gemini reference.** For the S-32 amazing demo, install sandboxed Play + Google Maps + Gemini on Phone B only (not a VOS dependency)? *Default: yes on Phone B for the demo; Phone A stays Play-absent unless you change Q11.*
 18. **Default assistant role.** Keep VOS as `ROLE_ASSISTANT` even when exercising Maps' in-app Gemini (duplex Path A), rather than yielding the role to Google? *Default: keep VOS; never yield.*
+19. **Model picker defaults.** Which alternates go in the M1 registry for `chat_voice` (xAI default) and is the *Balanced* profile the default? *Default: xAI realtime as primary, one alternate vendor only if you name it; Balanced; caps per Q5.*
+20. **Files scope.** OK to pre-grant `MANAGE_EXTERNAL_STORAGE` to the actuator on Tier P (all shared storage, never app-private dirs)? *Default: yes on Tier P; Tier S uses MediaStore + SAF grants only.*
 
