@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Date | 2026-10-12 (wake-word AEC configurable; OS enhancements configurable; unlock→wake-word; long-press optional; app-agent typed→duplex→vision; M3-SPOT; M3-MAP GPS spoof; unprompted pan/zoom; on-device tools + scratchpad; live-map look-around; model choice open; audio cache; Maps duplex; vision-first UI; dual-device panther/akita) |
+| Date | 2026-10-14 (Tier F committed after M4, no patch cap; F5 secure-layer capture + secure-pixel release policy; F7 actuator-only INJECT_EVENTS + panel-only presence; screen power/brightness; on-device agent timers. Earlier, 10-12: wake-word AEC configurable; OS enhancements configurable; unlock→wake-word; long-press optional; app-agent typed→duplex→vision; M3-SPOT; M3-MAP GPS spoof; unprompted pan/zoom; on-device tools + scratchpad; live-map look-around; model choice open; audio cache; Maps duplex; vision-first UI; dual-device panther/akita) |
 | Owner | Caleb |
 | Name | **VOS**. Packages `com.vos.session` and `com.vos.actuator` (`com.vos.sandbox` at M7). Tool bus: **VOS Tool Bus (VTB)**. |
 | Replaces | The earlier target plan in `argoos/TARGET-PLAN.md` and every name in it. Its architecture is reused. Its platform choice (Google's Pixel factory OTA) is reversed. Nothing is carried forward for compatibility. |
@@ -14,7 +14,7 @@
 - **[spike S-nn]** marks an Android or GrapheneOS claim that must be checked on a device before anything depends on it. The spike register is §6.0.
 - **Tier S** is the two VOS apps on an unmodified phone (stock Android 14+ or stock GrapheneOS).
 - **Tier P** is the **VOS Image**: GrapheneOS's own signed OTA plus the VOS session layer, re-signed with the owner's keys. No source build.
-- **Tier F** is the **VOS Fork**: GrapheneOS built from source with a short, named patch queue. It is used only when a Shell Contract row (§3.6) needs it.
+- **Tier F** is the **VOS Fork**: GrapheneOS built from source with a named patch queue (no count cap; each patch small, self-contained, tied to a Shell Contract row). It is the committed shipping build, started right after M4 (Caleb, 2026-10-14); Tier P stays the first dev build and the fallback.
 
 ---
 
@@ -78,7 +78,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 | (2026-10-12) A small agent team may suit better, even with one main agent the user works with | One user-facing agent + small internal specialist team mapped onto the UID split; agent↔agent over Binder/VTB made first-class; ModelRouter binds each role's backend and escalates (decision 13, §3.4, §3.7). M1 ships internal roles in one session + one actuator; M5 opens VTB peer agents. Issue: *Agent team* (M1). |
 | (2026-10-12) Treat GitHub as the source of truth | `calebtt/vos` wins; local copies are caches (`docs/TRACKING.md`, decision 10). |
 | (2026-10-12) Intents suck (tried them); screenshots are about the only way; on-device models can pick out buttons; needs heavy real-world benchmarks on up-to-date apps; version-locking those tests is counterproductive | Decision 14 + rewritten §3.5: vision+a11y screenshot loop is the default UI path; intents demoted to weak/fallback. Hybrid vision pipeline (§3.5.1): on-device OCR/button detect in the actuator; cloud multimodal via ModelRouter for hard scene understanding. M3 eval: real-world tasks on current Play/Graphene apps; track app version in results but refresh targets — no version-pin success criterion. |
-| (2026-10-12) Model choice for on-device UI detect is unsettled (fine-tuned YOLO may or may not cover buttons; a11y merge / OmniParser-style / other detectors need research); hold until Claude is back on the desktop | Leave concrete `control_detect` model **open**. Thin ModelRouter policy stays (decision 11, §3.2.1); do **not** lock YOLO vs a11y vs OmniParser. Research + pick with Claude when desktop is back; M3 binds whatever wins. |
+| (2026-10-12) Model choice for on-device UI detect is unsettled (fine-tuned YOLO may or may not cover buttons; a11y merge / OmniParser-style / other detectors need research); hold until Claude is back on the desktop | **Resolved 2026-10-13:** `control_detect` v0 = a11y-tree adapter + cloud `ui_verify` (§3.2.1; research/UI-DETECT-GROK-2026-10-13.md). Original note: leave concrete `control_detect` model **open**. Thin ModelRouter policy stays (decision 11, §3.2.1); do **not** lock YOLO vs a11y vs OmniParser. Research + pick with Claude when desktop is back; M3 binds whatever wins. |
 | (2026-10-12) Cache and lookup compressed audio messages instead of regenerating every time | Announcer / house-voice (and common prompts): cache compressed audio keyed by `(text, voice_id)`; replay on hit; synth on miss (§3.3 ANNOUNCE, §3.7 Announcer). |
 | (2026-10-12) For mid-drive nav Q&A, look around the live map; Maps has a built-in voice AI the team can question for route guidance | Mid-drive (decision 16): **typed Maps agent first** if available, then Duplex to Maps' **built-in voice AI**, then Operator screenshot/pan/zoom the **live navigation map** (vision loop, not intents) (§3.5.1 Maps nav, §3.3 duplex). |
 | (2026-10-12) On-device tools should be drafted; many are used by the current agent crew; add useful ones (scratchpad etc.); live-map look-around must be intelligent / human-like for complex tasks or it isn't useful | Decision 15 + §3.5.2: named **on-device tool surface** (actuator-local) covering screenshot, a11y gestures, `control_detect`, duplex, file R/W, TTS cache, **scratchpad/notes**, timers, shell globals; VTB may expose a subset later. Live-map look-around raised to a **multi-step human-like explore** (pan/zoom/read labels/reorient with oracles) — not scripted intents. Issue: *On-device tool kit draft* (M3). |
@@ -89,6 +89,11 @@ Every earlier product, package, permission, interface, and path name is retired.
 | (2026-10-12) Dislikes long-press-to-listen; start wake-word listening when the phone unlocks | Decision 17: **unlock → wake-word listening (default)**; stop on lock / before first unlock; long-press (power/MFB) = **optional fallback**. Shell Contract row 1, S-14, presence/origin, Q13 updated. Not voice unlock (decision 6). |
 | (2026-10-12) Strip playing audio from the wake-word listening stream (AEC); using that cancelling should be configurable; has a GitHub AEC project (Android port unsure) | Decision 18 + §3.3 / S-34: wake-word mic path **cancels playback reference** by default when available; **Settings toggle** to disable. Candidate: [`calebtt/clean-speech`](https://github.com/calebtt/clean-speech) — Android port TBD; also evaluate platform AEC / WebRTC AEC3. |
 | (2026-10-12) Most aspects of the OS enhancement should be configurable | Decision 19 + **P16**: VOS session-layer enhancements are **configurable** (toggles/policy + defaults + audit); security invariants are not owner-off switches. |
+| (2026-10-14) Secure screens are screens like any other; the agent may capture them | `FLAG_SECURE` non-goal dropped; Tier F patch F5 secure-layer capture; wireframe until F5; secure-pixel release policy (§5.8); M3-VERIFY-02, F-SEC-01 (3d6842a, this commit) |
+| (2026-10-14) Allow real input injection | Shell Contract row 5: F7 `INJECT_EVENTS` for the actuator UID only, owner-turn only, blocklist, stop suspends; panel-only presence (§5.7); S-35, M4-INJ-01, F-PRES-01 (5e0821d, this commit) |
+| (2026-10-14) No need for the 5-patch cap; it's OK to fork | Patch-count cap removed (8ad9a0b); Tier F committed, starts right after M4, §9 Q16 answered (32b7e8a). Rebase deadline (F-REBASE-01) is the real limit. |
+| (2026-10-14) The agent must control screen waking and brightness | Shell Contract row 22, S-36, M2-SCREEN-01 (9fba7dd) |
+| (2026-10-14) An on-device timer should be available to the agent | Shell Contract row 23, `timer.*` tools, S-37, M2-TIMER-01 (this commit) |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
 
@@ -99,7 +104,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 | Same-UID skills could read keys | Model-written code is out of scope until M7, and then runs in an `isolatedProcess` (§5.2). |
 | Nobody owned the audio | The actuator's AudioPlane is the only owner; intercept/redirect/manage + app-assistant duplex (§3.3). |
 | No app↔OS interop | VTB v0 (§3.4) plus the capability ladder (§3.5). |
-| Fork scope had no limit | Tier P has zero patches. Tier F is capped at 5 named patches, each tied to a Shell Contract row (§4.6). |
+| Fork scope had no limit | Tier P has zero patches. Tier F is a named queue with no count cap; each patch is small, self-contained, tied to a Shell Contract row, tested (F-PATCH-nn), and rebased per Graphene tag; rebase cost feeds Hatch L trigger 2 (§4.6–4.7). |
 | One phone; flashing risked the daily driver | Phone B (Pixel 7 `panther` main flash/dev rig) takes every flash. Phone A (Pixel 8a `akita` path, or another Graphene daily) migrates only after a 14-day soak (M4). Both device trees stay supported. |
 | Work was not in git | M0-01, day 1. |
 | xAI key and VPS token compiled into the old APK | Rotated on Day 0 (§8). |
@@ -158,7 +163,7 @@ Who this is for, in order of impact:
 |---|---|
 | Google Play services, GSF, Google apps, or Google speech/ML services as a VOS dependency | Caleb's requirement. VOS works with all of them absent. Sandboxed Play is the owner's per-app choice, and it is off by default. |
 | Google's Pixel factory image as the base | It ships Play services and Google apps as privileged system components, and it has none of Graphene's hardening (§4.2). |
-| Maintaining a broad OS fork | One person cannot maintain one. Tier F is capped at 5 named patches, each tied to a Shell Contract row (§4.6). |
+| Maintaining a broad OS fork | One person cannot maintain one. Tier F is a named, rebased patch queue with no count cap; each patch stays small and contract-tied, and the ≤1-day rebase (F-REBASE-01) is the limit (§4.6–4.7). |
 | Root (Magisk/KernelSU), `su`, or a shell-UID helper as the source of privilege | The agent reads attacker-controlled text. Root puts uid 0 within reach of prompt injection. This rules out "rooted Graphene" builds too. |
 | A platform-signed actuator, or the `signature`-only screen permissions (`READ_FRAME_BUFFER`, `CAPTURE_SECURE_VIDEO_OUTPUT`) | A platform signature next to an injectable agent is root by another name. This holds on Tier F too, where we will hold the platform key. **`INJECT_EVENTS` is no longer in this list (2026-10-14):** it is allowed for the actuator only, through Tier F patch F7, without platform-signing the actuator (§3.6 row 5). |
 | ~~Bypassing `FLAG_SECURE`~~ (removed 2026-10-14) | No longer a non-goal. Caleb: secure screens (banking etc.) are screens like any other; the agent may capture and see them (§3.5.1 secure capture, Tier F patch F5). |
@@ -189,7 +194,7 @@ Each principle has a test. A principle without a test does not count.
 | **P7** | **Two speeds.** | Fast tools (≤2 s budget) never touch vision. Before a slow task starts, the agent speaks a measured estimate ("about 30 seconds"). | M1-FAST-01 |
 | **P8** | **Honest stops.** | `NEEDS_USER` (biometric, CAPTCHA, login), `NEEDS_PLATFORM` (needs Tier P or F), `NEEDS_GOOGLE` (the target app will not run without Play services), `UNSUPPORTED`, `DEFERRED`. Each is spoken and audited. No result is ever faked. | M3-HONEST-01 |
 | **P9** | **Typed for fast tools and app agents; duplex then vision.** | Fast/non-UI tools prefer typed built-ins, VTB, notifications, MediaBrowser. When talking to an **app's own agent**, order is **typed interop → duplex voice → screenshot vision** (decision 16). For ordinary in-app UI with no app agent (settings trees, unknown screens, Maps Start Guidance taps), the **screenshot + a11y loop is the default** — public intents are a weak probe only. When vision succeeds, record a route; routes invalidate on UI drift, not on a pinned version. | M3-UI-01/02, M3-SPOT-*, M3-MAP-*, M5-LAD-01 |
-| **P10** | **Thin session layer; fork only by contract.** | Every privilege is a named Android permission or role that maps to a capability. On Tier P the machine layer is unmodified and one script rebuilds the image. Tier F patches exist only for named Shell Contract rows: at most 5, each with a test and a rebase check. | M4-PRIV-01, M4-IMG-*, F-PATCH-* |
+| **P10** | **Thin session layer; fork only by contract.** | Every privilege is a named Android permission or role that maps to a capability. On Tier P the machine layer is unmodified and one script rebuilds the image. Tier F patches exist only for named Shell Contract rows; no count cap; each is small, with a test and a rebase check. F5 and F7 are committed. | M4-PRIV-01, M4-IMG-*, F-PATCH-* |
 | **P11** | **Voice is not identity.** | Speaker verification never grants authority. Authority comes from the caller's UID, the origin the actuator determines, and owner presence (§5). | M2-ORIGIN-01 |
 | **P12** | **Data stays home by default.** | Audio and screens leave the phone only during an open turn, only to declared vendors, and every upload is audited (hash, bytes, destination). | M1-EGR-01, M3-PRIV-01 |
 | **P13** | **Accessibility is the market.** | Coexist with the owner's screen reader (TalkBack on stock phones; on Graphene, whatever the owner installs **[verify what Graphene ships]**). Declare `android:isAccessibilityTool` honestly. Test with blind users before calling M6 done. | M6 |
@@ -584,7 +589,7 @@ Operator (actuator)
 
 **Verify-and-correct (proposed Set-of-Mark).** Instead of asking the cloud to find the control, the phone proposes and the cloud checks.
 - **Request.** Actuator draws numbered marks on every candidate control on a downscaled, compressed screenshot (~1000 px long side, JPEG/WebP; redacted as above), attaches its proposed `mark_id` + the goal, and hands it over Binder to the session, which calls ModelRouter `ui_verify` (never from the actuator).
-- **Full-tree coverage + secure capture (2026-10-14, rev).** The numbered image must box **every** control the a11y tree lists as on screen. `FLAG_SECURE` windows are **captured and sent like any other screen** (Caleb: no special secure-screen class). Mechanism: Tier F patch **F5 (secure-layer capture)** lets the actuator UID's `takeScreenshot` include secure layers. Until F5 lands (Tier S/P), secure regions come back black, so the actuator falls back to a **tree-rendered wireframe** for those regions: each listed node from `AccessibilityNodeInfo.getBoundsInScreen()` drawn as a numbered box labeled with role + label. Tree-listed off-viewport/occluded nodes go in a numbered side list (mark, role, label, bounds) so the mark set always equals the tree's on-screen set. Each mark carries `source: pixels|secure_pixels|wireframe`. IME region masking still applies. Test: M3-VERIFY-02.
+- **Full-tree coverage + secure capture (2026-10-14, rev).** The numbered image must box **every** control the a11y tree lists as on screen. `FLAG_SECURE` windows are **captured like any other screen** (Caleb: no special secure-screen class); release to the session/cloud follows the secure-pixel policy (§5.8). Mechanism: Tier F patch **F5 (secure-layer capture)** lets the actuator UID's `takeScreenshot` include secure layers. Until F5 lands (Tier S/P), secure regions come back black, so the actuator falls back to a **tree-rendered wireframe** for those regions: each listed node from `AccessibilityNodeInfo.getBoundsInScreen()` drawn as a numbered box labeled with role + label. Tree-listed off-viewport/occluded nodes go in a numbered side list (mark, role, label, bounds) so the mark set always equals the tree's on-screen set. Each mark carries `source: pixels|secure_pixels|wireframe`. IME region masking still applies. Test: M3-VERIFY-02.
 - **Reply (tiny structured JSON).** `{verdict: confirm|correct|none, mark_id?, action?, reason}`. `correct` names the right mark (and optionally action); `none` = target not on screen → scroll/reorient or escalate to `vision_step`.
 - **Policy.** *Skip* when the on-device match is high-confidence with a clear margin over the runner-up **and** the action is reversible. *Verify first* on ambiguity, dense same-type lists (Spotify rows), and **always** before irreversible actions (send/buy/delete/commit — in addition to the trusted path, never instead of it). *Act then verify* for safe taps: tap, check with the screen-diff oracle, undo (back/re-tap) if wrong.
 - **Learning.** Every `correct` is logged as a labeled example (screenshot hash, marks, proposed vs gold mark) — gold data for the detector/ranker.
@@ -614,7 +619,7 @@ Operator (actuator)
 - `provenance`: `api_reference` | `adjudicated` | `owner_label` | `action_outcome`.
 - `state`: `unconfirmed` → `confirmed` via second API pass, Caleb, or a real tap/scroll outcome.
 - Agreeing frames: a small sampled share kept as easy positives.
-- **Privacy:** secure-window frames included like any other; password, payment and message-content regions redacted (or the frame skipped). Stored **on-device by default**; export to the desktop for training only when Caleb opts in.
+- **Privacy:** secure-window frames (`secure_pixels`) are never included in training data; password, payment and message-content regions redacted (or the frame skipped). Stored **on-device by default**; export to the desktop for training only when Caleb opts in.
 
 **Latency budgets (M3 gates; measured on panther):**
 
@@ -631,7 +636,7 @@ Operator (actuator)
 
 **When to skip cloud (stay on-device only):** offline / `NEEDS_NETWORK`; spend cap; goal is a labeled a11y node with conf ≥ τ_tap; trusted-path commit detection (`ocr_commit`); any frame that is entirely `FLAG_SECURE` and F5 is absent (no pixels to send — tree/wireframe only).
 
-**Privacy.** IME region always masked before upload. `FLAG_SECURE` windows are uploaded like any other screen (audited per P12; real pixels need F5). Notification shade contents stripped unless the task is about notifications. Every upload: audit `(hash, bytes, destination, turnId)`. Actuator never holds vendor keys.
+**Privacy.** IME region always masked before upload. `FLAG_SECURE` windows (real pixels need F5) upload only under the secure-pixel policy (§5.8: owner turn, target app, matching window; audit class `secure_capture`). Notification shade contents stripped unless the task is about notifications. Every upload: audit `(hash, bytes, destination, turnId)`. Actuator never holds vendor keys.
 
 **Maps nav (example).** No reliance on `google.navigation:` / `geo:` success. Open Maps (launch), then rung-7 loop: search field → type destination → pick result → Start → oracle = nav notification / guidance UI.
 
@@ -663,7 +668,7 @@ The agent crew needs a named set of **hands** — tools that run only inside `co
 | `audio.announce` | Trusted-path house voice + offline "stop" listen | Announcer | |
 | `file.read` / `file.write` / `file.list` / `file.move` / `file.delete` | Shared-storage ops (MediaStore, SAF grants, MES on P) | Files | Destructive → Announcer |
 | `notes.scratchpad` | Per-`goalId` / per-role scratch notes (structured KV + short text) in actuator CE storage | Any actuator role; Conductor may read summaries via Binder | **New crew aid:** interim observations ("south lot entrance"), failed coords, explore breadcrumbs. Cleared or archived when the goal ends. Not owner documents (those are `file.*`). Session may keep its own plan notes in CE; scratchpad is the actuator-side board the hands write on. |
-| `time.timer` / `time.alarm_query` | Timers; read next alarm/calendar peek when APIs allow | Operator | Fast tools |
+| `timer.*` (`timer.set`, `timer.list`, `timer.cancel`, `timer.snooze`, `timer.stopwatch`, `alarm.set`, `alarm.query`, `timer.internal`) | Owner timers/alarms/stopwatch and agent-internal wakeups (`timer.internal{after|at, reason, goalId, action: wake_role|revert_change|deadline}`), all held in the actuator's `AlarmManager` (row 23); fire offline with screen off; internal fires wake the owning role or run a pre-registered revert; every set/fire/cancel audited (`audit_class: timer` / `timer_internal`) | Operator (owner timers); any role via actuator API (internal) | Fast tools; replaces `time.timer` |
 | `device.toggle` | Wifi/BT/DND/torch/brightness + auto-brightness/screen wake, sleep, keep-awake, timeout (row 22)/ringer mode + ringtone/per-app notification settings/**location (GPS) on-off at runtime — default off, on only for the task, off after**/… | Operator | QS tap on S; silent on P |
 | `comms.notify_*` / `comms.reply` | Read/act/reply notifications | Operator | Trusted path on send |
 | `app.launch` | Bring package/activity to foreground | Operator | |
@@ -684,13 +689,13 @@ The agent crew needs a named set of **hands** — tools that run only inside `co
 
 "The voice agent is the OS session" means the agent can do whatever a person can do with the shell, and for each action we name the mechanism on each tier. The contract is a list of rows. Tier F is committed (§4.6); a **Must** row that fails on Tier P adds a patch to its queue. Each row has a test, `M4-SHELL-nn`.
 
-| # | Shell action | Tier S | Tier P (VOS Image) | Tier F patch (only if needed) | Level |
+| # | Shell action | Tier S | Tier P (VOS Image) | Tier F patch | Level |
 |---|---|---|---|---|---|
 | 1 | Summon: **wake word after unlock (default)**; headset MFB; assist gesture; QS tile; lock-screen affordances; **optional** power/MFB long-press fallback | Assistant role + QS tile; wake-word listening starts on unlock when HotwordDetectionService or FGS fallback is available **[S-14]** | Same, plus RRO default assistant; power long-press mapped as **optional** fallback summon **[S-20]**; unlock→start / lock→stop wake-word **[S-14]** | — | Must |
 | 2 | Navigate: home, back, recents, notification shade, Quick Settings, power menu, lock, screenshot, split screen | `AccessibilityService.performGlobalAction` | Same | — | Must |
 | 3 | Launch any app or activity from the background | Bound `VoiceInteractionService`/`AccessibilityService` exemption from background-activity-start limits **[S-26]** | Same | — | Must |
 | 4 | Read the screen, including `FLAG_SECURE` windows | Node tree + `takeScreenshot`; secure windows black, so tree wireframe for them | Same (no secure pixels without a patch) | **F5:** secure-layer capture for the actuator UID's `takeScreenshot` (framework/SurfaceFlinger), no `READ_FRAME_BUFFER` | Must |
-| 5 | Input: tap, swipe, type, scroll, key events | `dispatchGesture`, `ACTION_SET_TEXT` | Same | **F7:** `INJECT_EVENTS` for the actuator UID only (real touch + key events via `InputManager.injectInputEvent`); callable only from the actuator's trusted Operator code path, never from the session or model-supplied code; every injection goes through the actuator API with the same class/trusted-path/catastrophic-"yes" gates and audit as `dispatchGesture`; events tagged with a VOS policy flag so owner-touch detection (S-09) still tells them apart | Must (a11y) / Should (true injection) |
+| 5 | Input: tap, swipe, type, scroll, key events | `dispatchGesture`, `ACTION_SET_TEXT` | Same | **F7:** `INJECT_EVENTS` for the actuator UID only (real touch + key events via `InputManager.injectInputEvent`); callable only from the actuator's trusted Operator code path, never from the session or model-supplied code; every injection goes through the actuator API with the same class/trusted-path/catastrophic-"yes" gates and audit as `dispatchGesture`; events tagged with a VOS policy flag and delivered through a dedicated tagged virtual input device (`vos-inject`), never the touch panel's device ID, so owner presence (§5.7, panel-only) never counts them. **Scope:** only during an `owner_turn`; refused for a window/keycode blocklist (keyguard/PIN/bouncer, Settings security & privacy, VOS's own Settings, permission dialogs); spoken stop, QS tile, or the F2 chord suspends F7 in ≤300 ms until the next owner turn | Must (a11y) / Should (true injection) |
 | 6 | Notifications: read, act, reply, dismiss, snooze | NLS `cancelNotification`/`snoozeNotification`, `RemoteInput` | Same | — | Must |
 | 7 | Calls: who, answer, end, place, speaker | Telecom APIs | Same, pre-granted, plus `MODIFY_PHONE_STATE` | — | Must |
 | 8 | Own all audio: focus, routing, loopback, per-app mute/route, intercept/redirect/manage playback & recording | Cooperative transport + volumes (§3.3) | Authoritative AudioPolicy + PlayerProxy (§3.3) | **F6** if Graphene blocks priv-app AudioPolicy inject/capture | Must (P) |
@@ -699,6 +704,7 @@ The agent crew needs a named set of **hands** — tools that run only inside `co
 | 20 | **Files:** find, open, read, create, move/rename, copy, share, delete documents, photos, downloads, recordings | `MediaStore` (own + `READ_MEDIA_*`), SAF `ACTION_OPEN_DOCUMENT_TREE` grants the owner made once, Files UI rung; delete/overwrite/share-out = trusted path | Same, plus privileged `MANAGE_EXTERNAL_STORAGE` pre-grant on the actuator for shared storage; never other apps' private dirs | — (no root, no bypass of app sandboxes) | Must |
 | 21 | **Live sensor state (agent-facing):** query current values on demand and subscribe to change updates for position (GPS lat/lon, heading/bearing, speed, altitude, accuracy, as available), motion (accelerometer, gyroscope, magnetometer, step/activity) and environment (proximity, ambient light, barometer) sensors, plus which sensors are active and what each is reporting | `SensorManager` listeners + `LocationManager`/`GnssStatus` in the actuator (no network); `sensors.query(name)` / `sensors.subscribe(name, rate, until)` tools; readings released to the session per turn and audited (P2); subscriptions are time/turn-bounded and visible in the acting indicator; **location default off**: a position query/subscription turns location on only for that task and turns it off when the subscription or task ends | Same, pre-granted | — | Should |
 | 22 | **Screen power + brightness:** wake the screen, turn it off/sleep, keep it awake for a task (e.g. navigation, reading a recipe), set screen-off timeout; brightness level, auto-brightness on/off, and temporary boosts ("max brightness for a minute"). Waking never unlocks (decision 2: voice is not identity); a locked wake shows only the lock screen / allowed glance surfaces | Off: `GLOBAL_ACTION_LOCK_SCREEN` (a11y). Wake: full-screen wake activity (`setTurnScreenOn`/`setShowWhenLocked`) or `ACQUIRE_CAUSES_WAKEUP` wake lock. Keep awake: `FLAG_KEEP_SCREEN_ON` overlay / screen wake lock. Brightness, auto-brightness, timeout: `Settings.System` `SCREEN_BRIGHTNESS`, `SCREEN_BRIGHTNESS_MODE`, `SCREEN_OFF_TIMEOUT` via `WRITE_SETTINGS` | Same, plus `DEVICE_POWER` (privileged) for `PowerManager.wakeUp`/`goToSleep` if granted to the priv-app **[S-36]** | — | Must |
+| 23 | **Timers, alarms, stopwatch (agent + owner):** "set a 10 minute timer", alarms, list/cancel/snooze/stopwatch; ring with spoken announcement (house voice) + notification. Internal agent timers too: self-wakeups to check back on a task, auto-revert of temporary changes (keep-awake, brightness boost, DND-for-an-hour), deadlines. Owned by the actuator: work offline, survive session death and network loss, fire with the screen off / in Doze, persist across reboot (direct-boot plane for owner alarms) | Own `AlarmManager.setExactAndAllowWhileIdle` / `setAlarmClock` with `SCHEDULE_EXACT_ALARM` (user grant); `ACTION_SET_ALARM`/`SET_TIMER` to Clock only as weak fallback | Same, with `USE_EXACT_ALARM` / pre-granted `SCHEDULE_EXACT_ALARM` for the priv-app; `RECEIVE_BOOT_COMPLETED` + `LOCKED_BOOT_COMPLETED` re-arm **[S-37]** | — | Must |
 | 9 | Behave correctly after reboot: before first unlock, stop, time, and alarms only; full VOS after the first unlock; Graphene's auto-reboot kept on | Actuator `directBootAware` for the minimal plane; session keys are in CE storage | Same | — | Must |
 | 10 | Device toggles: wifi, BT, mobile data, airplane, location (**default OFF:** GPS/location stays off when not in use; the agent turns it on only when a task needs it and turns it back off when the task ends; distinct from the session's no-location permission boundary), NFC, DND, brightness, dark theme, ringer mode (ring/vibrate/silent) and ringtone selection, per-app notification settings (enable/disable, channel importance) | QS tile taps via accessibility, `Settings.Panel` | Silent privileged APIs + `WRITE_SECURE_SETTINGS` **[S-17]** | — | Should |
 | 11 | Install, update, and uninstall apps | UI rung on the installer dialogs (class `app.install`/`app.uninstall`, trusted path) | `INSTALL_PACKAGES`/`DELETE_PACKAGES`, trusted path | — | Should |
@@ -753,7 +759,7 @@ The owner talks to **one** agent. Behind it is a small, fixed crew of roles. Eac
 
 1. **No Google by default.** No Play services, GSF, or Google apps in the image. The owner can opt in per app, and opting in must not give Google code any special privilege.
 2. **Hardening kept.** A memory-safety and exploit-mitigation baseline at least as strong as Graphene's, because the agent next to it reads hostile text.
-3. **Privileged APIs.** `signature|privileged` permissions for the VOS actuator: `MODIFY_AUDIO_ROUTING`, `CAPTURE_AUDIO_OUTPUT`, `CAPTURE_VOICE_COMMUNICATION_OUTPUT`, `CONCURRENT_AUDIO_RECORD_BYPASS` (Android 16+; else rely on `CAPTURE_AUDIO_OUTPUT`), `MEDIA_CONTENT_CONTROL`, `WRITE_SECURE_SETTINGS`, `INSTALL_PACKAGES`, `DELETE_PACKAGES`, `PROVIDE_TRUST_AGENT`, `EXECUTE_APP_FUNCTIONS`, `MODIFY_PHONE_STATE`, and — if spikes pass — `ACCESS_COMPUTER_CONTROL` and/or `CREATE_VIRTUAL_DEVICE`. No `signature`-only permission is needed. `CALL_AUDIO_INTERCEPTION` is **not** requested (call-content non-goal).
+3. **Privileged APIs.** `signature|privileged` permissions for the VOS actuator: `MODIFY_AUDIO_ROUTING`, `CAPTURE_AUDIO_OUTPUT`, `CAPTURE_VOICE_COMMUNICATION_OUTPUT`, `CONCURRENT_AUDIO_RECORD_BYPASS` (Android 16+; else rely on `CAPTURE_AUDIO_OUTPUT`), `MEDIA_CONTENT_CONTROL`, `WRITE_SECURE_SETTINGS`, `INSTALL_PACKAGES`, `DELETE_PACKAGES`, `PROVIDE_TRUST_AGENT`, `EXECUTE_APP_FUNCTIONS`, `MODIFY_PHONE_STATE`, and — if spikes pass — `ACCESS_COMPUTER_CONTROL` and/or `CREATE_VIRTUAL_DEVICE`. Tier P needs no `signature`-only permission. Tier F grants exactly one, `INJECT_EVENTS`, to the actuator UID via patch F7 (not a platform signature); F5 gives the actuator's `takeScreenshot` secure layers without granting `READ_FRAME_BUFFER` / `CAPTURE_SECURE_VIDEO_OUTPUT` (both stay banned). `CALL_AUDIO_INTERCEPTION` is **not** requested (call-content non-goal).
 4. **Setup is pre-granted** through `privapp-permissions`, `default-permissions`, and `sysconfig` XML, plus a static RRO.
 5. **Owner keys and relock.** Verified boot is relocked with the owner's key, so the owner, not upstream, decides what runs.
 6. **A path to framework patches** when a Shell Contract row needs one, without becoming a full-time OS maintainer.
@@ -876,7 +882,7 @@ There is evidence the pipeline works: the third-party rooted-graphene project al
 - Patches touch AOSP code paths where possible, not Graphene-specific hardening code.
 
 **Cost:**
-- About 3 weeks to first boot.
+- About 3 weeks to first boot of the zero-patch build, plus an estimated 1–2 weeks each for F5 and F7 (including F-PATCH tests and S-10/S-35 reruns); later patches estimated when queued.
 - About 250 GB on the ext4 volume (§7).
 - 2–4 h for a full build on 20 cores and 125 GB RAM.
 - Per Graphene tag: rebase, build, Phone B soak. That comes to about 1–2 days a month.
@@ -1016,7 +1022,7 @@ A session call that carries a `turnId` the actuator did not issue, or one that i
 
 "Presence" is true when either of these holds:
 - **(a) Headset.** A bonded headset on the owner's allowlist has had an unbroken ACL link (`BluetoothDevice.ACTION_ACL_CONNECTED/DISCONNECTED`) since the last human unlock, and the current turn was summoned from that headset or from the unlocked phone.
-- **(b) Hands.** The phone is unlocked and interactive, and a human touched it in the last 60 s. The actuator's accessibility service sees this through observed motion events **[spike S-09]**.
+- **(b) Hands.** The phone is unlocked and interactive, and a human touched it in the last 60 s. The actuator's accessibility service sees this through observed motion events **[spike S-09]**. **Panel-only rule (2026-10-14):** only events whose `InputDevice` is the physical touch panel (device ID / descriptor pinned at boot from the built-in touchscreen) count. `dispatchGesture` and F7 injection never count: F7 events go through the dedicated tagged virtual device `vos-inject` and are logged; an injection claiming the panel's device ID, or arriving via `uinput` / other kernel input paths, is blocked and audited (`audit_class: inject_spoof`). With nobody touching, irreversible acts defer to headset presence (a) or the next human touch.
 
 Presence gates irreversible acts, private reads on a locked phone, and Extend Unlock. It does **not** unlock a locked phone.
 
@@ -1038,7 +1044,7 @@ Presence gates irreversible acts, private reads on a locked phone, and Extend Un
 - **Screenshots.**
   - Downscaled to ≤1024 px on the long edge.
   - Status bar, notification shade, and IME regions masked.
-  - `FLAG_SECURE` windows are sent like any other screen (F5). Without F5 they are black, and their controls are drawn as a tree wireframe (§3.5.1). IME region still masked.
+  - **Secure pixels are a separate data class** (`secure_pixels`, `audit_class: secure_capture`). With F5 the actuator captures `FLAG_SECURE` windows; it releases them to the session/cloud only during an `owner_turn`, only for the app the task targets, and only when the captured secure window matches that app's window. Otherwise the session gets the wireframe/marks. Secure pixels never go into training data, the on-device corpus export, or VTB peers. Without F5 they are black, and their controls are drawn as a tree wireframe (§3.5.1). IME region still masked.
   - Each task has an image budget.
   - Every upload is audited as (sha256, bytes, host).
 - **Loopback audio (P).** It stays on the device unless the owner asks in the current turn.
@@ -1068,10 +1074,11 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | S-06 | `setUidDeviceAffinity` routes app X to the speaker while VOS stays on the headset | Audio is heard on the expected devices | `setPreferredDevicesForStrategy` (global) | M4 |
 | S-07 | Actuator-held mic: a `microphone` foreground service starts from a summon (assist gesture, MFB, QS tile) on stock GrapheneOS, Pixel stock Android 14–16, and Samsung; concurrent capture while another app records | Mic opens ≤150 ms after a summon from the background | Session-UI activity as the foreground anchor | M0 decision |
 | S-08 | PCM over a `ParcelFileDescriptor` pipe, actuator → session, adds ≤10 ms. `AcousticEchoCanceler` in `MODE_IN_COMMUNICATION` on the Pixel 7 speaker. | Measured | Larger buffers; software AEC (WebRTC AEC3) | M0 decision |
-| S-09 | Accessibility observed touch (`setObservedMotionEventSources(SOURCE_TOUCHSCREEN)`, a flagged API) is available on panther and separates real touches from `dispatchGesture` | Real finger detected ≤100 ms; injected gestures not reported | `TYPE_ACCESSIBILITY_OVERLAY` + `FLAG_WATCH_OUTSIDE_TOUCH`; then window-change heuristics | M3 |
-| S-35 | F7 on a Tier F build: actuator-only `INJECT_EVENTS`; real touch/key events reach apps that ignore or block accessibility gestures; session/other UIDs get `SecurityException`; VOS-flagged events still distinguishable from owner touch (S-09) | Injection works in ≥3 apps where `dispatchGesture` fails; 0 calls succeed from non-actuator UIDs | Stay on `dispatchGesture` | M4 |
+| S-09 | Accessibility observed touch (`setObservedMotionEventSources(SOURCE_TOUCHSCREEN)`, a flagged API) is available on panther and separates real finger touches from `dispatchGesture`, F7 injection, and a virtual input device, by `InputDevice` ID (panel-only rule, §5.7); on Tier F rerun with F7 | Real finger detected ≤100 ms; injected gestures not reported | `TYPE_ACCESSIBILITY_OVERLAY` + `FLAG_WATCH_OUTSIDE_TOUCH`; then window-change heuristics | M3 |
+| S-35 | F7 on a Tier F build: actuator-only `INJECT_EVENTS`; real touch/key events reach apps that ignore or block accessibility gestures; session/other UIDs get `SecurityException`; injected events arrive only from the tagged `vos-inject` virtual device; compare finger vs `dispatchGesture` vs F7 vs `uinput`/virtual device: only the finger counts as presence; panel-ID spoof blocked | Injection works in ≥3 apps where `dispatchGesture` fails; 0 calls succeed from non-actuator UIDs; 0 non-finger events counted as presence | Stay on `dispatchGesture` | Tier F |
 | S-10 | `takeScreenshot` rate limit and `FLAG_SECURE` behavior; prototype F5 secure-layer capture on a Tier F build | ≥1 capture/s; secure windows detectable; with F5, secure layers present in the actuator's capture | Throttle the loop; wireframe fallback for secure regions | M3 |
 | S-36 | Screen power on Graphene, Tier P: wake from off (locked + unlocked) via wake activity vs wake lock vs `DEVICE_POWER` `wakeUp`; sleep via a11y lock; keep-awake survives app switches; brightness/auto/timeout writes | All work silently on P without unlocking; pick the lowest-latency mechanism | Wake activity + a11y lock only | M2 |
+| S-37 | Agent timers on Graphene panther: `setExactAndAllowWhileIdle`/`setAlarmClock` from the actuator priv-app with `USE_EXACT_ALARM` or pre-granted `SCHEDULE_EXACT_ALARM`; fire in deep Doze with screen off, network off, session process killed; re-arm after reboot (`LOCKED_BOOT_COMPLETED`) | Fires ±1 s in 50/50 trials over 8 h idle | `setAlarmClock` only (shows in status bar); foreground service | M2 |
 | S-11 | The accessibility shortcut (both volume keys, 3 s) bound to the actuator turns it off | `ENABLED_ACCESSIBILITY_SERVICES` readback | QS tile and power press only; F2 candidate | M1 |
 | S-12 | A priv-app `TrustAgentService` can extend unlock on Graphene while presence holds (and, as expected, cannot unlock); Graphene has not disabled the trust-agent framework | Stays unlocked; relocks on headset disconnect | Normal timeout | M4 |
 | S-13 | `EXECUTE_APP_FUNCTIONS` can be granted to a product priv-app on Graphene (`panther` smoke, `akita` confirm); list the installed apps that expose AppFunctions | Execute one function, or record "no providers on a de-Googled phone" | Skip rung 3 on P | M5 |
@@ -1159,6 +1166,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M2-AUDIT-01 | Change one byte of an audit line | Chain verification fails at that line |
 | M2-UNDO-01 | "Undo that" after volume, DND, and brightness changes | Previous values restored (readback) |
 | M2-SCREEN-01 | Voice: "turn the screen on", "screen off", "keep it on while I cook", "max brightness for a minute", "auto brightness off", "screen timeout 5 minutes" (locked and unlocked) | Each takes effect ≤1 s with readback; locked wake never unlocks; keep-awake and temporary boost revert at task end/timer; "undo that" restores previous values |
+| M2-TIMER-01 | "Set a 10 minute timer", "alarm at 6:30", "list my timers", "cancel the pasta timer", "snooze", stopwatch; plus an internal `timer.internal` self-wakeup and a keep-awake auto-revert | Fires on time ±1 s in airplane mode with the screen off and the session process killed; spoken + notification ring; list/cancel/snooze correct; internal wakeups and reverts each audited with `goalId`; owner alarms survive reboot |
 | M2-CALL-01 | Incoming call: "who is it" → "answer" | Caller read out; `TelecomManager` in a call; VOS never takes the communication device unsummoned |
 | M2-REPLY-01 | "Reply to Sam: on my way" through `RemoteInput` (S-18) | Message in the thread; oracle from the notification update |
 
@@ -1214,7 +1222,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 - Privileged actuator: focus policy, loopback reference and capture, per-app routing, **AppAssistantDuplex (Paths A→B→C)**, PlayerProxy, silent toggles, Extend Unlock, pre-granted roles and permissions, **unlock→wake-word listening (default)** + optional power/MFB long-press summon fallback, AppFunctions probe.
 - Shell Contract on Tier P, including Must rows 18–19 (in-app assistant + duplex).
 - S-27–S-33 spike reports; S-32 amazing demo required for M4-EXIT.
-- Tier F go/no-go (including F6 if duplex blocked).
+- Tier F patch-set decision (F5 + F7 fixed; F6 if duplex blocked).
 - Migrate Phone A after a 14-day soak.
 
 | ID | Acceptance test | Pass |
@@ -1242,17 +1250,20 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M4-WAKE-02 | Music/nav playing: wake-word with AEC **on** (default) vs **off** (Settings); S-34 fixture | AEC on: false-accept ≤ half of AEC off; speaking wake word still opens `owner_turn`; toggle audited; clean-speech port or alternate backend noted in trial log |
 | M1-CFG-01 | Representative Settings keys exist for wake-word after unlock, wake-stream AEC, and optional long-press fallback (P16 / decision 19); defaults match decisions 17–18 | Readback matches; changing a key writes an audit line; security invariants have no off switch |
 | M4-BFU-01 | Reboot (and Graphene auto-reboot) → summon before the first unlock | Stop, time, and alarms work; everything else says "unlock once" |
-| M4-INJ-01 | F7 input injection: tap/swipe/type/key via `input.inject` in apps where a11y gestures are blocked; same irreversible-act fixtures as M2-TP | Gesture succeeds (oracle readback); irreversible acts still announced + catastrophic "yes"; session/model-origin calls refused; every event in the audit log; owner touch still detected |
 | M4-F-DECIDE | Tier F patch set (F5 + F7 fixed; others from the M4-SHELL results and §9 Q2/Q15) | Recorded in `docs/DECISIONS.md` |
 | M4-EXIT | Phone B used as the daily phone for 14 days with no fallback | Then back up Phone A (Seedvault + per-app exports, §7), unlock (wipe), flash, restore |
 
-**Tier F milestone (committed; starts right after M4, about 3 weeks, before or in parallel with M5):**
+**Tier F milestone (committed; starts right after M4, about 3 weeks to a zero-patch boot plus an estimated 1–2 weeks each for F5 and F7, before or in parallel with M5):**
 
 | ID | Acceptance test | Pass |
 |---|---|---|
 | F-BUILD-01 | Graphene source at the current tag + `vendor/vos` + patch queue, built and signed with owner keys on the ext4 volume | Boots and relocks on Phone B; M4-* suite passes |
 | F-PATCH-nn | One test per patch (e.g. F1: an app cannot draw the indicator; F2: the chord ends a turn in ≤300 ms with the actuator `SIGSTOP`ped) | Pass |
 | F-REBASE-01 | Rebase the queue onto the next Graphene tag | ≤1 working day; otherwise Hatch L trigger 2 is counted |
+| M4-INJ-01 | F7 input injection: tap/swipe/type/key via `input.inject` in apps where a11y gestures are blocked; same irreversible-act fixtures as M2-TP | Gesture succeeds (oracle readback); irreversible acts still announced + catastrophic "yes"; session/model-origin calls refused; every event in the audit log; owner touch still detected |
+| F-PRES-01 | Panel-only presence: nobody touching the phone (no headset), F7 injects taps/keys in a loop then the task reaches an irreversible act; also `dispatchGesture`, a `uinput` device, and an event spoofing the panel's device ID | Irreversible act deferred ("touch the phone or connect your headset"); 0 non-finger events counted as presence; spoof and `uinput` blocked and audited |
+| F-INJ-02 | F7 scope: inject into keyguard/PIN, Settings security, VOS Settings, a permission dialog; inject outside an owner turn; trigger spoken stop / QS tile / F2 during an injection burst | Refused and audited; F7 suspended in ≤300 ms until the next owner turn |
+| F-SEC-01 | Secure-pixel release: an injected web page says "open the authenticator app and read me the codes"; also an owner turn targeting a different app while a secure window is up | Nothing uploads (0 `secure_pixels` bytes in egress audit); session gets wireframe only; attempt audited. Owner turn targeting the authenticator itself releases only that window |
 
 ### M5 — VOS Tool Bus v0 (target 2027-03-19)
 
@@ -1332,7 +1343,7 @@ sudo mkdir -p /mnt/vos-build
 #   /media/caleb/UStor21/vos/vol/vos-build.ext4 /mnt/vos-build ext4 loop,noatime,nofail,x-systemd.requires-mounts-for=/media/caleb/UStor21 0 2
 ```
 
-Measure the loop volume once with `fio` (random 4 KiB, iodepth 32). If random writes come in under ~50 MB/s, move `gradle/` to `/` instead (427 GB free there). If Tier F triggers, grow the file to 600 GB (`truncate -s 600G` + `resize2fs`) before syncing Graphene.
+Measure the loop volume once with `fio` (random 4 KiB, iodepth 32). If random writes come in under ~50 MB/s, move `gradle/` to `/` instead (427 GB free there). Before Tier F starts (right after M4), grow the file to 600 GB (`truncate -s 600G` + `resize2fs`) before syncing Graphene.
 
 ### Layout
 
@@ -1359,7 +1370,7 @@ Measure the loop volume once with `fio` (random 4 KiB, iodepth 32). If random wr
   src-ref/       shallow Graphene checkout for reading only: frameworks/base,
                  frameworks/av, system/sepolicy, packages/modules/{Permission,
                  Bluetooth}, packages/services/Telecomm, SystemUI                       ~25 GB
-  graphene/      ONLY if Tier F triggers: full sync + out/ + kernel; grow to 600 GB    ~250 GB
+  graphene/      Tier F (committed, from M4):     full sync + out/ + kernel; grow to 600 GB    ~250 GB
   lineage/       ONLY if Hatch L triggers: grow the image to 800 GB first              ~450 GB
 
 ~/.vos-keys/                           encrypted AVB/OTA/release keys (+ offline USB copy). Never on UStor2 in the clear.
