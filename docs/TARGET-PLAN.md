@@ -160,7 +160,7 @@ Who this is for, in order of impact:
 | Google's Pixel factory image as the base | It ships Play services and Google apps as privileged system components, and it has none of Graphene's hardening (§4.2). |
 | Maintaining a broad OS fork | One person cannot maintain one. Tier F is capped at 5 named patches, each tied to a Shell Contract row (§4.6). |
 | Root (Magisk/KernelSU), `su`, or a shell-UID helper as the source of privilege | The agent reads attacker-controlled text. Root puts uid 0 within reach of prompt injection. This rules out "rooted Graphene" builds too. |
-| A platform-signed actuator, or any `signature`-only permission (`INJECT_EVENTS`, `READ_FRAME_BUFFER`, `CAPTURE_SECURE_VIDEO_OUTPUT`) | Accessibility and `takeScreenshot` cover input and screen. A platform signature next to an injectable agent is root by another name. This holds on Tier F too, where we will hold the platform key. |
+| A platform-signed actuator, or the `signature`-only screen permissions (`READ_FRAME_BUFFER`, `CAPTURE_SECURE_VIDEO_OUTPUT`) | A platform signature next to an injectable agent is root by another name. This holds on Tier F too, where we will hold the platform key. **`INJECT_EVENTS` is no longer in this list (2026-10-14):** it is allowed for the actuator only, through Tier F patch F7, without platform-signing the actuator (§3.6 row 5). |
 | ~~Bypassing `FLAG_SECURE`~~ (removed 2026-10-14) | No longer a non-goal. Caleb: secure screens (banking etc.) are screens like any other; the agent may capture and see them (§3.5.1 secure capture, Tier F patch F5). |
 | ADB, a VPS, or any server in the runtime tool path | Every hop off the phone adds latency, a credential, and attack surface. ADB is for development only. |
 | Unlocking a locked phone by voice alone | Voice is not identity. It would need a keyguard patch (Tier F). See §9 Q2. |
@@ -650,7 +650,7 @@ The agent crew needs a named set of **hands** — tools that run only inside `co
 | Tool id | What it does | Primary role | Notes |
 |---|---|---|---|
 | `screen.capture` | Screenshot (downscaled) + optional a11y tree/marks | Operator | Captures `FLAG_SECURE` windows (F5) like any screen; feed for `control_detect` / Vision |
-| `ui.gesture` | Tap / long-press / swipe / pinch-zoom / scroll via `dispatchGesture` | Operator | Live-map pan/zoom uses this. Scroll/pan take content intent only (`scroll(toward=end\|start)`, `scroll(toward=next\|prev, axis=h)`, `pan(reveal=n\|s\|e\|w)`); raw up/down rejected; actuator maps to swipe vectors (RTL/reverse-layout aware) and verifies displacement sign (§3.5.1) |
+| `ui.gesture` | Tap / long-press / swipe / pinch-zoom / scroll via `dispatchGesture`, or real `InputManager` touch/key events (`input.inject`, F7) when accessibility gestures are blocked or too slow | Operator | Live-map pan/zoom uses this. Scroll/pan take content intent only (`scroll(toward=end\|start)`, `scroll(toward=next\|prev, axis=h)`, `pan(reveal=n\|s\|e\|w)`); raw up/down rejected; actuator maps to swipe vectors (RTL/reverse-layout aware) and verifies displacement sign (§3.5.1) |
 | `ui.type` | `ACTION_SET_TEXT` / paste into focused field | Operator | |
 | `ui.global` | Home, back, recents, notifications, QS, lock, split | Operator | Shell Contract row 2 |
 | `ui.control_detect` | On-device proposals `{coords, type, label?, conf}` | Operator | v0 = a11y-tree adapter; detector for blind regions later (§3.2.1); escalate on fail |
@@ -690,7 +690,7 @@ The agent crew needs a named set of **hands** — tools that run only inside `co
 | 2 | Navigate: home, back, recents, notification shade, Quick Settings, power menu, lock, screenshot, split screen | `AccessibilityService.performGlobalAction` | Same | — | Must |
 | 3 | Launch any app or activity from the background | Bound `VoiceInteractionService`/`AccessibilityService` exemption from background-activity-start limits **[S-26]** | Same | — | Must |
 | 4 | Read the screen, including `FLAG_SECURE` windows | Node tree + `takeScreenshot`; secure windows black, so tree wireframe for them | Same (no secure pixels without a patch) | **F5:** secure-layer capture for the actuator UID's `takeScreenshot` (framework/SurfaceFlinger), no `READ_FRAME_BUFFER` | Must |
-| 5 | Input: tap, swipe, type, scroll | `dispatchGesture`, `ACTION_SET_TEXT` | Same | Never: no `INJECT_EVENTS` | Must |
+| 5 | Input: tap, swipe, type, scroll, key events | `dispatchGesture`, `ACTION_SET_TEXT` | Same | **F7:** `INJECT_EVENTS` for the actuator UID only (real touch + key events via `InputManager.injectInputEvent`); callable only from the actuator's trusted Operator code path, never from the session or model-supplied code; every injection goes through the actuator API with the same class/trusted-path/catastrophic-"yes" gates and audit as `dispatchGesture`; events tagged with a VOS policy flag so owner-touch detection (S-09) still tells them apart | Must (a11y) / Should (true injection) |
 | 6 | Notifications: read, act, reply, dismiss, snooze | NLS `cancelNotification`/`snoozeNotification`, `RemoteInput` | Same | — | Must |
 | 7 | Calls: who, answer, end, place, speaker | Telecom APIs | Same, pre-granted, plus `MODIFY_PHONE_STATE` | — | Must |
 | 8 | Own all audio: focus, routing, loopback, per-app mute/route, intercept/redirect/manage playback & recording | Cooperative transport + volumes (§3.3) | Authoritative AudioPolicy + PlayerProxy (§3.3) | **F6** if Graphene blocks priv-app AudioPolicy inject/capture | Must (P) |
@@ -857,7 +857,7 @@ There is evidence the pipeline works: the third-party rooted-graphene project al
 - (d) M4 field data shows F1 or F2 is needed: the overlay chip can be imitated by an app in M4-SHELL-13, or a stop takes more than 500 ms while the actuator is wedged.
 - (e) App-assistant duplex Must rows 18–19 fail on Tier P after S-27–S-31: then F6 (AudioPolicy / concurrent-capture allowlist) before Hatch L.
 
-**The patch queue** (`fork/patches/`, budget ≤5 by default; F6 may take a sixth slot only to save Must rows 18–19):
+**The patch queue** (`fork/patches/`, budget ≤5 by default; F6 may take a sixth slot only to save Must rows 18–19; **F7 (input injection) exceeds the original budget by Caleb's choice, 2026-10-14**):
 
 | Patch | Contract row | Touches | Status |
 |---|---|---|---|
@@ -867,6 +867,7 @@ There is evidence the pipeline works: the third-party rooted-graphene project al
 | F4 permission/toggle API for the actuator | 15 | `PermissionController`, Graphene's toggles | Only if Q15 = yes |
 | F5 secure-layer capture | 4 | WindowManager/SurfaceFlinger: the actuator UID's accessibility `takeScreenshot` includes `FLAG_SECURE` layers; nothing else gains access; every capture audited | Caleb 2026-10-14: secure screens are captured like any other |
 | F6 AudioPolicy duplex allowlist | 8, 19 | `frameworks/av` audiopolicy / concurrent-capture policy so product VIS may UID-inject and capture | Only if S-27/S-28/S-31 fail on unmodified Graphene |
+| F7 actuator input injection | 5 | `frameworks/base` permission allowlist: grant `signature`-only `INJECT_EVENTS` to the `com.vos.actuator` UID only (no platform signature on the actuator); `InputManagerService` tags its events with a VOS policy flag; injection refused while the session holds the turn without an actuator-classified act | Caleb 2026-10-14: true touch/key injection, scoped to actuator trusted code |
 
 **Rules:**
 - Each patch has a named test (`F-PATCH-nn`) and a rebase check that runs against every new Graphene tag.
@@ -1067,6 +1068,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | S-07 | Actuator-held mic: a `microphone` foreground service starts from a summon (assist gesture, MFB, QS tile) on stock GrapheneOS, Pixel stock Android 14–16, and Samsung; concurrent capture while another app records | Mic opens ≤150 ms after a summon from the background | Session-UI activity as the foreground anchor | M0 decision |
 | S-08 | PCM over a `ParcelFileDescriptor` pipe, actuator → session, adds ≤10 ms. `AcousticEchoCanceler` in `MODE_IN_COMMUNICATION` on the Pixel 7 speaker. | Measured | Larger buffers; software AEC (WebRTC AEC3) | M0 decision |
 | S-09 | Accessibility observed touch (`setObservedMotionEventSources(SOURCE_TOUCHSCREEN)`, a flagged API) is available on panther and separates real touches from `dispatchGesture` | Real finger detected ≤100 ms; injected gestures not reported | `TYPE_ACCESSIBILITY_OVERLAY` + `FLAG_WATCH_OUTSIDE_TOUCH`; then window-change heuristics | M3 |
+| S-35 | F7 on a Tier F build: actuator-only `INJECT_EVENTS`; real touch/key events reach apps that ignore or block accessibility gestures; session/other UIDs get `SecurityException`; VOS-flagged events still distinguishable from owner touch (S-09) | Injection works in ≥3 apps where `dispatchGesture` fails; 0 calls succeed from non-actuator UIDs | Stay on `dispatchGesture` | M4 |
 | S-10 | `takeScreenshot` rate limit and `FLAG_SECURE` behavior; prototype F5 secure-layer capture on a Tier F build | ≥1 capture/s; secure windows detectable; with F5, secure layers present in the actuator's capture | Throttle the loop; wireframe fallback for secure regions | M3 |
 | S-11 | The accessibility shortcut (both volume keys, 3 s) bound to the actuator turns it off | `ENABLED_ACCESSIBILITY_SERVICES` readback | QS tile and power press only; F2 candidate | M1 |
 | S-12 | A priv-app `TrustAgentService` can extend unlock on Graphene while presence holds (and, as expected, cannot unlock); Graphene has not disabled the trust-agent framework | Stays unlocked; relocks on headset disconnect | Normal timeout | M4 |
@@ -1237,6 +1239,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M4-WAKE-02 | Music/nav playing: wake-word with AEC **on** (default) vs **off** (Settings); S-34 fixture | AEC on: false-accept ≤ half of AEC off; speaking wake word still opens `owner_turn`; toggle audited; clean-speech port or alternate backend noted in trial log |
 | M1-CFG-01 | Representative Settings keys exist for wake-word after unlock, wake-stream AEC, and optional long-press fallback (P16 / decision 19); defaults match decisions 17–18 | Readback matches; changing a key writes an audit line; security invariants have no off switch |
 | M4-BFU-01 | Reboot (and Graphene auto-reboot) → summon before the first unlock | Stop, time, and alarms work; everything else says "unlock once" |
+| M4-INJ-01 | F7 input injection: tap/swipe/type/key via `input.inject` in apps where a11y gestures are blocked; same irreversible-act fixtures as M2-TP | Gesture succeeds (oracle readback); irreversible acts still announced + catastrophic "yes"; session/model-origin calls refused; every event in the audit log; owner touch still detected |
 | M4-F-DECIDE | Tier F go/no-go from the M4-SHELL results and §9 Q2/Q15 | Recorded in `docs/DECISIONS.md` |
 | M4-EXIT | Phone B used as the daily phone for 14 days with no fallback | Then back up Phone A (Seedvault + per-app exports, §7), unlock (wipe), flash, restore |
 
