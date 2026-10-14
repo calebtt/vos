@@ -26,7 +26,7 @@
 4. **GrapheneOS is the machine layer, and VOS is the session layer on top of it.**
    - **Tier P (default):** Graphene's official OTA for the target device (`panther` first, `akita` also supported) plus the VOS product overlay, re-signed with the owner's AVB key by avbroot (rootless), with the bootloader relocked. Graphene's code is unmodified and nothing is built from source.
    - **Google Play:** absent by default. Graphene's sandboxed Play stays an optional, unprivileged app that the owner may install. VOS never depends on it.
-   - **Tier F:** a source soft-fork of Graphene with ≤5 named patches (F6 reserved for AudioPolicy duplex if spikes fail). It is built only when the agent shell or audio duplex needs it.
+   - **Tier F:** a source soft-fork of Graphene with named patches, no fixed count (each one small, self-contained and rebased per Graphene tag). It is built only when the agent shell or audio duplex needs it.
    - **Hatch L (LineageOS, microG off):** used only if Graphene fights the agent shell, by the measured triggers in §4.7.
    - **Rejected:** Pixel factory stock, AOSP, and root (§4).
 5. **The voice agent is the OS session.** The **Shell Contract** (§3.6) lists every shell action a person can take and the mechanism the agent uses for it on each tier. Graphene compatibility (its official OTA channel, its key attestation, upstream support) is given up on purpose wherever it would block a Must row.
@@ -252,7 +252,7 @@ Each principle has a test. A principle without a test does not count.
 │ toggles, Storage/Contact Scopes, verified boot (relocked), USB-C port        │
 │ control, duress PIN, auto-reboot, Vanadium, Speech Services TTS,             │
 │ sandboxed Play (optional, absent by default)                                 │
-│ Tier F only: ≤5 named VOS patches (§4.6)                                     │
+│ Tier F only: named VOS patches, no cap (§4.6)                                │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -768,7 +768,7 @@ The owner talks to **one** agent. Behind it is a small, fixed crew of roles. Eac
 | Rooted Graphene (Magisk/KernelSU via avbroot) | Yes | Graphene's, minus what root breaks | Yes, via root | Yes | Root modules | Fast | Low | **Reject.** Root puts uid 0 next to a prompt-injected agent (non-goal). |
 | GrapheneOS, official, unmodified | Yes | **Best available** | No. Its official images accept no third-party priv-app. | Graphene's key, not the owner's | None | Fastest | Zero | **Tier S only.** This is Phone A today. |
 | **GrapheneOS official OTA + VOS session overlay, re-signed (avbroot, rootless)** | **Yes.** Sandboxed Play is optional and unprivileged. | **Graphene's, unmodified** | **Yes.** Product priv-app + allowlist XML **[S-01, S-03]** | **Yes.** Owner AVB key in `avb_custom_key`, then relock. | Escalate to Tier F | Graphene's release + ~30 min repack | ~10 GB a month, no source tree | **Choose (Tier P).** |
-| **GrapheneOS source soft fork** | Yes | Graphene's, unmodified apart from named patches | Yes | Yes. Graphene's build docs cover owner release keys. | **Yes, ≤5 patches** (F6 duplex allowlist may use the fifth slot or expand to 6 if F1–F4 already taken — documented at trigger time) | Rebase per Graphene tag | ~250 GB tree + `out/`, 32 GB RAM, 2–4 h builds | **Tier F, only by trigger** (§4.6). |
+| **GrapheneOS source soft fork** | Yes | Graphene's, unmodified apart from named patches | Yes | Yes. Graphene's build docs cover owner release keys. | **Yes, named patches, no cap** (each kept small and self-contained) | Rebase per Graphene tag | ~250 GB tree + `out/`, 32 GB RAM, 2–4 h builds | **Tier F, only by trigger** (§4.6). |
 | LineageOS (+ microG optional) | Yes (vanilla), or microG as a privileged spoofing stub | AOSP baseline | Yes | Not officially supported; possible with an own-key `user` build **[hatch spike]** | Easy, and a friendly community | Days to weeks | ~450 GB, monthly merges | **Hatch L** (§4.7). |
 | CalyxOS | Yes; microG optional | AOSP baseline + some | Yes (source build) | Yes, relocks on Pixels | Source build | Monthly per its news posts. Its OTAs resumed automatic delivery only with 7.2.2.0 (Aug 2026). | Like Lineage | **Reference only.** Re-evaluated against Lineage if Hatch L triggers. |
 
@@ -857,7 +857,7 @@ There is evidence the pipeline works: the third-party rooted-graphene project al
 - (d) M4 field data shows F1 or F2 is needed: the overlay chip can be imitated by an app in M4-SHELL-13, or a stop takes more than 500 ms while the actuator is wedged.
 - (e) App-assistant duplex Must rows 18–19 fail on Tier P after S-27–S-31: then F6 (AudioPolicy / concurrent-capture allowlist) before Hatch L.
 
-**The patch queue** (`fork/patches/`, budget ≤5 by default; F6 may take a sixth slot only to save Must rows 18–19; **F7 (input injection) exceeds the original budget by Caleb's choice, 2026-10-14**):
+**The patch queue** (`fork/patches/`, no patch-count cap (Caleb, 2026-10-14); each patch must stay small, self-contained, named, and rebased per Graphene tag):
 
 | Patch | Contract row | Touches | Status |
 |---|---|---|---|
