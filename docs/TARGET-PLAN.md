@@ -26,7 +26,7 @@
 4. **GrapheneOS is the machine layer, and VOS is the session layer on top of it.**
    - **Tier P (default):** Graphene's official OTA for the target device (`panther` first, `akita` also supported) plus the VOS product overlay, re-signed with the owner's AVB key by avbroot (rootless), with the bootloader relocked. Graphene's code is unmodified and nothing is built from source.
    - **Google Play:** absent by default. Graphene's sandboxed Play stays an optional, unprivileged app that the owner may install. VOS never depends on it.
-   - **Tier F:** a source soft-fork of Graphene with named patches, no fixed count (each one small, self-contained and rebased per Graphene tag). It is built only when the agent shell or audio duplex needs it.
+   - **Tier F:** a source soft-fork of Graphene with named patches, no fixed count (each one small, self-contained and rebased per Graphene tag). **Committed (Caleb, 2026-10-14):** VOS ships on Tier F; F5 (secure-screen capture) and F7 (input injection) are wanted and have no Tier P path.
    - **Hatch L (LineageOS, microG off):** used only if Graphene fights the agent shell, by the measured triggers in §4.7.
    - **Rejected:** Pixel factory stock, AOSP, and root (§4).
 5. **The voice agent is the OS session.** The **Shell Contract** (§3.6) lists every shell action a person can take and the mechanism the agent uses for it on each tier. Graphene compatibility (its official OTA channel, its key attestation, upstream support) is given up on purpose wherever it would block a Must row.
@@ -65,7 +65,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 |---|---|
 | Pixel factory OTA is wrong; turn off Google Play and Google services | Base is GrapheneOS with Play absent by default. Pixel stock is rejected (§4.2). P15 and M4-GOOG-01 test it. |
 | Keep what Graphene built that is good | The Tier P machine layer is Graphene's code, unmodified. §4.5 lists what is kept and what is given up. |
-| Don't let Graphene compatibility constraints block AI control of the shell; fork or soft-fork as needed | Owner keys and a privileged overlay (Tier P). A soft fork (Tier F) when a Shell Contract row needs a framework, SystemUI, or keyguard change. Hatch L with measured triggers (§4.6–4.7). |
+| Don't let Graphene compatibility constraints block AI control of the shell; fork or soft-fork as needed | Owner keys and a privileged overlay (Tier P). A soft fork (Tier F) is committed (2026-10-14) for framework, SystemUI, and keyguard changes. Hatch L with measured triggers (§4.6–4.7). |
 | The voice agent is the OS session | Shell Contract (§3.6), summon from anywhere, behavior on the lock screen and after reboot. |
 | Discard the old naming everywhere | Names table above, plus the CI check. |
 | Keep the good architecture | UID split, actuator-owned audio, trusted path, tool bus, capability ladder, oracle-over-confession, no keys in the actuator, a separate dev phone (Pixel 7), and the data-disk layout are all kept (§3, §5, §7). |
@@ -682,7 +682,7 @@ The agent crew needs a named set of **hands** — tools that run only inside `co
 
 ### 3.6 The agent as the OS session: the Shell Contract
 
-"The voice agent is the OS session" means the agent can do whatever a person can do with the shell, and for each action we name the mechanism on each tier. The contract is a list of rows. A **Must** row that fails on Tier P is a trigger for Tier F (§4.6). Each row has a test, `M4-SHELL-nn`.
+"The voice agent is the OS session" means the agent can do whatever a person can do with the shell, and for each action we name the mechanism on each tier. The contract is a list of rows. Tier F is committed (§4.6); a **Must** row that fails on Tier P adds a patch to its queue. Each row has a test, `M4-SHELL-nn`.
 
 | # | Shell action | Tier S | Tier P (VOS Image) | Tier F patch (only if needed) | Level |
 |---|---|---|---|---|---|
@@ -768,7 +768,7 @@ The owner talks to **one** agent. Behind it is a small, fixed crew of roles. Eac
 | Rooted Graphene (Magisk/KernelSU via avbroot) | Yes | Graphene's, minus what root breaks | Yes, via root | Yes | Root modules | Fast | Low | **Reject.** Root puts uid 0 next to a prompt-injected agent (non-goal). |
 | GrapheneOS, official, unmodified | Yes | **Best available** | No. Its official images accept no third-party priv-app. | Graphene's key, not the owner's | None | Fastest | Zero | **Tier S only.** This is Phone A today. |
 | **GrapheneOS official OTA + VOS session overlay, re-signed (avbroot, rootless)** | **Yes.** Sandboxed Play is optional and unprivileged. | **Graphene's, unmodified** | **Yes.** Product priv-app + allowlist XML **[S-01, S-03]** | **Yes.** Owner AVB key in `avb_custom_key`, then relock. | Escalate to Tier F | Graphene's release + ~30 min repack | ~10 GB a month, no source tree | **Choose (Tier P).** |
-| **GrapheneOS source soft fork** | Yes | Graphene's, unmodified apart from named patches | Yes | Yes. Graphene's build docs cover owner release keys. | **Yes, named patches, no cap** (each kept small and self-contained) | Rebase per Graphene tag | ~250 GB tree + `out/`, 32 GB RAM, 2–4 h builds | **Tier F, only by trigger** (§4.6). |
+| **GrapheneOS source soft fork** | Yes | Graphene's, unmodified apart from named patches | Yes | Yes. Graphene's build docs cover owner release keys. | **Yes, named patches, no cap** (each kept small and self-contained) | Rebase per Graphene tag | ~250 GB tree + `out/`, 32 GB RAM, 2–4 h builds | **Tier F, committed** (§4.6). |
 | LineageOS (+ microG optional) | Yes (vanilla), or microG as a privileged spoofing stub | AOSP baseline | Yes | Not officially supported; possible with an own-key `user` build **[hatch spike]** | Easy, and a friendly community | Days to weeks | ~450 GB, monthly merges | **Hatch L** (§4.7). |
 | CalyxOS | Yes; microG optional | AOSP baseline + some | Yes (source build) | Yes, relocks on Pixels | Source build | Monthly per its news posts. Its OTAs resumed automatic delivery only with 7.2.2.0 (Aug 2026). | Like Lineage | **Reference only.** Re-evaluated against Lineage if Hatch L triggers. |
 
@@ -850,7 +850,7 @@ There is evidence the pipeline works: the third-party rooted-graphene project al
 
 ### 4.6 Tier F: the VOS Fork (source soft fork of GrapheneOS)
 
-**Triggered when any one of these happens:**
+**Committed (Caleb, 2026-10-14): "It's OK to fork."** Tier F is the shipping build, started right after M4 (Tier P remains the first dev build and the fallback). F5 and F7 are in the queue unconditionally. The conditions below no longer decide *whether* to fork; they decide which *additional* patches join the queue:
 - (a) S-01/S-03 fail, so Graphene's OTA cannot take a product overlay. In that case Tier F *becomes* the Tier P build path, with zero patches: Graphene source, plus `vendor/vos` product makefiles, signed with the owner's keys by Graphene's documented release flow.
 - (b) A **Must** Shell Contract row fails on Tier P.
 - (c) Caleb answers §9 Q2 or Q15 "yes" (F3, F4).
@@ -1240,10 +1240,10 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M1-CFG-01 | Representative Settings keys exist for wake-word after unlock, wake-stream AEC, and optional long-press fallback (P16 / decision 19); defaults match decisions 17–18 | Readback matches; changing a key writes an audit line; security invariants have no off switch |
 | M4-BFU-01 | Reboot (and Graphene auto-reboot) → summon before the first unlock | Stop, time, and alarms work; everything else says "unlock once" |
 | M4-INJ-01 | F7 input injection: tap/swipe/type/key via `input.inject` in apps where a11y gestures are blocked; same irreversible-act fixtures as M2-TP | Gesture succeeds (oracle readback); irreversible acts still announced + catastrophic "yes"; session/model-origin calls refused; every event in the audit log; owner touch still detected |
-| M4-F-DECIDE | Tier F go/no-go from the M4-SHELL results and §9 Q2/Q15 | Recorded in `docs/DECISIONS.md` |
+| M4-F-DECIDE | Tier F patch set (F5 + F7 fixed; others from the M4-SHELL results and §9 Q2/Q15) | Recorded in `docs/DECISIONS.md` |
 | M4-EXIT | Phone B used as the daily phone for 14 days with no fallback | Then back up Phone A (Seedvault + per-app exports, §7), unlock (wipe), flash, restore |
 
-**Tier F milestone (only if M4-F-DECIDE says go; about 3 weeks, before or in parallel with M5):**
+**Tier F milestone (committed; starts right after M4, about 3 weeks, before or in parallel with M5):**
 
 | ID | Acceptance test | Pass |
 |---|---|---|
@@ -1416,7 +1416,7 @@ Each question has a default. The default holds unless you change it.
 13. **Wake word + AEC.** Default is **unlock → wake-word listening** (hands-free after unlock); long-press is optional fallback; **playback AEC on the wake listen stream default on** when a reference exists (decision 18), owner-toggleable (decision 19 / P16). Confirm the custom-trained word / license path (the old bundled model was CC-BY-NC-SA). Always-on while locked stays rejected. OK to treat [`calebtt/clean-speech`](https://github.com/calebtt/clean-speech) as the primary AEC candidate (Android port TBD)? *Default: unlock-gated wake word on; AEC on when available; long-press optional; clean-speech as candidate.*
 14. **Local models.** The workstation holds Qwen3.8/GLM weights on data-disk. Use one as a private vision fallback? That puts a home server back in the path, against the non-goal. *Default: no; offline eval only.*
 15. **Agent control of permissions.** May the agent change other apps' permissions and Graphene's Network and Sensors toggles? Through the Settings UI with a catastrophic "yes" it is possible on every tier. A direct API (Tier F patch F4) is faster but gives an injected agent a permission lever. *Default: UI rung only, with a catastrophic "yes".*
-16. **Tier F timing.** Build the soft fork only when a Must row fails or M4 data asks for F1/F2/F6, or start it right after M4 regardless? *Default: only by trigger.*
+16. **Tier F timing.** Build the soft fork only when a Must row fails or M4 data asks for F1/F2/F6, or start it right after M4 regardless? **Answered (Caleb, 2026-10-14): start right after M4 regardless.**
 17. **Maps Gemini reference.** For the S-32 amazing demo, install sandboxed Play + Google Maps + Gemini on Phone B only (not a VOS dependency)? *Default: yes on Phone B for the demo; Phone A stays Play-absent unless you change Q11.*
 18. **Default assistant role.** Keep VOS as `ROLE_ASSISTANT` even when exercising Maps' in-app Gemini (duplex Path A), rather than yielding the role to Google? *Default: keep VOS; never yield.*
 19. **Model picker defaults.** Which alternates go in the M1 registry for `chat_voice` (xAI default) and is the *Balanced* profile the default? *Default: xAI realtime as primary, one alternate vendor only if you name it; Balanced; caps per Q5.*
