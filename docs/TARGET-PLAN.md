@@ -99,7 +99,8 @@ Every earlier product, package, permission, interface, and path name is retired.
 | (2026-10-15) Mask both (keyboard masking and notification stripping) | IME region masked and notification shade/heads-up contents stripped on **every** cloud image upload, no task exceptions (the old "unless the task is about notifications" exception is removed; notification tasks use `notif.read`, not pixels); security invariant, not an owner toggle (P16); §3.5.1 redact step, §3.5.2 privacy, §5.8 screenshots, M3-PRIV-01, M3-VERIFY-02 (6ffa47c). Only open question left: F5 vs F7 priority |
 | (2026-10-15) Only treat captures with protected content as sensitive | Frame-buffer captures are `secure_pixels` only when they contain a `FLAG_SECURE`/protected layer; ordinary frames captured via `READ_FRAME_BUFFER` are normal `pixels` (IME-masked, notification-stripped, audited) (§3.5.1, §5.8, §7 F5 row; 49b31f8) |
 | (2026-10-15) F7 first, then F5 | Tier F build/land order: F7 (actuator `INJECT_EVENTS`) first, then F5 (secure-layer capture + `READ_FRAME_BUFFER`); §4.6 queue + cost, M4-F-DECIDE, Tier F milestone schedule (this commit). Last open design question resolved; **no open design questions remain** (§9 defaults still apply where Caleb has not answered) |
-| (2026-10-15) Most testing on the Pixel 7 tethered to the desktop over USB with USB debugging on; only occasional in-the-wild use until VOS nears final | §7 Devices: Phone B + caleb-Z790 adb harness is the primary test setup; fixtures/logs pulled to the desktop; adb conveniences never leak into product behavior; F-F5-ISO-01/F-F7-ISO-01 adb cases exercisable and must still fail; real-world-only items get scheduled in-the-wild sessions. M4-EXIT and §9 Q1 flagged (daily-phone soak/switch near final, not at M4); Q4/Q12 notes (this commit) |
+| (2026-10-15) Most testing on the Pixel 7 tethered to the desktop over USB with USB debugging on; only occasional in-the-wild use until VOS nears final | §7 Devices: Phone B + caleb-Z790 adb harness is the primary test setup; fixtures/logs pulled to the desktop; adb conveniences never leak into product behavior; F-F5-ISO-01/F-F7-ISO-01 adb cases exercisable and must still fail; real-world-only items get scheduled in-the-wild sessions. M4-EXIT and §9 Q1 flagged (daily-phone soak/switch near final, not at M4); Q4/Q12 notes (5c3a4b3) |
+| (2026-10-15) Switch the daily phone near final, not at M4 | §9 Q1 answered; M4-EXIT = tethered M4 suite + scheduled in-the-wild sessions; 14-day daily-phone soak and Phone A move happen near final (§6.1, M4, problems table, Devices; this commit) |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
 
@@ -111,7 +112,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 | Nobody owned the audio | The actuator's AudioPlane is the only owner; intercept/redirect/manage + app-assistant duplex (§3.3). |
 | No app↔OS interop | VTB v0 (§3.4) plus the capability ladder (§3.5). |
 | Fork scope had no limit | Tier P has zero patches. Tier F is a named queue with no count cap; each patch is small, self-contained, tied to a Shell Contract row, tested (F-PATCH-nn), and rebased per Graphene tag; rebase cost feeds Hatch L trigger 2 (§4.6–4.7). |
-| One phone; flashing risked the daily driver | Phone B (Pixel 7 `panther` main flash/dev rig) takes every flash. Phone A (Pixel 8a `akita` path, or another Graphene daily) migrates only after a 14-day soak (M4-EXIT; flagged 2026-10-15 to move near final, §9 Q1). Both device trees stay supported. |
+| One phone; flashing risked the daily driver | Phone B (Pixel 7 `panther` main flash/dev rig) takes every flash. Phone A (Pixel 8a `akita` path, or another Graphene daily) migrates only after a 14-day daily-phone soak near final (Caleb, 2026-10-15; §9 Q1). Both device trees stay supported. |
 | Work was not in git | M0-01, day 1. |
 | xAI key and VPS token compiled into the old APK | Rotated on Day 0 (§8). |
 | The model decides what is irreversible; silence means proceed | Actuator class table, trusted path, presence, and defer (§5.5). |
@@ -919,7 +920,7 @@ The same two APKs run on any Android 14+ phone after a one-time setup:
 - runtime permissions;
 - optionally `adb shell pm grant com.vos.actuator android.permission.WRITE_SECURE_SETTINGS` for power users. It is a `development` permission, and it lets the actuator re-enable its own services.
 
-**Caleb's daily phone (Phone A) already runs official GrapheneOS, so it runs Tier S unchanged from M1** until it moves to the VOS Image (at M4-EXIT as written; flagged 2026-10-15 to move near final, §9 Q1).
+**Caleb's daily phone (Phone A) already runs official GrapheneOS, so it runs Tier S unchanged from M1** until it moves to the VOS Image near final (Caleb, 2026-10-15; §9 Q1).
 
 ---
 
@@ -1229,7 +1230,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 - Shell Contract on Tier P, including Must rows 18–19 (in-app assistant + duplex).
 - S-27–S-33 spike reports; S-32 amazing demo required for M4-EXIT.
 - Tier F patch-set decision (F7 then F5, fixed; F6 if duplex blocked).
-- Migrate Phone A after a 14-day soak.
+- Phone A migration is **not** part of M4: it follows a 14-day daily-phone soak near final (Caleb, 2026-10-15; §9 Q1).
 
 | ID | Acceptance test | Pass |
 |---|---|---|
@@ -1257,7 +1258,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M1-CFG-01 | Representative Settings keys exist for wake-word after unlock, wake-stream AEC, and optional long-press fallback (P16 / decision 19); defaults match decisions 17–18 | Readback matches; changing a key writes an audit line; security invariants have no off switch |
 | M4-BFU-01 | Reboot (and Graphene auto-reboot) → summon before the first unlock | Stop, time, and alarms work; everything else says "unlock once" |
 | M4-F-DECIDE | Tier F patch set (F7 then F5, fixed order; others from the M4-SHELL results and §9 Q2/Q15) | Recorded in `docs/DECISIONS.md` |
-| M4-EXIT | Phone B used as the daily phone for 14 days with no fallback. **Flagged (2026-10-15):** Phone B is now mostly tethered with only occasional in-the-wild use until near final, so this 14-day daily soak likely moves to the near-final stage; until Caleb confirms, M4 exits on the tethered M4 suite plus scheduled in-the-wild sessions, and the soak + Phone A migration wait (§9 Q1) | Then back up Phone A (Seedvault + per-app exports, §7), unlock (wipe), flash, restore |
+| M4-EXIT | Tethered M4 suite passes on Phone B (USB/adb harness, §7 primary test setup) plus the scheduled in-the-wild sessions for M4's real-world-only items (incl. the S-32 demo). The 14-day daily-phone soak and the Phone A move happen near final, not at M4 (Caleb, 2026-10-15; §9 Q1) | Near final: Phone B as daily phone 14 days with no fallback, then back up Phone A (Seedvault + per-app exports, §7), unlock (wipe), flash, restore |
 
 **Tier F milestone (committed; starts right after M4, about 3 weeks to a zero-patch boot plus an estimated 1–2 weeks each for F7 then F5, in that order, before or in parallel with M5):**
 
@@ -1390,7 +1391,7 @@ Budget: about 250 GB used in normal operation, about 500 GB with Tier F, or abou
 
 | Device | Role | Rule |
 |---|---|---|
-| Phone A: Pixel 8a (`akita`) path (or current Graphene daily) | Daily phone. Runs official GrapheneOS today, and Tier S on it from M1. Moves to the VOS Image only after M4-EXIT (flagged 2026-10-15: near final, §9 Q1). **First-class Tier P target** — same image recipe as panther, separate `firmware/akita/` tree. | Never the first device for any flash. Back it up (Seedvault + per-app exports) before M4; the key change wipes it. Confirm device-specific spikes on `akita` after panther smoke. |
+| Phone A: Pixel 8a (`akita`) path (or current Graphene daily) | Daily phone. Runs official GrapheneOS today, and Tier S on it from M1. Moves to the VOS Image only near final, after the 14-day daily-phone soak (Caleb, 2026-10-15; §9 Q1). **First-class Tier P target** — same image recipe as panther, separate `firmware/akita/` tree. | Never the first device for any flash. Back it up (Seedvault + per-app exports) before M4; the key change wipes it. Confirm device-specific spikes on `akita` after panther smoke. |
 | **Phone B: Pixel 7 (`panther`)** (already owned) — **main flash/dev rig** | Dev. **Primary test setup (Caleb, 2026-10-15): tethered to caleb-Z790 over USB with USB debugging on**; occasional in-the-wild use only until VOS nears final. Default for all spikes, every flash, the debug build, and CI smoke. Runs official Graphene for M1-NOGOOG-01 and S-25, then the VOS Image. | Must be the Google Store/unlocked variant (not Verizon): `fastboot flashing get_unlock_ability` returns 1. OEM unlocking stays on. Shorter support window than akita (~2027 [verify]). |
 | **Phone C: mainstream non-Pixel** (e.g. Samsung Galaxy A-series, Android 15+, ~$200) | Tier S reach from M1 | Portability bugs are found early, not in M6 |
 | Headsets | Current classic BT + one LE Audio reference (from M4) | Route type logged on every turn |
@@ -1429,7 +1430,7 @@ Not in the first two weeks: the vision loop, VTB code, trusted-path code (only i
 
 Each question has a default. The default holds unless you change it.
 
-1. **Daily phone base.** Near final (previously: at M4-EXIT), Phone A moves from official GrapheneOS to the VOS Image. That means the same Graphene code with VOS added; your AVB key instead of Graphene's; updates from your own builds (≤72 h behind Graphene); and a wipe-and-restore once, because the key changes. OK? *Default: yes, after S-25 shows which apps are affected, and only when VOS nears final (after the daily-use soak), not at M4-EXIT. Changed 2026-10-15 because Caleb tests mostly tethered with only occasional in-the-wild use until then; confirm.*
+1. **Daily phone base.** Near final (not at M4-EXIT), Phone A moves from official GrapheneOS to the VOS Image. That means the same Graphene code with VOS added; your AVB key instead of Graphene's; updates from your own builds (≤72 h behind Graphene); and a wipe-and-restore once, because the key changes. **Answered (Caleb, 2026-10-15): switch the daily phone near final, not at M4** — after S-25 shows which apps are affected and after the 14-day daily-phone soak.
 2. **Voice-only unlock.** Do you accept "never unlock a locked phone by voice; keep it unlocked while you're present; show visual results at your next unlock"? Saying no triggers Tier F patch F3 (a keyguard patch), which we recommend against because voice is not identity. *Default: accept.*
 3. **Catastrophic "yes".** For pay, reset, account, security settings, and bulk delete, is a spoken "yes" acceptable, given the no-dialog principle? *Default: yes, for those classes only.*
 4. **No presence.** When you're not present, should irreversible acts defer, or proceed after the announcement on the phone speaker? *Default: defer.* (2026-10-15 note: presence/away is exercised in scheduled in-the-wild sessions, not on the tethered rig; USB/adb never counts as presence.)
