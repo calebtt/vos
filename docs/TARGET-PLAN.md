@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Date | 2026-10-15 (IME masking + notification stripping unconditional on every cloud image upload; `READ_FRAME_BUFFER` allowed for the actuator UID only, folded into F5; review fixes: F5/F7 isolation tests F-F5-ISO-01/F-F7-ISO-01; secure pixels never to VTB peers or other agents; M4-SHELL-nn covers rows 20–23. Earlier, 10-14: Tier F committed after M4, no patch cap; F5 secure-layer capture + secure-pixel release policy; F7 actuator-only INJECT_EVENTS + panel-only presence; screen power/brightness; on-device agent timers. Earlier, 10-12: wake-word AEC configurable; OS enhancements configurable; unlock→wake-word; long-press optional; app-agent typed→duplex→vision; M3-SPOT; M3-MAP GPS spoof; unprompted pan/zoom; on-device tools + scratchpad; live-map look-around; model choice open; audio cache; Maps duplex; vision-first UI; dual-device panther/akita) |
+| Date | 2026-10-15 (Tier F order F7 then F5; no open design questions; IME masking + notification stripping unconditional on every cloud image upload; `READ_FRAME_BUFFER` allowed for the actuator UID only, folded into F5; review fixes: F5/F7 isolation tests F-F5-ISO-01/F-F7-ISO-01; secure pixels never to VTB peers or other agents; M4-SHELL-nn covers rows 20–23. Earlier, 10-14: Tier F committed after M4, no patch cap; F5 secure-layer capture + secure-pixel release policy; F7 actuator-only INJECT_EVENTS + panel-only presence; screen power/brightness; on-device agent timers. Earlier, 10-12: wake-word AEC configurable; OS enhancements configurable; unlock→wake-word; long-press optional; app-agent typed→duplex→vision; M3-SPOT; M3-MAP GPS spoof; unprompted pan/zoom; on-device tools + scratchpad; live-map look-around; model choice open; audio cache; Maps duplex; vision-first UI; dual-device panther/akita) |
 | Owner | Caleb |
 | Name | **VOS**. Packages `com.vos.session` and `com.vos.actuator` (`com.vos.sandbox` at M7). Tool bus: **VOS Tool Bus (VTB)**. |
 | Replaces | The earlier target plan in `argoos/TARGET-PLAN.md` and every name in it. Its architecture is reused. Its platform choice (Google's Pixel factory OTA) is reversed. Nothing is carried forward for compatibility. |
@@ -96,8 +96,9 @@ Every earlier product, package, permission, interface, and path name is retired.
 | (2026-10-14) An on-device timer should be available to the agent | Shell Contract row 23, `timer.*` tools, S-37, M2-TIMER-01 (this commit) |
 | (2026-10-15) Commit the research notes and finish the open review fixes | Research `.md` notes committed (8c73c69); F-F5-ISO-01 / F-F7-ISO-01 isolation tests; secure pixels never sent to VTB peers or other agents (`screen.capture`, §3.5.2, §5.8); M4-SHELL-nn covers rows 20–23; Tier F test issues #61–#65; #55/#56 stale M4 refs fixed (2946095). Open questions then: `READ_FRAME_BUFFER` (answered below), keyboard masking / notification stripping, F5 vs F7 priority |
 | (2026-10-15) Allow frame buffer permission | `READ_FRAME_BUFFER` removed from the non-goals; granted to the `com.vos.actuator` UID only through Tier F patch F5 (per-UID allowlist, no platform signature); frame-buffer captures follow the secure-pixel release policy (§5.8), are audited, never go to VTB peers or other agents; F-F5-ISO-01 extended; §3.6 row 4, §3.6 privileged APIs, §7 F5 row (63ba470). Still open then: keyboard masking / notification stripping, F5 vs F7 priority |
-| (2026-10-15) Mask both (keyboard masking and notification stripping) | IME region masked and notification shade/heads-up contents stripped on **every** cloud image upload, no task exceptions (the old "unless the task is about notifications" exception is removed; notification tasks use `notif.read`, not pixels); security invariant, not an owner toggle (P16); §3.5.1 redact step, §3.5.2 privacy, §5.8 screenshots, M3-PRIV-01, M3-VERIFY-02 (this commit). Only open question left: F5 vs F7 priority |
-| (2026-10-15) Only treat captures with protected content as sensitive | Frame-buffer captures are `secure_pixels` only when they contain a `FLAG_SECURE`/protected layer; ordinary frames captured via `READ_FRAME_BUFFER` are normal `pixels` (IME-masked, notification-stripped, audited) (§3.5.1, §5.8, §7 F5 row; this commit) |
+| (2026-10-15) Mask both (keyboard masking and notification stripping) | IME region masked and notification shade/heads-up contents stripped on **every** cloud image upload, no task exceptions (the old "unless the task is about notifications" exception is removed; notification tasks use `notif.read`, not pixels); security invariant, not an owner toggle (P16); §3.5.1 redact step, §3.5.2 privacy, §5.8 screenshots, M3-PRIV-01, M3-VERIFY-02 (6ffa47c). Only open question left: F5 vs F7 priority |
+| (2026-10-15) Only treat captures with protected content as sensitive | Frame-buffer captures are `secure_pixels` only when they contain a `FLAG_SECURE`/protected layer; ordinary frames captured via `READ_FRAME_BUFFER` are normal `pixels` (IME-masked, notification-stripped, audited) (§3.5.1, §5.8, §7 F5 row; 49b31f8) |
+| (2026-10-15) F7 first, then F5 | Tier F build/land order: F7 (actuator `INJECT_EVENTS`) first, then F5 (secure-layer capture + `READ_FRAME_BUFFER`); §4.6 queue + cost, M4-F-DECIDE, Tier F milestone schedule (this commit). Last open design question resolved; **no open design questions remain** (§9 defaults still apply where Caleb has not answered) |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
 
@@ -861,14 +862,14 @@ There is evidence the pipeline works: the third-party rooted-graphene project al
 
 ### 4.6 Tier F: the VOS Fork (source soft fork of GrapheneOS)
 
-**Committed (Caleb, 2026-10-14): "It's OK to fork."** Tier F is the shipping build, started right after M4 (Tier P remains the first dev build and the fallback). F5 and F7 are in the queue unconditionally. The conditions below no longer decide *whether* to fork; they decide which *additional* patches join the queue:
+**Committed (Caleb, 2026-10-14): "It's OK to fork."** Tier F is the shipping build, started right after M4 (Tier P remains the first dev build and the fallback). F5 and F7 are in the queue unconditionally. **Order (Caleb, 2026-10-15): F7 first, then F5**; other patches follow when triggered. The conditions below no longer decide *whether* to fork; they decide which *additional* patches join the queue:
 - (a) S-01/S-03 fail, so Graphene's OTA cannot take a product overlay. In that case Tier F *becomes* the Tier P build path, with zero patches: Graphene source, plus `vendor/vos` product makefiles, signed with the owner's keys by Graphene's documented release flow.
 - (b) A **Must** Shell Contract row fails on Tier P.
 - (c) Caleb answers §9 Q2 or Q15 "yes" (F3, F4).
 - (d) M4 field data shows F1 or F2 is needed: the overlay chip can be imitated by an app in M4-SHELL-13, or a stop takes more than 500 ms while the actuator is wedged.
 - (e) App-assistant duplex Must rows 18–19 fail on Tier P after S-27–S-31: then F6 (AudioPolicy / concurrent-capture allowlist) before Hatch L.
 
-**The patch queue** (`fork/patches/`, no patch-count cap (Caleb, 2026-10-14); each patch must stay small, self-contained, named, and rebased per Graphene tag):
+**The patch queue** (`fork/patches/`, no patch-count cap (Caleb, 2026-10-14); each patch must stay small, self-contained, named, and rebased per Graphene tag). Patches are numbered by name, not build order; **build/land order is F7, then F5** (Caleb, 2026-10-15), then any triggered patches:
 
 | Patch | Contract row | Touches | Status |
 |---|---|---|---|
@@ -886,7 +887,7 @@ There is evidence the pipeline works: the third-party rooted-graphene project al
 - Patches touch AOSP code paths where possible, not Graphene-specific hardening code.
 
 **Cost:**
-- About 3 weeks to first boot of the zero-patch build, plus an estimated 1–2 weeks each for F5 and F7 (including F-PATCH tests and S-10/S-35 reruns); later patches estimated when queued.
+- About 3 weeks to first boot of the zero-patch build, plus an estimated 1–2 weeks each for F7 then F5, in that order (including F-PATCH tests and S-35/S-10 reruns); later patches estimated when queued.
 - About 250 GB on the ext4 volume (§7).
 - 2–4 h for a full build on 20 cores and 125 GB RAM.
 - Per Graphene tag: rebase, build, Phone B soak. That comes to about 1–2 days a month.
@@ -1226,7 +1227,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 - Privileged actuator: focus policy, loopback reference and capture, per-app routing, **AppAssistantDuplex (Paths A→B→C)**, PlayerProxy, silent toggles, Extend Unlock, pre-granted roles and permissions, **unlock→wake-word listening (default)** + optional power/MFB long-press summon fallback, AppFunctions probe.
 - Shell Contract on Tier P, including Must rows 18–19 (in-app assistant + duplex).
 - S-27–S-33 spike reports; S-32 amazing demo required for M4-EXIT.
-- Tier F patch-set decision (F5 + F7 fixed; F6 if duplex blocked).
+- Tier F patch-set decision (F7 then F5, fixed; F6 if duplex blocked).
 - Migrate Phone A after a 14-day soak.
 
 | ID | Acceptance test | Pass |
@@ -1254,10 +1255,10 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M4-WAKE-02 | Music/nav playing: wake-word with AEC **on** (default) vs **off** (Settings); S-34 fixture | AEC on: false-accept ≤ half of AEC off; speaking wake word still opens `owner_turn`; toggle audited; clean-speech port or alternate backend noted in trial log |
 | M1-CFG-01 | Representative Settings keys exist for wake-word after unlock, wake-stream AEC, and optional long-press fallback (P16 / decision 19); defaults match decisions 17–18 | Readback matches; changing a key writes an audit line; security invariants have no off switch |
 | M4-BFU-01 | Reboot (and Graphene auto-reboot) → summon before the first unlock | Stop, time, and alarms work; everything else says "unlock once" |
-| M4-F-DECIDE | Tier F patch set (F5 + F7 fixed; others from the M4-SHELL results and §9 Q2/Q15) | Recorded in `docs/DECISIONS.md` |
+| M4-F-DECIDE | Tier F patch set (F7 then F5, fixed order; others from the M4-SHELL results and §9 Q2/Q15) | Recorded in `docs/DECISIONS.md` |
 | M4-EXIT | Phone B used as the daily phone for 14 days with no fallback | Then back up Phone A (Seedvault + per-app exports, §7), unlock (wipe), flash, restore |
 
-**Tier F milestone (committed; starts right after M4, about 3 weeks to a zero-patch boot plus an estimated 1–2 weeks each for F5 and F7, before or in parallel with M5):**
+**Tier F milestone (committed; starts right after M4, about 3 weeks to a zero-patch boot plus an estimated 1–2 weeks each for F7 then F5, in that order, before or in parallel with M5):**
 
 | ID | Acceptance test | Pass |
 |---|---|---|
