@@ -790,8 +790,8 @@ Logging each task and its data is a normal part of how VOS works, not an eval-on
 The desktop nav-eval harness (`~/vos-nav-evals`, phone tethered to caleb-Z790) writes the same record shape today, filled as far as a harness can (no Conductor plan yet; harness safety blocks recorded as vetoes).
 
 - [docs/nav-evals/TASKS.md](nav-evals/TASKS.md): every task ever defined, with app, goal, success check, cleanup, safety notes, and status (active, skipped by default, dropped with reason).
-- [docs/nav-evals/RESULTS-LOG.md](nav-evals/RESULTS-LOG.md): append-only per-task rows and a per-run summary; task records in `docs/nav-evals/records/<run-id>.jsonl`; failure screenshots and `notes.md` (last actions + raw model output) in `docs/nav-evals/failures/<run-id>/<task>/`.
-- **Rule:** every attempted nav-eval run — including killed, interrupted, and mock runs (marked mock) — is logged there with failure screenshots, using `export_to_vos.py runs/<run-dir>` in the harness, then committed.
+- [docs/nav-evals/RESULTS-LOG.md](nav-evals/RESULTS-LOG.md): append-only per-task rows and a per-run summary; task records (`records/<run-id>.jsonl`) and failure screenshots plus `notes.md` (last actions + raw model output, `failures/<run-id>/<task>/`) live only on the desktop in `~/vos-task-data/`.
+- **Rule:** every attempted nav-eval run — including killed, interrupted, and mock runs (marked mock) — is logged there, with failure screenshots saved locally, using `export_to_vos.py runs/<run-dir>` in the harness, then committed. **Training data stays off GitHub (Caleb, 2026-10-17):** screenshots, raw prompts and model output, and task records are never committed; only the task list and results tables are.
 - **Headline so far (2026-10-17, mode C Set-of-Mark):** Gemma 4 E2B on the phone GPU **2/9**; Grok `grok-4.7` via the xAI API **14/23**, **6/9** on the tasks both ran. Gemma loops on toggles and misses that it is done; Grok's failures were mostly 120 s API timeouts and two checks (`open_display`, `open_wifi_settings`) that are suspected wrong.
 
 ## 4. Platform choice
