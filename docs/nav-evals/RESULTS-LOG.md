@@ -10,6 +10,20 @@ screenshots are on the desktop in `~/vos-task-data/failures/<run-id>/<task>/`. S
 ## Run summaries (newest first)
 
 <!-- SUMMARIES:BEGIN -->
+### 20261017-140603_C_phone
+
+- Started: 2026-10-17 14:06 CT · model: gemma-4-E4B-it.litertlm · backend: phone · mode: C
+- Result: **3/5 strict pass**, 0 not run/skipped · tokens: 36,413 · model p50 61.8 s · step p50 69.9 s
+- Failure screenshots: 7 on the desktop in `~/vos-task-data/failures/20261017-140603_C_phone/`
+- Config: **thinking ON** (`<|think|>` system token + reason-first line + LiteRT-LM ThinkingConfig), max_tokens 1024. spotify_pause is invalid: Android killed E4B for low memory mid-task and the service restarted on E2B.
+
+### 20261017-144209_C_phone
+
+- Started: 2026-10-17 14:42 CT · model: gemma-4-E4B-it.litertlm · backend: phone · mode: C
+- Result: **1/5 strict pass**, 0 not run/skipped · tokens: 33,593 · model p50 29.3 s · step p50 38.4 s
+- Failure screenshots: 16 on the desktop in `~/vos-task-data/failures/20261017-144209_C_phone/`
+- Config: thinking OFF, max_tokens 1024 (budget control for the thinking run). spotify_pause is invalid: E4B was killed for low memory mid-task and the service restarted on E2B.
+
 ### 20261017-132738_C_phone
 
 - Started: 2026-10-17 13:28 CT · model: gemma-4-E4B-it.litertlm · backend: phone · mode: C
@@ -213,3 +227,13 @@ screenshots are on the desktop in `~/vos-task-data/failures/<run-id>/<task>/`. S
 | 2026-10-17 13:31 | 20261017-132738_C_phone | gemma-4-E4B-it.litertlm | phone | C | calc_12_times_7 | fail | 9 | 16.2 | 24.5 | 1 | 11972 | Check failed: stuck. | 4 img, local: `~/vos-task-data/failures/20261017-132738_C_phone/calc_12_times_7/` |
 | 2026-10-17 13:35 | 20261017-132738_C_phone | gemma-4-E4B-it.litertlm | phone | C | about_android | fail | 6 | 15.6 | 40.4 | 0 | 6574 | Check failed: answer '' does not contain release 17. | 4 img, local: `~/vos-task-data/failures/20261017-132738_C_phone/about_android/` |
 | 2026-10-17 13:39 | 20261017-132738_C_phone | gemma-4-E4B-it.litertlm | phone | C | spotify_pause | fail | 6 | 21.2 | 40.3 | 1 | 8696 | Check failed: stuck. | 4 img, local: `~/vos-task-data/failures/20261017-132738_C_phone/spotify_pause/` |
+| 2026-10-17 14:42 | 20261017-144209_C_phone | gemma-4-E4B-it.litertlm | phone | C | dark_on | lucky | 6 | 29.1 | 37.9 | 0 | 7053 | Repeated the same action (tap 'Dark theme') and hit the step cap. Check: night mode on / lucky_end_state. | 4 img, local: `~/vos-task-data/failures/20261017-144209_C_phone/dark_on/` |
+| 2026-10-17 14:46 | 20261017-144209_C_phone | gemma-4-E4B-it.litertlm | phone | C | clock_timer_tab | pass | 2 | 28.7 | 34.7 | 0 | 2308 |  |  |
+| 2026-10-17 14:48 | 20261017-144209_C_phone | gemma-4-E4B-it.litertlm | phone | C | calc_12_times_7 | fail | 9 | 30.7 | 37.7 | 0 | 10609 | Check failed: stuck. | 4 img, local: `~/vos-task-data/failures/20261017-144209_C_phone/calc_12_times_7/` |
+| 2026-10-17 14:53 | 20261017-144209_C_phone | gemma-4-E4B-it.litertlm | phone | C | about_android | fail | 6 | 28.2 | 37.5 | 0 | 6745 | Check failed: answer '' does not contain release 17. | 4 img, local: `~/vos-task-data/failures/20261017-144209_C_phone/about_android/` |
+| 2026-10-17 14:58 | 20261017-144209_C_phone | gemma-4-E4B-it.litertlm | phone | C | spotify_pause | fail | 5 | 34.6 | 54.1 | 0 | 6878 | Run interrupted. | 4 img, local: `~/vos-task-data/failures/20261017-144209_C_phone/spotify_pause/` |
+| 2026-10-17 14:06 | 20261017-140603_C_phone | gemma-4-E4B-it.litertlm | phone | C | dark_on | pass | 3 | 35.1 | 43.4 | 0 | 3939 |  |  |
+| 2026-10-17 14:09 | 20261017-140603_C_phone | gemma-4-E4B-it.litertlm | phone | C | clock_timer_tab | pass | 4 | 84.6 | 92.3 | 0 | 5910 |  |  |
+| 2026-10-17 14:16 | 20261017-140603_C_phone | gemma-4-E4B-it.litertlm | phone | C | calc_12_times_7 | pass | 5 | 61.1 | 69.0 | 0 | 7460 |  |  |
+| 2026-10-17 14:22 | 20261017-140603_C_phone | gemma-4-E4B-it.litertlm | phone | C | about_android | fail | 6 | 63.4 | 72.1 | 0 | 8156 | Check failed: answer '' does not contain release 17. | 3 img, local: `~/vos-task-data/failures/20261017-140603_C_phone/about_android/` |
+| 2026-10-17 14:31 | 20261017-140603_C_phone | gemma-4-E4B-it.litertlm | phone | C | spotify_pause | fail | 5 | 104.7 | 111.4 | 1 | 10948 | Run interrupted. | 4 img, local: `~/vos-task-data/failures/20261017-140603_C_phone/spotify_pause/` |
