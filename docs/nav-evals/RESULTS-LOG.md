@@ -10,6 +10,27 @@ screenshots are in `failures/<run-id>/<task>/`.
 ## Run summaries (newest first)
 
 <!-- SUMMARIES:BEGIN -->
+### 20261017-115627_A_phone
+
+- Started: 2026-10-17 11:57 CT · model: LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) · backend: phone · mode: A
+- Result: **2/3 passed**, 0 not run/skipped · tokens: 14,633 · model p50 39.8 s · step p50 44.2 s
+- Note: LFM mode A, part 2 (3 low-risk navigation tasks, max 6 steps).
+- Failure screenshots: 3 in `failures/20261017-115627_A_phone/`
+
+### 20261017-114231_A_phone
+
+- Started: 2026-10-17 11:43 CT · model: LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) · backend: phone · mode: A
+- Result: **0/3 passed**, 0 not run/skipped · tokens: 14,699 · model p50 42.6 s · step p50 46.4 s
+- Note: LFM mode A (text list), part 1. ~50 s per step. Stopped by the operator during battery_saver_on because the model was toggling unrelated switches (Battery percentage, Battery share) and had entered Modes > Create your own mode; both switches were put back off by hand, no mode was created.
+- Failure screenshots: 9 in `failures/20261017-114231_A_phone/`
+
+### 20261017-111851_C_phone
+
+- Started: 2026-10-17 11:39 CT · model: Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) · backend: phone · mode: C
+- Result: **6/11 passed**, 1 not run/skipped · tokens: 54,708 · model p50 14.5 s · step p50 21.9 s
+- Note: Bigger on-device model, mode C, the 9 tasks Gemma E2B ran plus Spotify. 6/9 on the comparable set. Low-memory killer killed the model when Spotify opened, so the Spotify tasks did not run on E4B (run stopped).
+- Failure screenshots: 14 in `failures/20261017-111851_C_phone/`
+
 ### 20261017-014749_C_xai
 
 - Started: 2026-10-17 01:48 CT · model: grok-4.7 (xAI API) · backend: xai · mode: C
@@ -153,3 +174,21 @@ screenshots are in `failures/<run-id>/<task>/`.
 |  | 20261017-014749_C_xai | grok-4.7 (xAI API) | xai | C | spotify_ai_podcast | skipped | 0 |  |  |  |  | Skipped at Caleb's request (music at 2 AM). |  |
 |  | 20261017-014749_C_xai | grok-4.7 (xAI API) | xai | C | spotify_skip_next | skipped | 0 |  |  |  |  | Skipped at Caleb's request (music at 2 AM). |  |
 |  | 20261017-014749_C_xai | grok-4.7 (xAI API) | xai | C | wifi_off | skipped | 0 |  |  |  |  | Not reached; the run was stopped after the Spotify skip. |  |
+| 2026-10-17 11:39 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | spotify_artist | fail | 0 |  |  | 0 |  | Not a model failure: Android's low-memory killer killed the E4B service (2.3 GB) when Spotify launched. |  |
+| 2026-10-17 11:19 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | about_android | fail | 6 | 12.8 | 18.8 | 0 | 7166 | Wandered (Network, Battery) and never opened About phone; no version reported. | [4 img](failures/20261017-111851_C_phone/about_android/notes.md) |
+| 2026-10-17 11:21 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | battery_level | pass | 2 | 12.5 | 18.1 | 0 | 2310 |  |  |
+| 2026-10-17 11:22 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | battery_saver_on | fail | 12 | 11.3 | 17.1 | 0 | 12588 | Re-tapped the Battery Saver switch 10 times without seeing its state; ended off. | [4 img](failures/20261017-111851_C_phone/battery_saver_on/notes.md) |
+| 2026-10-17 11:25 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | calc_12_times_7 | fail | 6 | 16.8 | 22.7 | 0 | 7276 | Confused element number 12 with the digit 12 and kept tapping the pi key. | [4 img](failures/20261017-111851_C_phone/calc_12_times_7/notes.md) |
+| 2026-10-17 11:28 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | clock_timer_tab | pass | 3 | 14.4 | 20.2 | 0 | 2866 |  |  |
+| 2026-10-17 11:29 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | dark_on | pass | 6 | 17.1 | 23.3 | 0 | 7516 |  |  |
+| 2026-10-17 11:32 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | open_display | pass | 2 | 22.0 | 27.4 | 0 | 2415 |  |  |
+| 2026-10-17 11:33 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | open_wifi_settings | pass | 6 | 25.5 | 30.9 | 0 | 7103 |  |  |
+| 2026-10-17 11:36 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | settings_search_battery_saver | pass | 4 | 30.4 | 36.8 | 0 | 3941 |  |  |
+| 2026-10-17 11:41 | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | spotify_play_get_lucky | fail | 1 | 12.0 | 142.6 | 0 | 1527 | Not run on E4B: stopped after the service restarted with the default E2B model. | [2 img](failures/20261017-111851_C_phone/spotify_play_get_lucky/notes.md) |
+|  | 20261017-111851_C_phone | Gemma 4 E4B (LiteRT-LM gemma-4-E4B-it.litertlm 3.66 GB, phone GPU) | phone | C | spotify_pause | skipped | 0 |  |  |  |  | Stopped after the E4B service was killed by low memory. |  |
+| 2026-10-17 11:43 | 20261017-114231_A_phone | LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) | phone | A | about_android | fail | 6 | 42.2 | 46.1 | 0 | 5577 | Opened Battery instead of About phone, then tapped the Battery share switch 5 times. | [3 img](failures/20261017-114231_A_phone/about_android/notes.md) |
+| 2026-10-17 11:48 | 20261017-114231_A_phone | LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) | phone | A | battery_level | fail | 6 | 43.9 | 47.7 | 0 | 5679 | Never answered; tapped the Battery percentage switch 5 times instead of reporting the 100% it could see. | [3 img](failures/20261017-114231_A_phone/battery_level/notes.md) |
+| 2026-10-17 11:53 | 20261017-114231_A_phone | LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) | phone | A | battery_saver_on | fail | 4 | 40.0 | 43.9 | 0 | 3443 | Stopped by the operator: wandered into Modes > Create your own mode. | [3 img](failures/20261017-114231_A_phone/battery_saver_on/notes.md) |
+| 2026-10-17 11:57 | 20261017-115627_A_phone | LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) | phone | A | clock_timer_tab | pass | 5 | 32.8 | 38.4 | 1 | 4192 |  |  |
+| 2026-10-17 12:00 | 20261017-115627_A_phone | LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) | phone | A | open_display | pass | 6 | 43.0 | 47.0 | 0 | 5722 |  |  |
+| 2026-10-17 12:05 | 20261017-115627_A_phone | LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) | phone | A | open_wifi_settings | fail | 6 | 32.8 | 36.5 | 0 | 4719 | Repeated the same action (tap [3] 'Use Data Saver') and hit the step cap. Check: com.android.settings/com.android.settings.SubSettings fragment DataSaverSummary. | [3 img](failures/20261017-115627_A_phone/open_wifi_settings/notes.md) |
