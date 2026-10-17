@@ -10,6 +10,17 @@ screenshots are on the desktop in `~/vos-task-data/failures/<run-id>/<task>/`. S
 ## Run summaries (newest first)
 
 <!-- SUMMARIES:BEGIN -->
+### 20261017-132738_C_phone
+
+- Started: 2026-10-17 13:28 CT · model: gemma-4-E4B-it.litertlm · backend: phone · mode: C
+- Result: **1/5 strict pass**, 0 not run/skipped · tokens: 36,601 · model p50 15.7 s · step p50 24.5 s
+- Failure screenshots: 16 on the desktop in `~/vos-task-data/failures/20261017-132738_C_phone/`
+
+### 20261017-132241_C_xai
+
+- Started: 2026-10-17 13:22 CT · model: grok-4.7 · backend: xai · mode: C
+- Result: **5/5 strict pass**, 0 not run/skipped · tokens: 39,337 · model p50 2.4 s · step p50 8.2 s
+
 ### 20261017-115627_A_phone
 
 - Started: 2026-10-17 11:57 CT · model: LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) · backend: phone · mode: A
@@ -192,3 +203,13 @@ screenshots are on the desktop in `~/vos-task-data/failures/<run-id>/<task>/`. S
 | 2026-10-17 11:57 | 20261017-115627_A_phone | LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) | phone | A | clock_timer_tab | pass | 5 | 32.8 | 38.4 | 1 | 4192 |  |  |
 | 2026-10-17 12:00 | 20261017-115627_A_phone | LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) | phone | A | open_display | pass | 6 | 43.0 | 47.0 | 0 | 5722 |  |  |
 | 2026-10-17 12:05 | 20261017-115627_A_phone | LFM2.5-2.6B (llama.cpp LFM2.5-2.6B-Q4_0.gguf 1.59 GB, phone CPU, 2 threads on cpus 4-5) | phone | A | open_wifi_settings | fail | 6 | 32.8 | 36.5 | 0 | 4719 | Repeated the same action (tap [3] 'Use Data Saver') and hit the step cap. Check: com.android.settings/com.android.settings.SubSettings fragment DataSaverSummary. | 3 img, local: `~/vos-task-data/failures/20261017-115627_A_phone/open_wifi_settings/` |
+| 2026-10-17 13:22 | 20261017-132241_C_xai | grok-4.7 | xai | C | dark_on | pass | 3 | 2.4 | 7.7 | 0 | 7164 |  |  |
+| 2026-10-17 13:23 | 20261017-132241_C_xai | grok-4.7 | xai | C | clock_timer_tab | pass | 2 | 1.9 | 6.4 | 0 | 4784 |  |  |
+| 2026-10-17 13:24 | 20261017-132241_C_xai | grok-4.7 | xai | C | calc_12_times_7 | pass | 5 | 1.5 | 7.1 | 0 | 12655 |  |  |
+| 2026-10-17 13:25 | 20261017-132241_C_xai | grok-4.7 | xai | C | about_android | pass | 4 | 3.1 | 22.2 | 0 | 9472 |  |  |
+| 2026-10-17 13:26 | 20261017-132241_C_xai | grok-4.7 | xai | C | spotify_pause | pass | 2 | 3.3 | 14.4 | 0 | 5262 |  |  |
+| 2026-10-17 13:28 | 20261017-132738_C_phone | gemma-4-E4B-it.litertlm | phone | C | dark_on | lucky | 6 | 13.0 | 22.0 | 0 | 7051 | Repeated the same action (tap 'Dark theme') and hit the step cap. Check: night mode on / lucky_end_state. | 4 img, local: `~/vos-task-data/failures/20261017-132738_C_phone/dark_on/` |
+| 2026-10-17 13:30 | 20261017-132738_C_phone | gemma-4-E4B-it.litertlm | phone | C | clock_timer_tab | pass | 2 | 12.2 | 17.5 | 0 | 2308 |  |  |
+| 2026-10-17 13:31 | 20261017-132738_C_phone | gemma-4-E4B-it.litertlm | phone | C | calc_12_times_7 | fail | 9 | 16.2 | 24.5 | 1 | 11972 | Check failed: stuck. | 4 img, local: `~/vos-task-data/failures/20261017-132738_C_phone/calc_12_times_7/` |
+| 2026-10-17 13:35 | 20261017-132738_C_phone | gemma-4-E4B-it.litertlm | phone | C | about_android | fail | 6 | 15.6 | 40.4 | 0 | 6574 | Check failed: answer '' does not contain release 17. | 4 img, local: `~/vos-task-data/failures/20261017-132738_C_phone/about_android/` |
+| 2026-10-17 13:39 | 20261017-132738_C_phone | gemma-4-E4B-it.litertlm | phone | C | spotify_pause | fail | 6 | 21.2 | 40.3 | 1 | 8696 | Check failed: stuck. | 4 img, local: `~/vos-task-data/failures/20261017-132738_C_phone/spotify_pause/` |
