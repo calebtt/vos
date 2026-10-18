@@ -1062,9 +1062,9 @@ Changes are uncommitted in the worktree; Caleb commits.
    - `docs/TRACKING.md` still describes the spike register as S-01…S-33 (stale before this branch).
    - The new spikes S-40–S-44 and the 24 new tests have no GitHub issues yet.
    - `README.md` still calls the Pixel 8a the reference device and Tier F "only when needed". Both were stale before this branch.
-3. **Decision 26's title** still reads "On-device step execution…". Under the editing rules its text stays; decision 30 and the §3.2.1 note carry the 1.0 binding.
+3. **Decision 26's title** still reads "On-device step execution…". Under the editing rules its text stays; decision 30 and the §3.2.1 note carry the 1.0 binding. *(Done 2026-10-18, Caleb: "Fix on device leftovers": decision 26 is retitled for the cloud 1.0 binding, and its on-device parts sit in TARGET-PLAN's §6 post-1.0 lane.)*
 4. **Q30 and Q31 need answers before M3 planning.**
-   - M3-UI-05 cannot pass with a cloud `ui_step`.
+   - M3-UI-05 cannot pass with a cloud `ui_step`. *(Q30 answered 2026-10-18: M3-UI-05 is split into M3-UI-05a, report-only in M3, and M3-UI-05b in the post-1.0 lane. Q31 stays open.)*
    - The new M3 work is about 6–7 engineer-weeks [est] even with the stretch line.
 5. **[est] numbers awaiting data:**
    - first-audio and barge-in targets (S-40, M1-VOICE-01);
