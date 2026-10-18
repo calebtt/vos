@@ -9,7 +9,7 @@ Work is tracked with GitHub issues, labels, parent/child (sub-issue) links, and 
 ## Structure
 
 - **Milestones = epic issues.** One parent issue per milestone M0–M7 (`M0 — Ground` … `M7 — Sandboxed skills`). The body holds the goal/scope and the acceptance-test table from `TARGET-PLAN.md` §6. An epic closes when every acceptance test passes.
-- **Spikes = child issues.** One issue per spike in the register (`TARGET-PLAN.md` §6.0, S-01 … S-33, plus S-03b), attached as a sub-issue of the milestone epic that needs it. Each spike body has Claim, Pass criteria, Fallback, and Needed by. A spike closes with a report in `docs/spikes/S-nn.md` saying pass, or which fallback was taken.
+- **Spikes = child issues.** One issue per spike in the register (`TARGET-PLAN.md` §6.0, S-01 … S-44, plus S-03b, S-UI-TREE and S-UI-LAT), attached as a sub-issue of the milestone epic that needs it; post-1.0-lane and backlog spikes (S-39, S-UI-TREE, S-UI-LAT, S-44) attach to a "Post-1.0 lane" or "Backlog" issue instead. **Open item (2026-10-18):** spikes S-40–S-44 and the tests added on 2026-10-17/18 (decisions 30–37, M5-QUERY-01, M3-UI-05a/b, M3-ESC-01b) have no issues yet; open them when the plan branch merges. Each spike body has Claim, Pass criteria, Fallback, and Needed by. A spike closes with a report in `docs/spikes/S-nn.md` saying pass, or which fallback was taken.
 - **Work items** are opened as further child issues of an epic once the spike that gates them has landed.
 - **Day 0** has its own issue (`day-0`) for the pre-M0 cleanup and ordering (§8).
 - Big fork choices get a short ADR entry in `docs/DECISIONS.md`.
