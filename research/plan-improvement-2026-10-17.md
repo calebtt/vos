@@ -1012,7 +1012,7 @@ Applied in six commits on 2026-10-17, each starting "Plan:". All question number
 
 ## 20. Self-review (pass 4, 2026-10-18)
 
-Changes are uncommitted in the worktree; Caleb commits.
+Changes are uncommitted in the worktree; Caleb commits. (2026-10-18 note: they were since committed on the branch, `fd058d3`…`41dce2d`; Grok's critique and Claude's verdicts on it are in research/plan-critique-grok-2026-10-18.md and research/plan-critique-decisions-2026-10-18.md.)
 
 ### Checks run (grep over `docs/TARGET-PLAN.md`)
 
