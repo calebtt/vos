@@ -67,6 +67,13 @@
     - **Open questions:** which milestone build is 1.0 (§9 Q29), and how M3-UI-05's on-device share is read under a cloud executor (§9 Q30).
     - **Why:** on Phone B, Grok passed 5/5 tasks at a 2.4 s model p50, while Gemma 4 E4B passed 1/5 to 3/5 at 15.7–61.8 s per step, with low-memory-killer stops (docs/nav-evals/RESULTS-LOG.md).
     - **Report:** research/plan-improvement-2026-10-17.md (C1).
+31. **Turn timing: VOS answers fast, can be interrupted, and keeps talking while it works (2026-10-17).**
+    - **First audio.** From the end of the owner's speech to the first VOS audio (an answer or an acknowledgement): p50 ≤1.0 s and p95 ≤2.0 s on Wi-Fi, with a stretch target of p50 ≤800 ms. LTE is logged separately. Fast-tool time-to-effect (§1) is unchanged.
+    - **End of turn.** The actuator's VAD marks the end of speech. The vendor's semantic turn detection decides the end of the turn where it exists. False cut-ins are ≤5% on a pause fixture. An owner **patience** setting lengthens the endpoint delay for slow speech, stutter or dysarthria.
+    - **Barge-in.** Owner speech while VOS is talking in CONVERSE stops VOS audio in ≤300 ms p95 and cancels the vendor's response. False barge-ins from VOS's own voice or music are ≤2% on speaker fixtures. ANNOUNCE keeps its own rule: any speech cancels the act.
+    - **Acknowledge, then work.** A slow task (P7) gets a ≤1 s spoken acknowledgement from the audio cache at once, then runs asynchronously while the conversation stays open. Fast requests still work, with one UI task at a time. Progress is reported at milestones or when asked, at most every ~15 s.
+    - **No silent waits.** During waits over 3 s with the screen off or a screen reader active, a soft working earcon plays (P16 setting).
+    - Section §3.2 "Turn timing"; spike S-40; tests M1-VOICE-01, M1-BARGE-01, M3-ASYNC-01; defaults in §9 Q33.
 
 ### Names
 
@@ -185,6 +192,9 @@ Measured bar. Every metric is computed from actuator oracles and the audit log, 
 | App-assistant duplex demo (S-32): tap→record active | ≤400 ms | M4 |
 | App-assistant duplex: stop→mix teardown | ≤300 ms | M4 |
 | Tier S setup, no ADB | ≤10 min | M6 |
+| Voice: end of owner speech → first VOS audio, Wi-Fi (decision 31) | p50 ≤1.0 s, p95 ≤2.0 s (stretch p50 ≤800 ms) | M1 |
+| Barge-in: owner speech onset → VOS audio stopped (decision 31) | ≤300 ms p95; false barge-ins ≤2% | M1 |
+| Injection fixtures that lead to an act outside the task scope (decision 32) | ≤2%; irreversible dispatches **0** | M3 |
 
 Who this is for, in order of impact:
 1. Blind and low-vision users.
@@ -312,6 +322,7 @@ The assistant role belongs to the actuator, not the session, for two reasons:
 
   The mic starts buffering at the summon, so words spoken while the WebSocket connects are kept. This is a lesson from the July field tests, rebuilt here.
 - **Typed turns (decision 21).** The actuator's chat window opens a typed `owner_turn` and calls `IVosSession.onTypedTurn(turnId, text)`; no mic, no `micPfd`. The session sends the text into the **same conversation** as voice (text input item on the `chat_voice` backend, or a `chat_text` backend via ModelRouter with the same context) and returns text, which the actuator shows in the chat window (and as a notification when the window is closed). Voice turns are mirrored into the thread as transcripts. In Quiet, every turn is a typed turn and output is text only (or earbuds-only speech if `quiet_headset_speech` is on).
+- **Turn timing (decision 31).** The actuator timestamps three events on every voice turn: owner speech end (its VAD), end-of-turn (vendor semantic detection or local fallback), and first VOS audio out. All three go into the task record and feed lane L5. While VOS speaks, the actuator keeps VAD running on the AEC'd mic; owner speech onset fades VOS audio out (`USAGE_ASSISTANT`) and sends `IVosSession.onBargeIn(turnId)`, and the session cancels the vendor response. For a slow `do` / `ui_task` / `app.assistant.duplex`, the Conductor plays a cached acknowledgement at once ("on it, about 30 seconds"; P7 estimate) and keeps the turn open. The task runs under its own `task_id`. Its progress and result come back as session events the Conductor speaks between owner utterances, never over them. The owner can ask "how's it going?" at any time.
 - **Fixed realtime tool surface.** It stays small so the voice model's context does not grow with the registry:
   - Fast tools: `media.control`, `media.play`, `volume.set`, `app.open`, `shell.nav`, `time.get`, `timer.set`, `alarm.set`, `device.set`, `notif.read`, `cancel`, `end`.
   - `find_capability(query) → top-K` from the registry, each with a one-line schema.
@@ -366,7 +377,7 @@ RESTORE: mode, communication device, focus, mixes, affinity; resume media iff th
 Each transition writes one audit line: `{state, focus, mode, inDev, outDev, pausedPkg, mixes[], targetUid?, turnId}`.
 
 Policies:
-- **CONVERSE:** `AudioFocusRequest(AUDIOFOCUS_GAIN_TRANSIENT)` + `MODE_IN_COMMUNICATION` (for the platform `AcousticEchoCanceler`) + `AudioManager.setCommunicationDevice()` for BT or wired headsets.
+- **CONVERSE:** `AudioFocusRequest(AUDIOFOCUS_GAIN_TRANSIENT)` + `MODE_IN_COMMUNICATION` (for the platform `AcousticEchoCanceler`) + `AudioManager.setCommunicationDevice()` for BT or wired headsets. **Barge-in (decision 31):** VAD stays armed on the AEC'd mic while VOS speaks; owner speech onset stops VOS playback in ≤300 ms p95. False barge-ins are measured on speaker fixtures (S-08, S-40).
 - **NOTICE** ("on it", "timer done"): `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`, no mode change. This keeps a classic BT headset in A2DP for one sentence instead of dropping it to HFP.
 - **ANNOUNCE:** played as `USAGE_ASSISTANT`, with the local VAD listening on the owner's mic. The house voice comes from:
   - `TextToSpeech` with an offline voice (`Voice.isNetworkConnectionRequired() == false`). On Graphene that is GrapheneOS Speech Services (US English, bundled with the OS since 2026-05 per Graphene's forum); on stock phones it is the platform's offline voice.
@@ -1207,6 +1218,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | S-31 | **Concurrent capture during APP_ASSIST:** actuator keeps offline "stop" mic (or VIS capture) while target UID records; `CONCURRENT_AUDIO_RECORD_BYPASS` / `CAPTURE_AUDIO_OUTPUT` on Tensor (G2 on panther / G3 on akita) / Graphene — smoke on Phone B (`panther`) | Spoken "stop" ends APP_ASSIST in ≤300 ms while Maps is recording | Headset MFB / QS only during APP_ASSIST | M4 |
 | S-32 | **Amazing demo (integration):** LE or classic BT headset; podcast playing; "ask Maps what the traffic is like on the way home"; VOS ducks media, opens duplex (Path A preferred), hears Maps/Gemini reply on headset, restores podcast; sandboxed Play present on Phone B | Median feel-native; budgets in §3.3 met; audit shows APP_ASSIST→RESTORE; 0 uncommanded volume changes | Document failing path; Must row 19 open until fixed | M4 exit |
 | S-33 | `PlayerProxy` pause/setVolume on active non-MediaSession players from a product priv-app | Proxy controls a fixture `AudioTrack` player | MediaSession/NLS only | M4 |
+| S-40 | **Turn timing (decision 31):** the voice vendor's time to first audio, end-of-turn behaviour and response cancel, plus barge-in on the Pixel 7 speaker and a BT headset with platform AEC. Phone B tethered on Wi-Fi in the daytime; one in-the-wild LTE session | Distributions logged per vendor; the decision 31 targets are reachable on Wi-Fi with the cached acknowledgement; false barge-in rate measured | Local acknowledgement earcon plus push-to-talk barge-in (headset MFB); report the gap | M1 |
 
 ### M0 — Ground (2026-10-12 → 2026-10-23)
 
@@ -1231,6 +1243,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 - **Typed chat v0** (decision 21, row 25): actuator chat window + notification direct reply, typed `owner_turn`, `chat_text` routed into the same conversation as voice. Read and reversible tools only until M2's trusted path.
 - **Agent team v0** (§3.7): Conductor + Operator + Announcer roles on the `AgentMsg` envelope inside one session + one actuator; escalation through ModelRouter; cancel fan-out.
 - S-25 inventory started.
+- **Turn timing (decision 31):** VAD timestamps, barge-in on CONVERSE, the cached acknowledgement, and the working earcon (S-40, M1-VOICE-01, M1-BARGE-01).
 
 | ID | Acceptance test | Pass |
 |---|---|---|
@@ -1253,6 +1266,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M1-TEAM-03 | Authority (decision 22): Planner and Vision propose conflicting next steps for one goal; then the Conductor requests an act the actuator must veto (Paused mode, a blocked area, an irreversible class without owner presence); then an Operator role tries to swap in its own plan | Conductor's choice is the one executed (audited with both proposals); each veto reaches the Conductor as a typed `veto {reason, class, actId}`; Conductor replans or tells the owner, 0 retries of the vetoed act around the veto; the actuator's own-plan attempt is rejected; owner override beats both |
 | M1-TEAM-02 | Spoken "stop" mid-task with Planner, Vision, and Operator busy | Every role on the `turnId` gets `cancel`; actuator roles stop in ≤500 ms without waiting on the session |
 | M1-TASKLOG-01 (#73) | Task record (decision 23): run one owner voice task that passes, one typed-chat task that fails its oracle, one task the actuator vetoes, and one inbound VTB/app-agent task; one fixture screen shows the keyboard, a heads-up notification, and a `FLAG_SECURE` window | Each task has exactly one `vos.task_record/0` with request + source, plan/replans, ModelRouter picks, and per-step time, foreground, observation ref, model tokens/latency, proposed action, veto `{reason, class, actId}`, executed action, oracle result; the failed and vetoed tasks keep failure screenshots, the passing one keeps none; stored frames have the IME masked, notification contents stripped, and secure regions as wireframe (0 secure pixels); owner view, export (JSONL + JPEG), and delete work, and delete leaves 0 frames; 0 network flows from the actuator UID |
+| M1-VOICE-01 | Turn timing (decision 31), lane L5: 100 recorded utterances via debug PCM injection, including mid-sentence pauses of 0.5–1.5 s, on Wi-Fi, daytime only (quiet hours); repeat with patience set to long | First-audio p50 ≤1.0 s / p95 ≤2.0 s; false cut-ins ≤5% (fewer with long patience); speech end, end-of-turn and first-audio timestamps in every task record |
+| M1-BARGE-01 | Barge-in: interrupt VOS mid-answer 30 times on the speaker and 30 times on a BT headset; play music and VOS's own voice with no owner speech | VOS audio stops ≤300 ms p95 and the vendor response is cancelled; false barge-ins ≤2%; ANNOUNCE still cancels the act on any speech |
 | M1-FIELD | 3 workdays on Phone A | Daily log in `eval/field/` |
 
 ### M2 — Trusted path and everyday comms (target 2026-12-04)
@@ -1360,6 +1375,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M3-ESC-01 (#77) | Escalation (decision 26): fixtures that make `ui_step` repeat an action, sit on an unchanged screen, oscillate (Pause/Play), emit invalid output, and a plan with no done condition; one fixture screen shows the keyboard and a heads-up notification | The actuator reports each stuck signal at the stated thresholds and never replans itself; the Conductor replans or escalates; each escalation is 1–2 cloud steps, then hands back to `ui_step`; ≤2 escalations per task, then an honest stop; every cloud upload is redacted per §5.8 and audited; signals and escalations are in the task record |
 | M3-SETTLE-01 (#79) | Screen settled (decision 28, §3.10): fixtures are a playing video (YouTube or a local video), a live Maps view, an app with a loading spinner, a WebView page load, and a static Settings page | `screen.settled` within 1 s after the tree goes quiet on the static, video, and map screens; never settled while the spinner or WebView is still loading; no fixed sleeps in the actuator or harness path |
 | M3-AW-01 | AndroidWorld on VOS (decision 29): the ported no-root task set on Phone B, first the System/Settings tasks, then Markor, Files and the browser in the `vos-eval` user; setup and check run with no agent (`--verify-tasks`), then one run per ModelRouter `ui_step` candidate | Every ported task's setup and success check pass verify with no root, using no-root checks, Tier P privileged grants, or the F8 eval data oracle; on Tier S the tasks that need P/F are listed as such; F8 is unreachable outside the `vos-eval` user and from the session (negative test); each run logs pass rate, s/step, and how often the Planner's done check (decision 25) agrees with AndroidWorld's check; device toggles restored after every task |
+| M3-ASYNC-01 | Acknowledge, then work (decision 31): start a UI task, then during it ask "what time is it", "volume 30", "how's it going?", and a second UI task | Acknowledgement ≤1 s; fast requests answered while the task runs; progress answer correct; the second UI task is queued or declined honestly; the task's result is spoken between owner utterances, never over them |
 | M3-GATE-01 | Eval gates (M3 eval rule): run lanes L1, L2, L4 and L6 on the M3 release candidate, then on a deliberately degraded build (one prompt line removed) | Gate result recorded with pass@1, pass^3, Wilson intervals, human-time ratio, and cloud bytes/cost per task; the degraded build is flagged by the gate; quiet-hours and Phone/Dialer/Messaging rules show 0 violations in the harness log |
 | M3-FIELD | 5 workdays on current apps | Fast ≥95%, UI ≥70%, unannounced irreversible acts = 0 |
 
@@ -1604,3 +1620,4 @@ Each question has a default. The default holds unless you change it.
 30. **M3-UI-05 under the 1.0 cloud executor (decision 30).** M3-UI-05 asks for ≥60% of successful cold steps to resolve on the device with no upload. A cloud `ui_step` sends every cold step to the cloud. *Default: keep M3-UI-05 as written (an M3 gate). Recommended: measure it in 1.0 and make it a gate in the next major release, when the on-device binding ships.*
 31. **M3 load.** The 2026-10-17 improvement pass adds about 6–7 engineer-weeks [est] to M3. *Default: keep M3's target date and every existing M3 item, and add the new ones. Recommended: either accept a later M3 target, or move M3-UI-05's on-device share and the detector spikes (S-UI-TREE, S-UI-LAT), which 1.0 does not need, to the next-release lane.*
 32. **Night window for sound-making tasks (M3 eval house rules).** *Default: 22:00–08:00 local time on the desktop that runs the harness.*
+33. **Turn-timing defaults (decision 31).** How long a pause ends the owner's turn, and when the working earcon plays. *Default: standard patience (vendor semantic end-of-turn, local fallback 0.5 s minimum delay), with long and extra-long owner settings; working earcon on when the screen is off or a screen reader is active, off otherwise; tune from M1-VOICE-01 and S-40.*
