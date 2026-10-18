@@ -137,6 +137,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 | (2026-10-18) Caleb on Q34: "Data retention policy is also handled by the API." | **Q34 answered:** VOS does not require or enforce zero data retention; retention follows the API provider's policy and account settings, and a provider ZDR option can be turned on at the account level later with no VOS change. Disclosure (§5.8 vendor retention record, M3-PRIV-02) and decision 33's minimization are unchanged. Updated §5.8 and Q34. Q5 already states that a provider usage query is read and shown report-only (no change). Q34 no longer blocks the merge. **Real-comms tests to the Pixel 8a** (Caleb, 2026-10-18: "Phone calling testing will just have to be delayed until we get it on the pixel 8a."): the `device: phone_c` tag becomes `device: sim_phone`, the phone holding the only SIM, which is the Pixel 8a (`akita`); status `delayed: until_8a` replaces `deferred: no_sim`. The real-comms variants run on the 8a once VOS runs there and gate no milestone before that. Updated the M2 comms device rule, §6 status words, eval house rule 2, the Phone A (8a) and Phone C rows in §7, Q12's note, S-18, M2-TP-01, M2-CALL-01, M2-REPLY-01, M3-UI-01, M3-FILE-01, M3-SHELL-S and M4-SHELL-nn rows 6–7. The Pixel 7 still never does calling tests |
 | (2026-10-18) Pre-merge cleanup, approved by Caleb ("Yes, do it.") | GitHub issues opened for the plan branch's new tests and spikes: #80–#119 (incl. M1-IND-01, M3-AW-01); issue numbers written into the table rows (43a292d). #77 (M3-ESC-01) rewritten for the 1.0 cloud loop; #78 (S-39) moved to the new Post-1.0 (next major) milestone. §3.1 diagram: session gets OwnerMemory lines per turn (031dae0). Branch merged to main (05b0aa2) |
 | (2026-10-18) Caleb: "Track everything." | Every test and spike row now carries an issue number. 106 new issues #120–#225 (older M0–M6 and Tier F tests, Tier F patches F1–F4/F6/F8, S-34, and the post-1.0 spikes S-UI-TREE/S-UI-LAT); existing issues linked where they are that item (S-01–S-38, F5 #53, F7 #54, Tier F tests #56/#61–#65, M3-VERIFY-01 → #50, M0-03 → #9 Day 0, S-36 → #59, S-37 → #57). New issue bodies carry the plan's pass criteria and milestone; SIM-phone variants say delayed: until_8a, and calling never targets the Pixel 7 |
+| (2026-10-18) Caleb: "Yes, be thorough." (linked checklists on the epics) | Every epic issue carries a Tracking checklist (tests, spikes, fork patches, features) and the same items as GitHub sub-issues: M0 #4 (12), M1 #1 (38), M2 #2 (19), M3 #3 (55), M4 #5 (45 plus the Tier F section: epic #52 with 18 items nested under it), M5 #6 (13), M6 #7 (9), M7 #8 (none yet). New epics: #226 for the post-1.0 lane (5) and #227 for the backlog (2). #49 (on-device tool kit draft) got milestone M3. Coverage check: all 216 non-epic issues appear in exactly one checklist |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
 
@@ -1658,6 +1659,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 
 ### Post-1.0 lane: on-device navigation (next major release; not scheduled)
 
+**Epic:** #226 "Post-1.0 (next major): on-device nav epic" (milestone Post-1.0 (next major); checklist and sub-issues for every item in this lane, 2026-10-18).
+
 **Gate:** ships after VOS 1.0 (decision 30; which build is 1.0: §9 Q29). The work runs in the nav-eval harness alongside M3–M6 and gates nothing in them (Caleb, 2026-10-18: "Fix on device leftovers"). 1.0 builds do not load the on-device `ui_step` model, so its ~2.3 GB is not in the 1.0 memory budget on Phone B (2026-10-18).
 
 **Scope:**
@@ -1672,6 +1675,8 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 | M3-ESC-01b (#89) | M3-ESC-01's fixtures on the on-device `ui_step` binding | Each escalation is 1–2 cloud steps, then hands back to the on-device model; ≤2 escalations per task, then an honest stop; where the runtime supports constrained decoding, 0 invalid actions and 0 actions on elements not on screen; the model service stays alive through the run (S-39) |
 
 ### Backlog (not scheduled; 2026-10-18)
+
+**Epic:** #227 "Backlog (not scheduled): epic" (checklist of every issue with no milestone, 2026-10-18).
 
 Items from the 2026-10-17 improvement pass that Grok's critique (research/plan-critique-grok-2026-10-18.md) showed to be research rather than 1.0 work. They gate nothing; a plan change schedules them. Verdicts: research/plan-critique-decisions-2026-10-18.md.
 - **S-44 background agent display** (§6.0). Computer Control is an OEM-preloaded-assistant API and Graphene ships none; IME, accessibility and audio focus on a secondary display are framework work. Foreground stays the only mode (§9 Q38).
