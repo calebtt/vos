@@ -4,7 +4,7 @@
 |---|---|
 | Date | 2026-10-17 |
 | Author | Claude (claude-opus-5-5), planning-only run on branch `plan/claude-advanced-2026-10-17` |
-| Status | **Passes 1–3 complete; pass 4 (self-review) not run, account session limit.** §0–§14: gap analysis (pass 1). §15–§18: ranked proposals, milestone sequencing and open questions (pass 2). §19: what was applied to `docs/TARGET-PLAN.md` (pass 3): decisions 30–37, S-40–S-44, Q29–Q39 and 24 new tests. |
+| Status | **Passes 1–4 complete.** §0–§14: gap analysis (pass 1). §15–§18: ranked proposals, milestone sequencing and open questions (pass 2). §19: what was applied to `docs/TARGET-PLAN.md` (pass 3): decisions 30–37, S-40–S-44, Q29–Q39 and 24 new tests. §20: self-review and consistency fixes (pass 4, 2026-10-18). |
 | Inputs | `docs/TARGET-PLAN.md` (decisions 1–29, §1–§9), `research/*.md`, `docs/nav-evals/TASKS.md` and `RESULTS-LOG.md`, `docs/TRACKING.md`, `docs/AUDIO-DUPLEX-RESEARCH.md`, and the web sources cited inline |
 | Goal (Caleb) | Make VOS the most advanced and usable AI phone OS in existence, while staying buildable by a small team on GrapheneOS / Pixel 7 |
 
@@ -23,7 +23,10 @@ Applied to `docs/TARGET-PLAN.md` on branch `plan/claude-advanced-2026-10-17` (no
 - Eval lanes and regression gates (M3-GATE-01), the house rules written into M3 (night window, no Phone/Dialer/Messaging), a MobileWorld port (M5-MW-01), mobile prompt-injection suites (M3-INJ-02..04).
 - Thermal and power budgets (M3-THERM-01, M4-PWR-01), onboarding (M1-ONBOARD-01), and an "Only on VOS" signature-task list (M4-SIG-01).
 
-Process note: passes 1–3 (research, proposals, apply) ran in Claude Code. Pass 4 (Claude self-review) did not run because the Claude account hit its session limit. The mechanical checks were done by hand instead: new IDs unique, one-screen list complete, Q numbers sequential, no dangling decision, Q or § references. The compaction of decisions 30–37 into one paragraph each, as in decisions 1–29, is still open.
+Process note: passes 1–3 (research, proposals, apply) ran in Claude Code. The first pass-4 attempt stopped at the account session limit, and the mechanical checks were done by hand. Pass 4 then ran in full on 2026-10-18:
+- decisions 30–37 are compacted to one paragraph each;
+- cross-references were re-checked with grep;
+- the consistency fixes are listed in §20.
 
 
 **How to read this.** Each section has three parts: what the best systems do (with a source URL for every claim), what the VOS plan already has (with plan section references), and the gaps. "[secondary]" marks a claim that comes only from press or blog coverage, not from the vendor or the paper. "[unverified]" marks a claim the source itself could not confirm. "[est]" marks my estimate.
@@ -1004,3 +1007,69 @@ Applied in six commits on 2026-10-17, each starting "Plan:". All question number
 - **M3-UI-05.** It stays as written, with Q30.
 - **Q5, Q8, the non-goals, P6.** They keep their wording and defaults, and the new questions point at them.
 - **Standing constraints.** Quiet hours and the Phone/Dialer/Messaging ban are now written into the plan, under the M3 eval rule.
+
+---
+
+## 20. Self-review (pass 4, 2026-10-18)
+
+Changes are uncommitted in the worktree; Caleb commits.
+
+### Checks run (grep over `docs/TARGET-PLAN.md`)
+
+| Check | Result |
+|---|---|
+| Test IDs unique | No duplicates across the 145 test-table rows. |
+| Every referenced test ID is defined | Yes. Every `M?-…-nn` / `F-…-nn` mentioned anywhere has a table row, including all 24 added on this branch. |
+| Spikes | S-40–S-44 are each defined once. Every reference (decisions 31–32, P13, scope bullets, M3-A11Y-01, M4-PWR-01, Q33, Q38) points to the right spike. |
+| Open questions | Q29–Q39 are sequential in §9. Decision text, sections, the change-log row and this report all use the same numbers. |
+| Decisions | 30–37 are all in "Decisions on one screen", and each has its own section: §3.2.1 and the M3 scope (30); §3.2 and §3.3 (31); §3.5.1 and §5.1 A8 (32); §3.5.1 and §5.8 (33); §3.7 (34); §3.7 and §3.8 (35); §3.11 (36); §3.6 row 26, §3.5.2 and §5.8 (37). |
+| Sections | Every § reference resolves: §3.2, §3.5.1, §3.5.2, §3.7, §3.8, §3.10, §3.11, §5.1, §5.5, §5.8. |
+| Issue refs and dates | No new issue refs were added. No milestone dates were changed. |
+| Against `origin/main` | The only lines removed are 8 that were extended in place: the Date row, P13, the `ui_step` bullet, CONVERSE, busy indicators, text announcements, Session HTTP, and Q23. No decision 1–29 text changed apart from pointers, and no standing constraint was weakened. |
+
+### Fixes made in this pass
+
+1. **Decisions 30–37** are rewritten as one paragraph each, matching decisions 1–29. Every rule, number, test ID, spike ID and question number is kept. In decision 30, "15.7–61.8 s per step" now says "model p50 per step", as RESULTS-LOG reports it.
+2. **§3.6 Shell Contract** rows are reordered to run 1–26. Before, they ran 1–8, then 18–26, then 9–17. Row text is unchanged.
+3. **§6.0 spike register**: the S-42 and S-43 rows are swapped into numeric order.
+4. **M1-TASKLOG-01** now also checks the decision 31 voice timestamps. It names the test that checks each other field added to §3.8 on 2026-10-17.
+5. **§1 injection metric row** is reworded to match the M3-INJ-03/04 pass criteria: VOS acts on injected text in ≤2% of fixtures, with 0 irreversible dispatches.
+6. **M3 scope**:
+   - screen-reader coexistence (S-43, M3-A11Y-01) moves out of the security bullet into a new "Accessibility and heat" bullet, alongside M3-THERM-01;
+   - a **stretch** line names four new items that move to M5 first if M3 runs late: M3-ASYNC-01, M3-ASK-01, M3-THERM-01, M3-INJ-04;
+   - Q31's default now names those four;
+   - no item that existed before 2026-10-17 is marked stretch.
+7. **Eval house rule 1 (no sound at night)** now covers any spoken VOS output or earcon and screen-reader speech, on the speaker or a headset. That catches M1-BARGE-01, M1-ONBOARD-01, M3-A11Y-01, M3-TAKEOVER-01 and M5-CAM-01, which all speak.
+8. **"Only on VOS" list (§1)**: the wording is fixed ("tasks", not "rows"). It now says the Maps item needs sandboxed Play on Phone B (Q17).
+9. **Scope pointers** were added where tests had none:
+   - M1: M1-ONBOARD-01.
+   - M4: M4-SIG-01, S-42 / M4-PWR-01, and S-44 with Q38.
+   - M6: M6-REACH-03 and M6-A11Y-02, plus the M4-SIG-01 re-run if M6 is 1.0 (Q29).
+10. **§3.1 process map**: the session box gets an `OwnerMemory` line pointing to §3.11, aligned to the box border.
+11. **Header Date row** records the 2026-10-18 consistency pass.
+
+### Found but left for Caleb
+
+1. **Existing comms tests and the Phone B rule.** Several pre-existing tests send or answer real messages or calls:
+   - M2-TP-01 ("text Alex", an SMS in `Telephony.Sms.Sent`);
+   - M2-TP-03 (the same request, deferred);
+   - M2-CALL-01 (answer an incoming call);
+   - M2-REPLY-01 (a `RemoteInput` reply in a messaging thread);
+   - M3-UI-01's seed "open a Signal chat".
+
+   The plan does not say which device runs them. The standing rule (and the new eval house rule 2) forbids reaching Phone, Dialer or Messaging on Phone B, so they must run on Phone A or C, or against a fixture provider. I did not edit those tests. One line in M2 naming the device would close this.
+2. **Tracking and issues.**
+   - `docs/TRACKING.md` still describes the spike register as S-01…S-33 (stale before this branch).
+   - The new spikes S-40–S-44 and the 24 new tests have no GitHub issues yet.
+   - `README.md` still calls the Pixel 8a the reference device and Tier F "only when needed". Both were stale before this branch.
+3. **Decision 26's title** still reads "On-device step execution…". Under the editing rules its text stays; decision 30 and the §3.2.1 note carry the 1.0 binding.
+4. **Q30 and Q31 need answers before M3 planning.**
+   - M3-UI-05 cannot pass with a cloud `ui_step`.
+   - The new M3 work is about 6–7 engineer-weeks [est] even with the stretch line.
+5. **[est] numbers awaiting data:**
+   - first-audio and barge-in targets (S-40, M1-VOICE-01);
+   - cloud step budgets (M3-LAT-01);
+   - the 25-image budget, the taint threshold (≥8 characters), and the 0.8 thermal-headroom trigger;
+   - the M6-REACH-03 80% target.
+6. **TalkBack on a Play-free Graphene phone** is still [verify] (S-43). If it can't be installed cleanly, P13's screen-reader coexistence work targets whatever reader the owner uses.
+7. **Report-only proposals** stay out of the plan: C15 personal-context index, C16 routines, C17 proactive layer, C20 deictic references, C26 on-device injection screening (reasons in §19). C10 (typed data plane) has a §3.5.2 row but no test yet.
