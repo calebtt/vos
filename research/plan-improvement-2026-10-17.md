@@ -4,7 +4,7 @@
 |---|---|
 | Date | 2026-10-17 |
 | Author | Claude (claude-opus-5-5), planning-only run on branch `plan/claude-advanced-2026-10-17` |
-| Status | **Draft, pass 2 of 5.** §0–§14: gap analysis (pass 1). §15–§18: ranked proposals, milestone sequencing and new open questions (pass 2). `docs/TARGET-PLAN.md` is not edited yet; the "Apply" proposals are the ones planned for the next pass. |
+| Status | **Draft, pass 3 of 5.** §0–§14: gap analysis (pass 1). §15–§18: ranked proposals, milestone sequencing and open questions (pass 2). §19: what was applied to `docs/TARGET-PLAN.md` (pass 3): decisions 30–37, S-40–S-44, Q29–Q39 and 24 new tests. |
 | Inputs | `docs/TARGET-PLAN.md` (decisions 1–29, §1–§9), `research/*.md`, `docs/nav-evals/TASKS.md` and `RESULTS-LOG.md`, `docs/TRACKING.md`, `docs/AUDIO-DUPLEX-RESEARCH.md`, and the web sources cited inline |
 | Goal (Caleb) | Make VOS the most advanced and usable AI phone OS in existence, while staying buildable by a small team on GrapheneOS / Pixel 7 |
 
@@ -480,7 +480,7 @@ Every proposal keeps decisions 1–29 and the standing constraints:
     - never used as training data, and never sent to VTB peers or other agents;
     - IME and notification masking does not apply, because these are not screen frames.
   - The platform camera indicator stays on while capturing. Quiet mode works with text output. Paused refuses.
-  - No recognition of specific people by default (Q35).
+  - No recognition of specific people by default (Q36).
   - Test **M5-CAM-01**:
     - `read` of a printed fixture label in airplane mode;
     - guided framing of a letter;
@@ -491,7 +491,7 @@ Every proposal keeps decisions 1–29 and the standing constraints:
   - Envision Ally walks users through tasks "at your pace" ([Envision](https://letsenvision.com/blog/ally-ai-assistant-sightcity-2025)).
   - Blind users want interactive camera guidance and distrust opaque confidence scores ([Misfitting With AI](https://arxiv.org/abs/2408.06546)).
   - Gemini Live shares the camera in conversation ([9to5Google](https://9to5google.com/2025/04/07/gemini-live-camera-screen-sharing/)).
-- **Cost** M. **Risk** bystander privacy, cloud cost, OCR on curved or glossy labels. **Milestone** M5, with blind-user validation in M6-A11Y-01. **Conflicts**: no decision changes. Decision 23 keeps failure *screenshots* by default, and camera frames are a new class, so the plan should say outright that they are not kept (Q35, default: not kept).
+- **Cost** M. **Risk** bystander privacy, cloud cost, OCR on curved or glossy labels. **Milestone** M5, with blind-user validation in M6-A11Y-01. **Conflicts**: no decision changes. Decision 23 keeps failure *screenshots* by default, and camera frames are a new class, so the plan should say outright that they are not kept (Q36, default: not kept).
 
 #### C15 · Personal-context index — Rank 22 · Report
 - **Problem.** "When does my flight land?" needs search across calendar, files, notifications and messages, and on VOS those providers belong to the actuator (§5.2).
@@ -520,7 +520,7 @@ Every proposal keeps decisions 1–29 and the standing constraints:
 - **Problem.** Every rung-7 task takes over the owner's screen.
 - **Change.** Spike **S-44** on Tier P/F: run a rung-7 task on an actuator-owned virtual display using Computer Control (if S-29 passes) or VirtualDeviceManager (S-30), with a live mini-view in the chat window. Takeover moves the task to the main display.
   - Hard limit: a non-secure virtual display blanks `FLAG_SECURE` windows, and a secure one needs `CAPTURE_SECURE_VIDEO_OUTPUT`, which stays banned (non-goal). Secure flows always run on the main display.
-  - The default stays foreground (Q37).
+  - The default stays foreground (Q38).
 - **Evidence.** Computer Control: "secure background virtual display", ≤6 target apps, hand-over ([docs](https://developer.android.com/ai/computer-control)). Gemini UI automation runs in the background with live view ([Android blog](https://android-developers.googleblog.com/2026/02/the-intelligent-os-making-ai-agents.html)). The secure-display permission is system-only ([DisplayManager](https://developer.android.com/reference/android/hardware/display/DisplayManager)).
 - **Cost** L. **Risk** high: app compatibility, the IME on virtual displays, audio focus, a11y on secondary displays. **Milestone** spike in M4; default decided after 1.0. **Conflicts** none if the default stays foreground; `CAPTURE_SECURE_VIDEO_OUTPUT` stays banned.
 
@@ -549,7 +549,7 @@ Every proposal keeps decisions 1–29 and the standing constraints:
   - Voice-UI tolerance: <2 s acceptable, ~4 s poor ([arXiv 2603.19904](https://arxiv.org/abs/2603.19904)).
   - Semantic turn detectors ([LiveKit](https://docs.livekit.io/agents/build/turns/turn-detector); [Deepgram Flux](https://deepgram.com/learn/introducing-flux-conversational-speech-recognition)).
   - Barge-in in Gemini's Live API ([Google Cloud](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/live-api)); asynchronous function calling in gpt-realtime ([OpenAI](https://openai.com/index/introducing-gpt-realtime/)); Full-Duplex-Bench's four behaviours ([arXiv 2503.04721](https://arxiv.org/abs/2503.04721)).
-- **Cost** M. **Risk**: vendor latency is outside VOS's control (mitigation: ack from the local cache); speakerphone AEC quality (S-08). **Milestone** M1 for items 1–3 and 5; M3 for item 4 during UI tasks. **Conflicts** none. The patience and working-cue defaults go in Q32.
+- **Cost** M. **Risk**: vendor latency is outside VOS's control (mitigation: ack from the local cache); speakerphone AEC quality (S-08). **Milestone** M1 for items 1–3 and 5; M3 for item 4 during UI tasks. **Conflicts** none. The patience and working-cue defaults go in Q33.
 
 #### C5 · Work log, takeover and hand-back, "how I know" — Rank 6 · Apply
 - **Problem.** The indicator (row 13) shows *that* VOS acts, not *what* it is doing. A finger touch aborts a task (M3-UI-03) but cannot hand it back. Results say "done" without saying how VOS knows.
@@ -601,14 +601,14 @@ Every proposal keeps decisions 1–29 and the standing constraints:
      - the spoken guard window and the countdown can be set **longer**, up to 10×, but never shorter;
      - the end-of-turn patience setting from C2 applies.
   4. **Step narration** from C5.
-  5. **Early feedback**: one informal session with a blind tester at M3 if Caleb has a contact (Q36; the default keeps Q8's M5 recruiting).
+  5. **Early feedback**: one informal session with a blind tester at M3 if Caleb has a contact (Q37; the default keeps Q8's M5 recruiting).
   - Tests **M3-A11Y-01**: Core tasks and a trusted-path fixture with TalkBack on, every VOS surface operated by screen reader. **M6-A11Y-02**: task time against the tester's usual method, adding numbers to M6-A11Y-01.
 - **Evidence.**
   - Touch exploration is one shared mode per interaction ([TouchInteractionController](https://developer.android.com/reference/android/accessibilityservice/TouchInteractionController)), and two services sharing explore-by-touch is a known contention point ([BRLTTY list](https://brltty.app/pipermail/brltty/2016-December/014516.html)).
   - TalkBack 16 describes the screen and images with follow-up questions ([Google](https://support.google.com/accessibility/android/answer/16294093)).
   - WCAG 2.2.1 Timing Adjustable: turn off, adjust ≥10×, or extend ([W3C](https://www.w3.org/WAI/WCAG22/Understanding/timing-adjustable.html)).
   - The blind-user agent study found termination and verification failures ([arXiv 2609.00524](https://arxiv.org/abs/2609.00524)).
-- **Cost** S–M. **Risk**: TalkBack availability on a Play-free Graphene phone ([verify]). **Milestone** M3 (spike and test), M6. **Conflicts**: none for the guard (longer is more conservative; trusted-path invariants unchanged). The early tester is Q36.
+- **Cost** S–M. **Risk**: TalkBack availability on a Play-free Graphene phone ([verify]). **Milestone** M3 (spike and test), M6. **Conflicts**: none for the guard (longer is more conservative; trusted-path invariants unchanged). The early tester is Q37.
 
 #### C9 · Clarify at plan time — Rank 16 · Light
 - **Problem.** MobileWorld shows agents fail when the user must be asked. VOS has no policy for when the Conductor should ask.
@@ -619,7 +619,7 @@ Every proposal keeps decisions 1–29 and the standing constraints:
   Otherwise it acts on the likeliest reading and says which ("Playing the newest Everyday AI episode"). Mid-task, missing information ends the task with `NEEDS_USER` carrying the question, and the owner's answer resumes it under the same task record.
   - Test **M3-ASK-01**: asks on ≥90% of underspecified fixtures; asks on ≤5% of clear ones [est].
 - **Evidence.** MobileWorld's agent-user tasks: "current models struggle significantly with user interaction" ([arXiv 2512.19432](https://arxiv.org/abs/2512.19432)). Magentic-UI asked for help in 10% of tasks and accuracy rose from 30.3% to 51.9% ([arXiv 2507.22358](https://arxiv.org/html/2507.22358v1)).
-- **Cost** S. **Risk**: over-asking. **Milestone** M3. **Conflicts**: P6 ("the only interruptions are…"). Plan-time questions come before work, and the mid-task route is the existing honest stop, so P6 is unchanged. Real mid-task questions are Q34, with a default of no.
+- **Cost** S. **Risk**: over-asking. **Milestone** M3. **Conflicts**: P6 ("the only interruptions are…"). Plan-time questions come before work, and the mid-task route is the existing honest stop, so P6 is unchanged. Real mid-task questions are Q35, with a default of no.
 
 #### C23 · Onboarding and discoverability — Rank 18 · Light
 - **Problem.** Owners guess what a voice agent can do. Command lists shown at setup get dismissed. The plan times setup (M6-REACH-02) but not first-session success.
@@ -637,9 +637,9 @@ Every proposal keeps decisions 1–29 and the standing constraints:
 
 #### C24 · Multi-user — Rank 26 · Light (question only)
 - **Problem.** The plan keeps multi-user and secondary profiles as a non-goal until M6. The only secondary user is `vos-eval` (decision 29). A shared family phone, or a second person, is unaddressed.
-- **Change.** No design change now. Q38 asks whether a second human user is wanted before M6; the default is no, which keeps the non-goal. The report notes the M6+ shape: one VOS instance per Android user, each with its own keys, memory and task records, and no cross-user reads. Voice stays not-identity (P11), so a second person talking to an unlocked phone is governed by the existing presence rules (§5.7).
+- **Change.** No design change now. Q39 asks whether a second human user is wanted before M6; the default is no, which keeps the non-goal. The report notes the M6+ shape: one VOS instance per Android user, each with its own keys, memory and task records, and no cross-user reads. Voice stays not-identity (P11), so a second person talking to an unlocked phone is governed by the existing presence rules (§5.7).
 - **Evidence.** The plan's own non-goal and P11.
-- **Cost** S (text). **Conflicts**: the non-goal → Q38.
+- **Cost** S (text). **Conflicts**: the non-goal → Q39.
 
 #### C20 · Deictic references and vague settings — Rank 24 · Report
 - **Change (later).**
@@ -789,10 +789,10 @@ Every proposal keeps decisions 1–29 and the standing constraints:
   - Each egress-allowlist vendor entry records its retention, training use and ZDR status, with the source and date checked.
   - For xAI, log the `x-zero-data-retention` response header in each upload's audit line.
   - Show retention in the Settings destinations list (§5.8) from M3; the full M6-DATA-01 page stays in M6.
-  - Q33 asks whether to require ZDR; the default is no (record and disclose), which keeps Q5's default of xAI.
+  - Q34 asks whether to require ZDR; the default is no (record and disclose), which keeps Q5's default of xAI.
   - Test **M3-PRIV-02**.
 - **Evidence.** xAI: "temporarily stored… for 30 days"; ZDR is enterprise-only; responses carry the header ([xAI docs](https://docs.x.ai/docs/resources/faq-api/security)). Apple and Google offer attested private cloud compute as the bar ([The Register](https://www.theregister.com/2025/11/12/google_touts_private_ai_compute/)).
-- **Cost** S. **Risk** none. **Milestone** M3. **Conflicts** none (Q33's default keeps Q5).
+- **Cost** S. **Risk** none. **Milestone** M3. **Conflicts** none (Q34's default keeps Q5).
 
 #### C26 · On-device injection screening (defense in depth) — Rank 25 · Report
 - **Change (later).** A small classifier in the session flags instruction-like text in observations. Prompt Guard 2 22M is the candidate: DeBERTa-xsmall, English, Llama 4 Community License ([verify] that the license fits Q10). Flagged spans are marked `suspicious` in the quoted data and noted in the task record. It is never the only control, and it never touches the owner's own words.
@@ -806,7 +806,7 @@ Every proposal keeps decisions 1–29 and the standing constraints:
 #### C6 · Eval house rules in the plan — Rank 5 · Apply
 - **Problem.** Two of Caleb's standing constraints live only in the harness (`VOSNAV_ALLOW_SOUND_TASKS`, the app allowlist) or in passing notes (decision 29's "SMS and call tasks are skipped on Phone B"): no sound-making tasks at night, and nothing reaching Phone, Dialer or Messaging on the Pixel 7.
 - **Change.** Add to the M3 eval rule:
-  1. Tasks tagged `sound` (media playback, timers or alarms that ring, TTS on the speaker, voice-latency fixtures) do not run at night (default window 22:00–08:00 local, Q39). The harness refuses them and logs `skipped: quiet_hours`.
+  1. Tasks tagged `sound` (media playback, timers or alarms that ring, TTS on the speaker, voice-latency fixtures) do not run at night (default window 22:00–08:00 local, Q32). The harness refuses them and logs `skipped: quiet_hours`.
   2. On Phone B no test opens or drives Phone, Dialer or Messaging, places a call, or sends an SMS. Emergency calling is never touched. The harness app allowlist enforces this, and imported suites (AndroidWorld, MobileWorld) drop those tasks.
   3. Training data, screenshots, raw model output and task records stay on the desktop and are never committed (already in §3.8.1; restated as an eval rule).
   - The rules apply to every eval lane in C19.
@@ -853,30 +853,30 @@ Score = impact on "most advanced and usable" (1–5) against cost and risk for o
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | C1 | VOS 1.0 release scope (Caleb's rule) | Reliability / sequencing | 5 | S | L | now → M3 | M3-UI-05 → Q30; 1.0 milestone → Q29 | **Apply** |
 | 2 | C3 | Task scope and flow control | Security | 5 | M | M | M2, M3 | none (Q23 list grows by its own rule) | **Apply** |
-| 3 | C2 | Turn timing, end-of-turn, barge-in, acknowledge-then-work | Usability | 5 | M | M | M1, M3 | defaults → Q32 | **Apply** |
+| 3 | C2 | Turn timing, end-of-turn, barge-in, acknowledge-then-work | Usability | 5 | M | M | M1, M3 | defaults → Q33 | **Apply** |
 | 4 | C25 | Cloud context minimization for 1.0 | Privacy | 4 | M | M | M3 | none | **Apply** |
-| 5 | C6 | Eval house rules (quiet hours, no Phone/Dialer/Messaging) | Eval | 3 | S | L | now | window → Q39 | **Apply** |
+| 5 | C6 | Eval house rules (quiet hours, no Phone/Dialer/Messaging) | Eval | 3 | S | L | now | window → Q32 | **Apply** |
 | 6 | C5 | Work log, takeover and hand-back, "how I know" | Usability / trust | 4 | S–M | L | M1, M3 | none | **Apply** |
 | 7 | C7 | Cloud-loop latency, `act_seq`, `zoom`, loading limit | Reliability | 4 | S–M | M | M3 | none | **Apply** |
 | 8 | C4 | Mobile injection suite and window-owner rule | Security | 4 | M | L | M3 | none | **Apply** |
 | 9 | C19 | Eval lanes and regression gates | Eval | 4 | M | L | M3, M5 | none | **Apply** |
 | 10 | C22 | Recovery ladder and undo for UI tasks | Usability | 4 | M | M | M2, M3 | none | **Apply** |
-| 11 | C13 | Accessibility-first details | Accessibility | 4 | S–M | M | M3, M6 | early tester → Q36 | **Apply** |
-| 12 | C8 | Vendor retention disclosure | Privacy | 3 | S | L | M3 | ZDR → Q33 | Light |
+| 11 | C13 | Accessibility-first details | Accessibility | 4 | S–M | M | M3, M6 | early tester → Q37 | **Apply** |
+| 12 | C8 | Vendor retention disclosure | Privacy | 3 | S | L | M3 | ZDR → Q34 | Light |
 | 13 | C21 | Signature task suite | Capability | 3 | S | L | M4, 1.0 | none | Light |
-| 14 | C12 | Camera "look" | Capability / accessibility | 4 | M | M | M5 | frames, person ID → Q35 | **Apply** |
+| 14 | C12 | Camera "look" | Capability / accessibility | 4 | M | M | M5 | frames, person ID → Q36 | **Apply** |
 | 15 | C14 | Owner memory with write rules | Reliability / security | 4 | M | M | M2 | none | **Apply** |
-| 16 | C9 | Clarify at plan time | Reliability | 3 | S | L | M3 | P6 → Q34 | Light |
+| 16 | C9 | Clarify at plan time | Reliability | 3 | S | L | M3 | P6 → Q35 | Light |
 | 17 | C10 | Typed data plane | Capability | 3 | M | L | M5 (M3 if room) | none | Light |
 | 18 | C23 | Onboarding and discoverability | Usability | 3 | S | L | M1, M6 | none | Light |
 | 19 | C11 | Battery and thermal budget | Reliability | 3 | S–M | L | M3, M4 | none | Light |
 | 20 | C16 | Owner routines | Capability | 3 | M | M | M5 | location triggers → later Q | Report |
 | 21 | C17 | Proactive layer | Capability | 3 | M | M | M5+ | none | Report |
 | 22 | C15 | Personal-context index | Capability | 4 | M–L | M | M5+ | none | Report |
-| 23 | C18 | Background agent display | Usability | 5 | L | H | M4 spike | default → Q37 | Light |
+| 23 | C18 | Background agent display | Usability | 5 | L | H | M4 spike | default → Q38 | Light |
 | 24 | C20 | Deictic references and vague settings | Usability | 2 | S | L | M5 | none | Report |
 | 25 | C26 | On-device injection screening | Security | 2 | S–M | M | M5 | none | Report |
-| 26 | C24 | Multi-user | Usability | 2 | S | L | M6+ | non-goal → Q38 | Light |
+| 26 | C24 | Multi-user | Usability | 2 | S | L | M6+ | non-goal → Q39 | Light |
 
 **Why this order.**
 - **C1 comes first** because it decides how much every other proposal matters. A cloud executor in 1.0 makes C25 (what leaves the phone), C7 (round trips) and C8 (vendor retention) central rather than optional.
@@ -919,14 +919,14 @@ None of the proposals changes a numbered decision. Where a proposal touches a pr
 | Q29 | Which milestone build is VOS 1.0? | The M6 exit build (Tier F with F7 and F5, used by other people) | C1 |
 | Q30 | M3-UI-05 (≥60% of cold steps on device) under the 1.0 cloud executor | Keep M3-UI-05 as written. Recommended: measure it in 1.0, gate it in the next release | C1 |
 | Q31 | The M3 load after these additions | Keep M3's date and scope; add the new items. Recommended: a later M3 target, or move named on-device hybrid items to the next-release lane | §17 |
-| Q32 | End-of-turn patience and the audible "working" cue | Standard patience, owner-adjustable; working cue on when the screen is off or a screen reader is active | C2 |
-| Q33 | Require zero data retention from vision and voice vendors? | No. Record and disclose each vendor's retention; keeps Q5's xAI default | C8 |
-| Q34 | May the agent interrupt mid-task with a question? | No. Questions only at plan time; mid-task it stops with `NEEDS_USER` (P6 unchanged) | C9 |
-| Q35 | Camera frames and people | Camera frames are never kept, including for failed tasks; no recognition of specific people | C12 |
-| Q36 | An informal blind-tester session at M3? | Keep Q8: recruit in M5. If Caleb has a contact, one informal session at M3 | C13 |
-| Q37 | Run UI tasks on a background agent display by default when possible? | No. Foreground stays the default; background only after S-44 passes and Caleb opts in | C18 |
-| Q38 | A second human user (secondary profile) before M6? | No. Keeps the multi-user non-goal | C24 |
-| Q39 | The night window for sound-making tasks | 22:00–08:00 local | C6 |
+| Q32 | The night window for sound-making tasks | 22:00–08:00 local | C6 |
+| Q33 | End-of-turn patience and the audible "working" cue | Standard patience, owner-adjustable; working cue on when the screen is off or a screen reader is active | C2 |
+| Q34 | Require zero data retention from vision and voice vendors? | No. Record and disclose each vendor's retention; keeps Q5's xAI default | C8 |
+| Q35 | May the agent interrupt mid-task with a question? | No. Questions only at plan time; mid-task it stops with `NEEDS_USER` (P6 unchanged) | C9 |
+| Q36 | Camera frames and people | Camera frames are never kept, including for failed tasks; no recognition of specific people | C12 |
+| Q37 | An informal blind-tester session at M3? | Keep Q8: recruit in M5. If Caleb has a contact, one informal session at M3 | C13 |
+| Q38 | Run UI tasks on a background agent display by default when possible? | No. Foreground stays the default; background only after S-44 passes and Caleb opts in | C18 |
+| Q39 | A second human user (secondary profile) before M6? | No. Keeps the multi-user non-goal | C24 |
 
 C3's taint threshold (≥8 normalized characters, or any OTP-like code) lives in the decision text as a default, to be tuned from M3-INJ-02 data.
 
@@ -940,3 +940,49 @@ C3's taint threshold (≥8 normalized characters, or any OTP-like code) lives in
 - **P16:** new settings are owner-adjustable, and the trusted-path invariants stay non-disableable.
 - **§5.8's ≤1024 px rule:** C7's zoom is a crop within it.
 - **The `CAPTURE_SECURE_VIDEO_OUTPUT` non-goal:** C18 keeps it banned.
+
+---
+
+## 19. What was applied to `TARGET-PLAN.md` (pass 3)
+
+Applied in six commits on 2026-10-17, each starting "Plan:". All question numbers in this report now match the plan.
+
+**Status key:**
+- **Applied**: written into the plan as decisions, sections and tests.
+- **Applied (light)**: a line, a test, a spike or a question only.
+- **Left as proposal**: not in the plan; the reason is given.
+
+| ID | Status | Where in `TARGET-PLAN.md` |
+|---|---|---|
+| C1 VOS 1.0 release scope | **Applied** | Decision 30; §3.2.1 `ui_step` release note; M3 scope bullet; Q29, Q30, Q31 |
+| C2 Turn timing | **Applied** | Decision 31; §3.2 "Turn timing" bullet (incl. `IVosSession.onBargeIn`); §3.3 CONVERSE barge-in; §1 metric rows; S-40; M1-VOICE-01, M1-BARGE-01, M3-ASYNC-01; Q33; M1 scope bullet |
+| C3 Task scope and flow control | **Applied** | Decision 32; §3.5.1 "Task scope, taint, and the window-owner rule"; §5.1 threat A8; Q23's veto list (+`scope_violation`, `taint_flow`); §1 metric row; M2 and M3 scope bullets; M3-INJ-02 |
+| C25 Cloud context minimization | **Applied** | Decision 33; §3.5.1 "Cloud minimization"; §3.8 field (`text_bytes`); M3-PRIV-03 |
+| C6 Eval house rules | **Applied** | M3 "Eval house rules"; Q32 |
+| C5 Work log, takeover, hand-back | **Applied** | Decision 34; §3.7 bullet; §3.8 fields (`owner_step`, work-log lines); M3-TAKEOVER-01 |
+| C7 Cloud-loop latency | **Applied** | §3.5.1 budget rows and "Cloud-loop rules"; §3.5.2 `ui.act_seq`, `screen.zoom`; §3.10 loading limit; M3-LAT-01, M3-TOOL-03 |
+| C4 Injection suite and window-owner rule | **Applied** | Decision 32 (window-owner rule); §3.5.1; S-41; M3-INJ-03, M3-INJ-04 |
+| C19 Eval lanes and gates | **Applied** | M3 "Eval lanes and gates" (L1–L6, pass^3, Wilson, human-time ratio); M3-GATE-01; M5-MW-01 |
+| C22 Recovery ladder and undo | **Applied** | Decision 35; §3.7 bullet; §3.8 fields (inverse / `no_undo`); M2 scope bullet; M3-UNDO-02 |
+| C13 Accessibility details | **Applied** | P13 text; §5.5 countdown announced and lengthening only; S-43; M3-A11Y-01, M6-A11Y-02; Q37 |
+| C8 Vendor retention | **Applied (light)** | §5.8 "Vendor retention"; M3-PRIV-02; Q34 |
+| C21 Signature suite | **Applied (light)** | §1 "Only on VOS"; M4-SIG-01 |
+| C12 Camera look | **Applied** | Decision 37; Shell Contract row 26; §3.5.2 `camera.look`; §5.8 camera frames; M5 scope; M5-CAM-01; Q36 |
+| C14 Owner memory | **Applied** | Decision 36; new §3.11 OwnerMemory; M2 scope; M2-MEM-01 |
+| C9 Clarify at plan time | **Applied (light)** | §3.7 bullet; M3-ASK-01; Q35 |
+| C10 Typed data plane | **Applied (light)** | §3.5.2 `device.query` / `data.query` row; M5 scope. No test yet (add when M5 work starts) |
+| C23 Onboarding | **Applied (light)** | M1-ONBOARD-01, M6-REACH-03 |
+| C11 Battery and thermal | **Applied (light)** | §3.5.1 cloud-loop rule 7 (thermal); §3.8 thermal field; S-42; M3-THERM-01, M4-PWR-01. The §1 power target is to be set from S-42 data |
+| C18 Background agent display | **Applied (light)** | S-44; Q38 (default foreground) |
+| C24 Multi-user | **Applied (light)** | Q39 (default keeps the non-goal) |
+| C16 Owner routines | Left as proposal | M5+ work. It should follow OwnerMemory (decision 36) and task scope (decision 32) so routines inherit their write and scope rules. Location triggers would need a question against location-default-off |
+| C17 Proactive layer | Left as proposal | M5+. It depends on routines and on summary labelling (the Apple summary lesson); low priority for a small team before 1.0 |
+| C15 Personal-context index | Left as proposal | M–L cost, and a stored history of messages and notifications is a new high-value target. Revisit after OwnerMemory and decision 33 are proven |
+| C20 Deictic references, vague settings | Left as proposal | Low impact per effort; can join the L1 lane as an eval class later |
+| C26 On-device injection screening | Left as proposal | Prompt Guard 2's Llama license must be checked against Q10 (Apache-2.0 publishing); defense in depth only |
+
+**What did not change:**
+- **Decisions 1–29.** The only additions are pointers: decision 26 via §3.2.1, and Q23's own list rule.
+- **M3-UI-05.** It stays as written, with Q30.
+- **Q5, Q8, the non-goals, P6.** They keep their wording and defaults, and the new questions point at them.
+- **Standing constraints.** Quiet hours and the Phone/Dialer/Messaging ban are now written into the plan, under the M3 eval rule.
