@@ -1,12 +1,30 @@
-# VOS plan improvement: gap analysis against the 2025–2026 state of the art (DRAFT)
+# VOS plan improvement: gap analysis against the 2025–2026 state of the art
 
 | Field | Value |
 |---|---|
 | Date | 2026-10-17 |
 | Author | Claude (claude-opus-5-5), planning-only run on branch `plan/claude-advanced-2026-10-17` |
-| Status | **Draft, pass 3 of 5.** §0–§14: gap analysis (pass 1). §15–§18: ranked proposals, milestone sequencing and open questions (pass 2). §19: what was applied to `docs/TARGET-PLAN.md` (pass 3): decisions 30–37, S-40–S-44, Q29–Q39 and 24 new tests. |
+| Status | **Passes 1–3 complete; pass 4 (self-review) not run, account session limit.** §0–§14: gap analysis (pass 1). §15–§18: ranked proposals, milestone sequencing and open questions (pass 2). §19: what was applied to `docs/TARGET-PLAN.md` (pass 3): decisions 30–37, S-40–S-44, Q29–Q39 and 24 new tests. |
 | Inputs | `docs/TARGET-PLAN.md` (decisions 1–29, §1–§9), `research/*.md`, `docs/nav-evals/TASKS.md` and `RESULTS-LOG.md`, `docs/TRACKING.md`, `docs/AUDIO-DUPLEX-RESEARCH.md`, and the web sources cited inline |
 | Goal (Caleb) | Make VOS the most advanced and usable AI phone OS in existence, while staying buildable by a small team on GrapheneOS / Pixel 7 |
+
+## CHANGES (summary)
+
+Applied to `docs/TARGET-PLAN.md` on branch `plan/claude-advanced-2026-10-17` (not merged): **8 decisions (30–37), 24 tests, 5 spikes (S-40–S-44), 11 open questions (Q29–Q39)**, a new §3.11, and a 2026-10-17 change-log row. 21 of 26 proposals applied; 5 left as proposals (§19). No numbered decision was reversed; every new question defaults to the current plan (§18).
+
+- **30:** VOS 1.0 is the cloud-loop release; on-device navigation comes in the next major release.
+- **31:** Turn timing: first audio ≤1.0 s median, barge-in stops VOS within 300 ms, acknowledge-then-work for slow tasks.
+- **32:** Task scope set before untrusted reads, plus taint-flow control (new threat A8, data leaking out through actuation); new veto reasons `scope_violation`, `taint_flow`.
+- **33:** Cloud steps carry the minimum: task-app window only, off-task content masked, per-task image budget, vendor retention recorded.
+- **34:** Work log, live view, owner takeover and hand-back.
+- **35:** Recovery ladder, undo for UI tasks, partial-completion reports.
+- **36:** OwnerMemory (§3.11), written only by owner turns.
+- **37:** Camera "look" for blind and low-vision owners; frames never kept.
+- Eval lanes and regression gates (M3-GATE-01), the house rules written into M3 (night window, no Phone/Dialer/Messaging), a MobileWorld port (M5-MW-01), mobile prompt-injection suites (M3-INJ-02..04).
+- Thermal and power budgets (M3-THERM-01, M4-PWR-01), onboarding (M1-ONBOARD-01), and an "Only on VOS" signature-task list (M4-SIG-01).
+
+Process note: passes 1–3 (research, proposals, apply) ran in Claude Code. Pass 4 (Claude self-review) did not run because the Claude account hit its session limit. The mechanical checks were done by hand instead: new IDs unique, one-screen list complete, Q numbers sequential, no dangling decision, Q or § references. The compaction of decisions 30–37 into one paragraph each, as in decisions 1–29, is still open.
+
 
 **How to read this.** Each section has three parts: what the best systems do (with a source URL for every claim), what the VOS plan already has (with plan section references), and the gaps. "[secondary]" marks a claim that comes only from press or blog coverage, not from the vendor or the paper. "[unverified]" marks a claim the source itself could not confirm. "[est]" marks my estimate.
 
