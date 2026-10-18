@@ -302,7 +302,8 @@ Each principle has a test. A principle without a test does not count.
 │  Player       Media3 MediaSessionService for RSS podcasts/radio (needs net) │
 │  Keys         Keystore-wrapped (StrongBox if present); entered at runtime   │
 │  Egress       OkHttp host allowlist; every request logged                   │
-│  Hints        AppMemory lookups + tip proposals (low trust, §3.9)           │
+│  Hints        AppMemory lookups + tip proposals (low trust, §3.9);          │
+│               OwnerMemory lines per turn from actuator, no copy (§3.11)     │
 │  ModelRouter  thin policy table (role/task_class→model) + audit (§3.2.1)   │
 └─────────────────────────────────────────────────────────────────────────────┘
        Actuator ──Binder, BIND_VTB_PROVIDER──► third-party VTB providers
