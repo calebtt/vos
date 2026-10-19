@@ -26,10 +26,11 @@
             android:exported="true"
             android:permission="com.vos.permission.SESSION" />
 
-        <!-- Hands (§3.1): bound only by the system, so not exported. -->
+        <!-- Hands (§3.1): exported so the system can bind it; only holders of the system-only
+             BIND_* permission (i.e. system_server) can. ci/policy_check.py enforces the guard. -->
         <service
             android:name=".HandsService"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/hands_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
@@ -42,7 +43,7 @@
 
         <service
             android:name=".NotificationsService"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/notifications_label"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
