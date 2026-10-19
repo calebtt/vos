@@ -375,6 +375,10 @@ _DIGEST_RE = re.compile(r"Signer #1 certificate SHA-256 digest: ([0-9a-f]+)")
 def signer_digest(apksigner, apk):
     res = subprocess.run([apksigner, "verify", "--print-certs", str(apk)], capture_output=True, text=True)
     if res.returncode != 0:
+        # Surface why apksigner rejected the APK (CI diagnosis); unsigned APKs also land here.
+        err = (res.stderr or res.stdout).strip().splitlines()
+        if err:
+            print(f"NOTE apksigner ({apksigner}) on {apk}: {err[-1]}", file=sys.stderr)
         return None
     m = _DIGEST_RE.search(res.stdout)
     return m.group(1) if m else None
