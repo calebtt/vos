@@ -369,7 +369,8 @@ def retired_scan_texts(root, files):
 # Signing
 # ---------------------------------------------------------------------------------------------
 
-_DIGEST_RE = re.compile(r"Signer #1 certificate SHA-256 digest: ([0-9a-f]+)")
+# Newer apksigner builds label signers differently (e.g. "Signer (minSdkVersion=…)"), so match any first signer line.
+_DIGEST_RE = re.compile(r"^Signer[^\n]*?certificate SHA-256 digest: ([0-9a-f]+)", re.M)
 
 
 def signer_digest(apksigner, apk):
@@ -381,6 +382,8 @@ def signer_digest(apksigner, apk):
             print(f"NOTE apksigner ({apksigner}) on {apk}: {err[-1]}", file=sys.stderr)
         return None
     m = _DIGEST_RE.search(res.stdout)
+    if not m:
+        print(f"NOTE apksigner ({apksigner}) printed no signer digest for {apk}: {res.stdout.strip()[:300]!r}", file=sys.stderr)
     return m.group(1) if m else None
 
 
