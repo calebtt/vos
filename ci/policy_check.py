@@ -369,8 +369,9 @@ def retired_scan_texts(root, files):
 # Signing
 # ---------------------------------------------------------------------------------------------
 
-# Newer apksigner builds label signers differently (e.g. "Signer (minSdkVersion=…)"), so match any first signer line.
-_DIGEST_RE = re.compile(r"^Signer[^\n]*?certificate SHA-256 digest: ([0-9a-f]+)", re.M)
+# apksigner labels vary by build-tools version ("Signer #1 certificate", build-tools 37: "V2 Signer: certificate"),
+# so match the first line that names a signer.
+_DIGEST_RE = re.compile(r"^[^\n]*Signer[^\n]*?certificate SHA-256 digest: ([0-9a-f]+)", re.M)
 
 
 def signer_digest(apksigner, apk):
