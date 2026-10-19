@@ -1,0 +1,12 @@
+# Retired names (TARGET-PLAN "Names"): the ONLY file allowed to contain them.
+# Matched case-insensitively, as whole tokens (no letter/digit on either side), over code,
+# manifests, resources, build scripts and CI config, and over the built APKs' strings.
+# Sources: the plan's "Replaces" row and §7 archive line name the old projects; the old
+# applicationIds come from those projects' build files (2026-10-18). Add any other old
+# product, package, permission, interface or path name here.
+argoos
+com.argo
+agentd
+voice-agent
+voice_agent
+voiceagent

@@ -1,0 +1,3 @@
+# The actuator never holds these (TARGET-PLAN §5.2, "Never holds").
+android.permission.INTERNET
+android.permission.CALL_AUDIO_INTERCEPTION

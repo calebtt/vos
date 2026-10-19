@@ -1,0 +1,4 @@
+# Every exported component of com.vos.session, with the permission that guards it ("-" = none).
+# kind name permission
+activity com.vos.session.MainActivity -
+service com.vos.session.SessionService com.vos.permission.ACTUATOR
