@@ -1,6 +1,6 @@
 # Day 0 runbook (#9, feeds M0-03 and M0-06)
 
-For Caleb, by hand. **No agent or CI runs any step here.** From TARGET-PLAN §8 (Day 0), §5.4 Keys, §7 Disk and Devices, and issue #9. Tick each box in #9 as you go. Never paste a key or token into a terminal command line, a chat, an issue, or this repo.
+For Caleb, by hand, except steps marked **done by agent** (run 2026-10-18 on Caleb's go-ahead: "just have Claude proceed with what it can"; no flashing, no secrets touched). From TARGET-PLAN §8 (Day 0), §5.4 Keys, §7 Disk and Devices, and issue #9. Tick each box in #9 as you go. Never paste a key or token into a terminal command line, a chat, an issue, or this repo.
 
 ## 1. Rotate the xAI key; prove the old key is dead (M0-03)
 
@@ -42,6 +42,8 @@ The loop-mounted ext4 build volume (§7) can follow on Mon 10-12; it is not part
 
 ## 5. One-time archive of old work, with SHA-256 (§7 Layout)
 
+**Status 2026-10-18: done by agent**, with secrets and build outputs excluded (SHA-256 and exclusion list in `docs/DEVICES.md`). The command below is the original recipe; the run added `--exclude` rules for `.env*`, keystores/keys, `local.properties`, the old `Config.kt`, `build/`, `.gradle/`, APK/AAB and `.venv`.
+
 ```bash
 mkdir -p /media/caleb/data-disk/vos/archive
 tar --zstd -cf /media/caleb/data-disk/vos/archive/2026-10-10-pre-vos.tar.zst -C ~ voice-agent argoos
@@ -49,9 +51,11 @@ sha256sum /media/caleb/data-disk/vos/archive/2026-10-10-pre-vos.tar.zst | tee /m
 chmod a-w /media/caleb/data-disk/vos/archive/2026-10-10-pre-vos.tar.zst
 ```
 
-The archive contains old secrets (the old key was compiled into the old APK). It stays off the repo and off any cloud. Record the SHA-256 in #9.
+The 2026-10-18 archive excludes the known secret files and the APKs that had the old key compiled in, but old history may still hold traces, so it stays off the repo and off any cloud. SHA-256 recorded in `docs/DEVICES.md` and #9.
 
 ## 6. Download GrapheneOS for `panther` and `akita`; verify signatures (§7, §4.4 step 1)
+
+**Status 2026-10-18: done by agent** (builds 2026101600 and 2026101601 for both codenames, all verified; records in `docs/DEVICES.md`).
 
 For each codename in `panther akita`, using the current stable build number `<build>` from grapheneos.org/releases:
 
@@ -59,17 +63,19 @@ For each codename in `panther akita`, using the current stable build number `<bu
 c=panther   # then akita
 d=/media/caleb/data-disk/vos/firmware/$c/grapheneos/<build>
 mkdir -p "$d" && cd "$d"
-curl -fLO https://releases.grapheneos.org/factory.pub        # Graphene's factory signing key; compare with grapheneos.org/install
+curl -fLO https://releases.grapheneos.org/allowed_signers  # Graphene's factory-image key; compare with grapheneos.org/install/cli
 curl -fLO https://releases.grapheneos.org/$c-install-<build>.zip
 curl -fLO https://releases.grapheneos.org/$c-install-<build>.zip.sig
-signify -Cqp factory.pub -x $c-install-<build>.zip.sig && echo verified
+ssh-keygen -Y verify -f allowed_signers -I contact@grapheneos.org -n "factory images" -s $c-install-<build>.zip.sig < $c-install-<build>.zip
 curl -fLO https://releases.grapheneos.org/$c-ota_update-<build>.zip   # full OTA, not incremental
 sha256sum $c-install-<build>.zip $c-ota_update-<build>.zip | tee SHA256SUMS
 ```
 
-Pass: `verified` for each factory image. Keep the last 3 builds per codename. Then update `docs/DEVICES.md` (firmware rows).
+Pass: `Good "factory images" signature for contact@grapheneos.org` for each factory image, with the Ed25519 fingerprint shown on grapheneos.org/install/cli (also recorded in `docs/DEVICES.md`) (Graphene replaced `factory.pub`/signify with `allowed_signers`/ssh-keygen). Keep the last 3 builds per codename. Then update `docs/DEVICES.md` (firmware rows).
 
 ## 7. Pin Graphene's OTA certificate into `image/pins/` (§4.4 step 1, threat A6)
+
+**Status 2026-10-18: done by agent** (both pins committed; full OTAs pass `avbroot ota verify` against them; see `image/pins/README.md`).
 
 1. From the **verified** factory image, extract the OTA certificate Graphene's recovery trusts (`otacerts.zip` in the system image's `etc/security/`), one per codename.
 2. Save it as `image/pins/grapheneos-ota-<codename>.crt` and record `openssl x509 -in <crt> -noout -fingerprint -sha256` in `image/pins/README.md`.
