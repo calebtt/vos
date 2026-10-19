@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VOS Actuator</string>
+    <string name="hands_label">VOS</string>
+    <string name="hands_description">Lets VOS operate apps for you when you ask it to.</string>
+    <string name="notifications_label">VOS notifications</string>
+</resources>
