@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Date | 2026-10-18 (Caleb answered Q5 (spending is the vendor account's limit; VOS reads usage, report-only) and Q31 (dates provisional until planning is done), and deferred Phone C comms tests; then answered Q34 (retention follows the API provider; no ZDR requirement) and delayed real-comms tests until VOS runs on the Pixel 8a; earlier that day, decision 39 app-use step loop: compressed screenshots and one coordinate transform, §3.13, M3-IMG-01/02, M3-COORD-01/02, Q40–Q42, research/app-use-workflow-2026-10-18.md; earlier that day, decision 38 tree trust and decision 34 cancel-on-takeover; Claude decided Grok's critique items, delegated by Caleb: Q31 answered (cut list, M3–M6 dates +3 weeks), decision 32 taint narrowed to exact copies, decision 31 and cloud-loop numbers are targets, OwnerMemory moved to the actuator, comms device rule, S-44 and M5-MW-01 to the backlog; research/plan-critique-decisions-2026-10-18.md. Earlier that day, on-device leftovers fixed: decision 26 retitled, Q30 answered, M3-UI-05a/b, §6 post-1.0 lane; earlier that day, a consistency pass on the improvement work: decisions 30–37 compacted, cross-references checked). 2026-10-17 (improvement pass: decisions 30–37, S-40–S-44, Q29–Q39, report `research/plan-improvement-2026-10-17.md`; earlier on 10-16 and 10-17: decisions 22–29, see the feedback table). Earlier, 10-15: (agent modes Full/Quiet/Paused + typed chat window, row 24–25, S-38, M1-CHAT-01, M2-MODE-01, M2-CHAT-02, Q22; primary test setup: Phone B tethered to the dev desktop over USB/adb, occasional in-the-wild sessions; Tier F order F7 then F5; no open design questions; IME masking + notification stripping unconditional on every cloud image upload; `READ_FRAME_BUFFER` allowed for the actuator UID only, folded into F5; review fixes: F5/F7 isolation tests F-F5-ISO-01/F-F7-ISO-01; secure pixels never to VTB peers or other agents; M4-SHELL-nn covers rows 20–23. Earlier, 10-14: Tier F committed after M4, no patch cap; F5 secure-layer capture + secure-pixel release policy; F7 actuator-only INJECT_EVENTS + panel-only presence; screen power/brightness; on-device agent timers. Earlier, 10-12: wake-word AEC configurable; OS enhancements configurable; unlock→wake-word; long-press optional; app-agent typed→duplex→vision; M3-SPOT; M3-MAP GPS spoof; unprompted pan/zoom; on-device tools + scratchpad; live-map look-around; model choice open; audio cache; Maps duplex; vision-first UI; dual-device panther/akita) |
+| Date | 2026-10-18 (Caleb answered Q5 (spending is the vendor account's limit; VOS reads usage, report-only) and Q31 (dates provisional until planning is done), and deferred Phone C comms tests; then answered Q34 (retention follows the API provider; no ZDR requirement) and delayed real-comms tests until VOS runs on the Pixel 8a; then retired the VPS (its Day 0 secret steps removed) and moved data-disk paths to `/media/caleb/data-disk` (fstab pin pending); earlier that day, decision 39 app-use step loop: compressed screenshots and one coordinate transform, §3.13, M3-IMG-01/02, M3-COORD-01/02, Q40–Q42, research/app-use-workflow-2026-10-18.md; earlier that day, decision 38 tree trust and decision 34 cancel-on-takeover; Claude decided Grok's critique items, delegated by Caleb: Q31 answered (cut list, M3–M6 dates +3 weeks), decision 32 taint narrowed to exact copies, decision 31 and cloud-loop numbers are targets, OwnerMemory moved to the actuator, comms device rule, S-44 and M5-MW-01 to the backlog; research/plan-critique-decisions-2026-10-18.md. Earlier that day, on-device leftovers fixed: decision 26 retitled, Q30 answered, M3-UI-05a/b, §6 post-1.0 lane; earlier that day, a consistency pass on the improvement work: decisions 30–37 compacted, cross-references checked). 2026-10-17 (improvement pass: decisions 30–37, S-40–S-44, Q29–Q39, report `research/plan-improvement-2026-10-17.md`; earlier on 10-16 and 10-17: decisions 22–29, see the feedback table). Earlier, 10-15: (agent modes Full/Quiet/Paused + typed chat window, row 24–25, S-38, M1-CHAT-01, M2-MODE-01, M2-CHAT-02, Q22; primary test setup: Phone B tethered to the dev desktop over USB/adb, occasional in-the-wild sessions; Tier F order F7 then F5; no open design questions; IME masking + notification stripping unconditional on every cloud image upload; `READ_FRAME_BUFFER` allowed for the actuator UID only, folded into F5; review fixes: F5/F7 isolation tests F-F5-ISO-01/F-F7-ISO-01; secure pixels never to VTB peers or other agents; M4-SHELL-nn covers rows 20–23. Earlier, 10-14: Tier F committed after M4, no patch cap; F5 secure-layer capture + secure-pixel release policy; F7 actuator-only INJECT_EVENTS + panel-only presence; screen power/brightness; on-device agent timers. Earlier, 10-12: wake-word AEC configurable; OS enhancements configurable; unlock→wake-word; long-press optional; app-agent typed→duplex→vision; M3-SPOT; M3-MAP GPS spoof; unprompted pan/zoom; on-device tools + scratchpad; live-map look-around; model choice open; audio cache; Maps duplex; vision-first UI; dual-device panther/akita) |
 | Owner | Caleb |
 | Name | **VOS**. Packages `com.vos.session` and `com.vos.actuator` (`com.vos.sandbox` at M7). Tool bus: **VOS Tool Bus (VTB)**. |
 | Replaces | The earlier target plan in `argoos/TARGET-PLAN.md` and every name in it. Its architecture is reused. Its platform choice (Google's Pixel factory OTA) is reversed. Nothing is carried forward for compatibility. |
@@ -33,7 +33,7 @@
 6. **The phone is never unlocked by voice alone.** Since Android 10, trust agents can only extend an unlock. VOS keeps an unlocked phone unlocked while the owner is present, and shows queued visual results at the next human unlock. Voice unlock would be a Tier F keyguard patch, and only if Caleb asks for it (§9 Q2).
 7. **VOS Tool Bus (VTB)** is a Binder protocol shaped like MCP. Apps use it to offer tools and to ask the OS agent for help. Android 16 AppFunctions and remote MCP servers mount into the same registry.
 8. **Reach comes from Tier S.** It runs on any Android 14+ phone, including Caleb's current GrapheneOS daily phone, with setup in 10 minutes and no ADB. Tier P is the full-power reference build.
-9. **Phone B (Pixel 7 `panther`) is the main flash/dev rig; Pixel 8a (`akita`) stays a first-class supported target (Phone A / second image). data-disk is enough disk.** The disk is mounted today at `/media/caleb/data-disk1`, and that path gets pinned in fstab (§7). Firmware trees for both `panther` and `akita`. Tier P needs no source tree. Tier F needs about 250 GB, which fits.
+9. **Phone B (Pixel 7 `panther`) is the main flash/dev rig; Pixel 8a (`akita`) stays a first-class supported target (Phone A / second image). data-disk is enough disk.** The disk is mounted at `/media/caleb/data-disk`, and that path gets pinned in fstab (§7). Firmware trees for both `panther` and `akita`. Tier P needs no source tree. Tier F needs about 250 GB, which fits.
 10. **Everything lives in git from the first hour,** with CI and static security checks on every push. **GitHub `calebtt/vos` is the source of truth** for the plan, issues, and milestones; `~/vos`, data-disk, and box copies are caches synced from it (`docs/TRACKING.md`).
 11. **ModelRouter is a thin policy table (role / task_class → model), not a fancy Settings picker for v0.** A session-owned registry of pluggable backends (LLMs *and* non-LLM models: ASR, TTS, OCR, wake word, VAD/AEC, vision, embeddings) bound per task class (and per agent-team role) by a policy table, with cost/latency tiers and offline vs cloud. Switches are audited. Simple jobs get small/fast/offline models; hard jobs get advanced ones. Settings UI for picking models is deferred; named profiles (*Fast/cheap*, *Balanced*, *Best*) are optional later. Provider-API juggling stays in the session (§3.2.1). **`control_detect` v0 = accessibility-tree adapter** (tree-first cascade, research/UI-DETECT-GROK-2026-10-13.md; Claude's report as second opinion); a small permissively licensed detector (YOLOX / MIT YOLO — not Ultralytics AGPL) is added only for blind regions after S-UI-TREE and S-UI-LAT pass, in the post-1.0 lane (§6, 2026-10-18). New `ui_verify` role: proposed Set-of-Mark verify-and-correct via a cheap-fast frontier multimodal API (§3.5.1).
 12. **The agent can do about everything a person can on the phone, including files — without root.** "About everything" = Shell Contract completeness (§3.6, incl. row 20 Files) + VTB + capability ladder. The actuator reads/writes phone storage (MediaStore, SAF grants, app-visible shared storage) for tasks; the session manages only its own CE storage and declared egress; M7 skills stay isolated. Irreversible file acts (delete, overwrite, share out) go through the trusted path.
@@ -75,7 +75,7 @@
 | Skill sandbox (M7) | `com.vos.sandbox` |
 | Tool bus | VOS Tool Bus (VTB). AIDL package `com.vos.vtb`. Manifest file `res/raw/vtb_tools.json`. |
 | Images | VOS Image (Tier P), VOS Fork (Tier F) |
-| Repo / blobs / keys | `~/vos` / `/media/caleb/data-disk1/vos` / `~/.vos-keys/` |
+| Repo / blobs / keys | `~/vos` / `/media/caleb/data-disk/vos` / `~/.vos-keys/` |
 
 Every earlier product, package, permission, interface, and path name is retired. CI scans code, manifests, resources, build scripts, and CI config for the names listed in `ci/retired-names.txt`, which is the only file allowed to contain them, and fails on any hit (M0-02).
 
@@ -138,6 +138,8 @@ Every earlier product, package, permission, interface, and path name is retired.
 | (2026-10-18) Pre-merge cleanup, approved by Caleb ("Yes, do it.") | GitHub issues opened for the plan branch's new tests and spikes: #80–#119 (incl. M1-IND-01, M3-AW-01); issue numbers written into the table rows (43a292d). #77 (M3-ESC-01) rewritten for the 1.0 cloud loop; #78 (S-39) moved to the new Post-1.0 (next major) milestone. §3.1 diagram: session gets OwnerMemory lines per turn (031dae0). Branch merged to main (05b0aa2) |
 | (2026-10-18) Caleb: "Track everything." | Every test and spike row now carries an issue number. 106 new issues #120–#225 (older M0–M6 and Tier F tests, Tier F patches F1–F4/F6/F8, S-34, and the post-1.0 spikes S-UI-TREE/S-UI-LAT); existing issues linked where they are that item (S-01–S-38, F5 #53, F7 #54, Tier F tests #56/#61–#65, M3-VERIFY-01 → #50, M0-03 → #9 Day 0, S-36 → #59, S-37 → #57). New issue bodies carry the plan's pass criteria and milestone; SIM-phone variants say delayed: until_8a, and calling never targets the Pixel 7 |
 | (2026-10-18) Caleb: "Yes, be thorough." (linked checklists on the epics) | Every epic issue carries a Tracking checklist (tests, spikes, fork patches, features) and the same items as GitHub sub-issues: M0 #4 (12), M1 #1 (38), M2 #2 (19), M3 #3 (55), M4 #5 (45 plus the Tier F section: epic #52 with 18 items nested under it), M5 #6 (13), M6 #7 (9), M7 #8 (none yet). New epics: #226 for the post-1.0 lane (5) and #227 for the backlog (2). #49 (on-device tool kit draft) got milestone M3. Coverage check: all 216 non-epic issues appear in exactly one checklist |
+| (2026-10-18) VPS retired; Caleb: "Pretty sure we don't use a VPS anymore" | VPS `SERVER_TOKEN` rotation and the VPS `.env` key deletion removed from Day 0, M0-03, the secrets and risk tables and §7/§8; note: VPS retired; no VPS secrets remain; if a VPS is ever found still running, shut it down. xAI key rotation and Phone A cleanup kept. |
+| (2026-10-18) data-disk mount path checked (`lsblk`, `findmnt`, `df`, 23:25 CT) | data-disk now mounts at `/media/caleb/data-disk`; the stale root-owned `data-disk` directory is gone and `/media/caleb/data-disk1` no longer exists, as §7 predicted. Paths updated in decision 9, the names table, §7 (rows, fstab lines with the real UUID, layout, budget: 944 GB free) and §8, plus `docs/runbooks/DAY0.md` and `docs/DEVICES.md`. The fstab pin is pending Caleb (needs sudo). |
 
 ### Problems inherited from IMPROVED-PLAN, still fixed
 
@@ -151,7 +153,7 @@ Every earlier product, package, permission, interface, and path name is retired.
 | Fork scope had no limit | Tier P has zero patches. Tier F is a named queue with no count cap; each patch is small, self-contained, tied to a Shell Contract row, tested (F-PATCH-nn), and rebased per Graphene tag; rebase cost feeds Hatch L trigger 2 (§4.6–4.7). |
 | One phone; flashing risked the daily driver | Phone B (Pixel 7 `panther` main flash/dev rig) takes every flash. Phone A (Pixel 8a `akita` path, or another Graphene daily) migrates only after a 14-day daily-phone soak near final (Caleb, 2026-10-15; §9 Q1). Both device trees stay supported. |
 | Work was not in git | M0-01, day 1. |
-| xAI key and VPS token compiled into the old APK | Rotated on Day 0 (§8). |
+| xAI key compiled into the old APK | Rotated on Day 0 (§8). |
 | The model decides what is irreversible; silence means proceed | Actuator class table, trusted path, presence, and defer (§5.5). |
 
 ---
@@ -1227,7 +1229,7 @@ Debug builds, which include a text-turn harness and PCM injection, install only 
 | App signing (release) | Workstation, in an encrypted keystore, plus an offline USB backup | Separate from the debug key |
 | AVB + OTA signing (Tier P) | `~/.vos-keys/` (avbroot passphrase-encrypted), an offline USB copy, and the passphrase in a password manager | Losing it means a wipe to recover the relocked phone. Never stored on data-disk in the clear. |
 | Full release key set (Tier F only) | `~/.vos-keys/fork/`, encrypted with Graphene's `encrypt-keys` flow (scrypt + AES-256) | Same handling as AVB |
-| Old xAI key and VPS `SERVER_TOKEN` | — | **Rotate on Day 0.** Every copy of the old voice-client APK carries them. |
+| Old xAI key | — | **Rotate on Day 0.** Every copy of the old voice-client APK carries it. |
 
 The actuator has no key API, no key storage, and no network. Static analysis checks this (M0-02), and so does a data-dir scan on the debug build (M1-KEY-01).
 
@@ -1372,7 +1374,7 @@ The calendar assumes one engineer and starts Monday 2026-10-12. All test IDs liv
 |---|---|---|
 | M0-01 (#127) | Fresh clone on a clean user: `./gradlew check :actuator:assembleRelease :session:assembleRelease` | Green; CI runs on every push to the private remote |
 | M0-02 (#128) | Static policy check in CI | Actuator: no `INTERNET`. Session: no `RECORD_AUDIO`/a11y/NLS/privileged permissions. Only the declared exported components. No Play services, Firebase, or ML Kit-download artifacts in either APK. No retired names (`ci/retired-names.txt`). gitleaks clean on the repo and the APK strings. |
-| M0-03 (#9) | Old secrets are dead | Old xAI key → 401. VPS token rejected. The phone's USB-debugging authorizations revoked. The VPS copy of the key deleted. |
+| M0-03 (#9) | Old secrets are dead | Old xAI key → 401. The phone's USB-debugging authorizations revoked. VPS retired; no VPS secrets remain. |
 | M0-04 (#129) | Platform decision | S-01/02/03 reports in `docs/spikes/`. `docs/DECISIONS.md` records "VOS Image on Graphene OTA", or "Tier F build path" with the reason, and the date. |
 | M0-05 (#130) | Audio decision | S-07/08 reports. Actuator-owned mic confirmed, or the fallback recorded. Desk plan for AppAssistantDuplex accepted (`AUDIO-DUPLEX-RESEARCH.md`); S-27+ scheduled on Phone B after S-01. |
 | M0-06 (#131) | Devices | Phone B (Pixel 7 `panther` main flash/dev rig, `fastboot flashing get_unlock_ability` = 1), Phone A path noted as Pixel 8a (`akita`) first-class supported target (or other Graphene daily), and Phone C (non-Pixel, Android 15+) enrolled in `docs/DEVICES.md`. Firmware dirs for both `panther` and `akita` present under data-disk. |
@@ -1696,8 +1698,8 @@ Items from the 2026-10-17 improvement pass that Grok's critique (research/plan-c
 |---|---|
 | Workstation | 20 cores, 125 GB RAM |
 | `/` (ext4 on LVM) | 935 GB, **427 GB free** |
-| data-disk | NVMe partition `/dev/nvme1n1p2`, NTFS through `ntfs3`, mounted `nosuid,nodev` by the desktop automounter at **`/media/caleb/data-disk1`**. 3.7 TB, **1.1 TB free**. Also holds Steam libraries and Windows projects, so it is likely shared with Windows. |
-| Why `data-disk1` | A stale, empty, root-owned `/media/caleb/data-disk` directory exists, so the automounter appended `1`. If that directory is ever removed, the next automount moves the disk back to `data-disk` and every path in this plan breaks. **Pin the mount (below).** |
+| data-disk | NVMe partition `/dev/nvme1n1p2` (label `data-disk`, UUID `AA947A61947A2FC5`), NTFS through `ntfs3`, mounted `nosuid,nodev` (uid/gid 1000) by the desktop automounter at **`/media/caleb/data-disk`** (checked 2026-10-18 with `lsblk`, `findmnt`, `df`). 3.7 TB, **944 GB free** as of 2026-10-18. Also holds Steam libraries and Windows projects, so it is likely shared with Windows. |
+| Mount path history | Until 2026-10-18 the disk mounted at `/media/caleb/data-disk1`, because a stale, empty, root-owned `/media/caleb/data-disk` directory made the automounter append `1`. That directory is gone, and the automounter moved the disk back to `/media/caleb/data-disk`, as this row predicted; `data-disk1` no longer exists. **Pin the mount (below)** so it cannot move again. Not pinned yet: it needs sudo (Caleb). |
 | Tools present | `adb`, `fastboot` (SDK platform-tools), JDK 21 |
 
 **Rule:** source trees, Gradle caches, emulator images, and unpacked partitions go on an **ext4 image file** on data-disk, loop-mounted. Large immutable blobs (OTA zips, eval recordings, backups) go directly on NTFS.
@@ -1710,13 +1712,13 @@ Why build trees do not go straight on NTFS:
 ```bash
 # one-time (root): pin data-disk at the path this plan uses, so the loop mount can depend on it
 #   /etc/fstab:
-#   UUID=<nvme1n1p2-uuid> /media/caleb/data-disk1 ntfs3 uid=1000,gid=1000,nosuid,nodev,nofail 0 0
-mkdir -p /media/caleb/data-disk1/vos/vol
-truncate -s 300G /media/caleb/data-disk1/vos/vol/vos-build.ext4      # sparse
-mkfs.ext4 -L vos-build -m 0 /media/caleb/data-disk1/vos/vol/vos-build.ext4
+#   UUID=AA947A61947A2FC5 /media/caleb/data-disk ntfs3 uid=1000,gid=1000,nosuid,nodev,nofail 0 0
+mkdir -p /media/caleb/data-disk/vos/vol
+truncate -s 300G /media/caleb/data-disk/vos/vol/vos-build.ext4      # sparse
+mkfs.ext4 -L vos-build -m 0 /media/caleb/data-disk/vos/vol/vos-build.ext4
 sudo mkdir -p /mnt/vos-build
 # /etc/fstab:
-#   /media/caleb/data-disk1/vos/vol/vos-build.ext4 /mnt/vos-build ext4 loop,noatime,nofail,x-systemd.requires-mounts-for=/media/caleb/data-disk1 0 2
+#   /media/caleb/data-disk/vos/vol/vos-build.ext4 /mnt/vos-build ext4 loop,noatime,nofail,x-systemd.requires-mounts-for=/media/caleb/data-disk 0 2
 ```
 
 Measure the loop volume once with `fio` (random 4 KiB, iodepth 32). If random writes come in under ~50 MB/s, move `gradle/` to `/` instead (427 GB free there). Before Tier F starts (right after M4), grow the file to 600 GB (`truncate -s 600G` + `resize2fs`) before syncing Graphene.
@@ -1729,7 +1731,7 @@ Measure the loop volume once with `fio` (random 4 KiB, iodepth 32). If random wr
   README.md  TARGET-PLAN.md  AUDIO-DUPLEX-RESEARCH.md
   actuator/  session/  vtb-sdk/  image/  fork/  eval/  docs/  ci/
 
-/media/caleb/data-disk1/vos/              (NTFS: blobs only)
+/media/caleb/data-disk/vos/               (NTFS: blobs only)
   README.md  TARGET-PLAN.md            copies of the repo's files
   firmware/panther/grapheneos/<build>/   Phone B (main) Graphene full OTA + factory + sigs (keep last 3)     ~10 GB
   firmware/akita/grapheneos/<build>/     Phone A path / second target — same layout for Pixel 8a             ~10 GB
@@ -1752,7 +1754,7 @@ Measure the loop volume once with `fio` (random 4 KiB, iodepth 32). If random wr
 ~/.vos-keys/                           encrypted AVB/OTA/release keys (+ offline USB copy). Never on data-disk in the clear.
 ```
 
-Budget: about 250 GB used in normal operation, about 500 GB with Tier F, or about 700 GB with Hatch L, out of 1.1 TB free. **No new disk purchase is needed.** Graphene's build needs 32 GB RAM, and the workstation has 125 GB.
+Budget: about 250 GB used in normal operation, about 500 GB with Tier F, or about 700 GB with Hatch L, out of 944 GB free (2026-10-18). **No new disk purchase is needed.** Graphene's build needs 32 GB RAM, and the workstation has 125 GB.
 
 ### Devices
 
@@ -1763,7 +1765,7 @@ Budget: about 250 GB used in normal operation, about 500 GB with Tier F, or abou
 | **Phone C: mainstream non-Pixel** (e.g. Samsung Galaxy A-series, Android 15+, ~$200) | Tier S reach from M1; no SIM, so it runs no real-comms tests; those run on the Pixel 8a once VOS runs there (2026-10-18). It becomes a `sim_phone` only if it later gets a SIM | Portability bugs are found early, not in M6 |
 | Headsets | Current classic BT + one LE Audio reference (from M4) | Route type logged on every turn |
 | Workstation | Build, CI runner, emulators, image builds, Wi-Fi AP for edge captures | No phone control in production. ADB is for development only. |
-| VPS | **Retired** from the phone path | Day 0: revoke ADB, delete the key copy, remove the phone from the tailnet ACL |
+| VPS | **Retired** (2026-10-18) | VPS retired; no VPS secrets remain; if a VPS is ever found still running, shut it down. |
 
 **Primary test setup (Caleb, 2026-10-15).** Most VOS testing runs on Phone B tethered to the dev desktop over USB with USB debugging enabled; Phone B gets only occasional in-the-wild use until VOS nears a final state.
 - **Harness:** the desktop drives tests over `adb` (install, debug-build text turns and PCM injection, fixture apps, oracle readback); fixtures, audit logs, captures, and reports are pulled to the desktop as the normal path.
@@ -1777,7 +1779,7 @@ Budget: about 250 GB used in normal operation, about 500 GB with Tier F, or abou
 
 | Day | Work | Done when |
 |---|---|---|
-| **Sat 10-10 (Day 0, ≈1.5 h)** | Rotate the xAI key and the VPS `SERVER_TOKEN`. On Phone A: "Revoke USB debugging authorizations", turn wireless debugging off, delete the key from the VPS `.env`. Confirm Phone B (Pixel 7 `panther` main flash/dev rig) is unlockable; order Phone C. Pin data-disk at `/media/caleb/data-disk1` in fstab. Write the one-time archive tarball of old work. Start downloading Graphene factory + full OTA for **both** `panther` (Phone B) and `akita` (Phone A / second target) into `firmware/<codename>/` and verify signatures. | Old key → 401; Phone C ordered; mount pinned; archive SHA-256 recorded; both firmware trees started |
+| **Sat 10-10 (Day 0, ≈1.5 h)** | Rotate the xAI key. On Phone A: "Revoke USB debugging authorizations", turn wireless debugging off. Confirm Phone B (Pixel 7 `panther` main flash/dev rig) is unlockable; order Phone C. Pin data-disk at `/media/caleb/data-disk` in fstab. Write the one-time archive tarball of old work. Start downloading Graphene factory + full OTA for **both** `panther` (Phone B) and `akita` (Phone A / second target) into `firmware/<codename>/` and verify signatures. | Old key → 401; Phone C ordered; mount pinned; archive SHA-256 recorded; both firmware trees started |
 | **Mon 10-12** | `git init` in `~/vos` (the plan and README are already there) and create the private remote. Gradle multi-module skeleton (`actuator`, `session`, `vtb-sdk`). Release and debug signing configs with **different certs**. CI: unit tests, `aapt2` permission checks, exported-component check, dependency check (no Play/Firebase/ML Kit download), retired-names check, gitleaks. Create and mount the ext4 volume; run `fio`. | M0-01, M0-02 green |
 | **Tue 10-13** | Binder auth on both sides: `SESSION`/`ACTUATOR` signature permissions, UID + cert guard, grant table, `linkToDeath`, `UNAUTHORIZED` audit. Foreign-signed fixture APK plus an instrumentation test on the emulator. | M1-AUTH-01 green on the emulator |
 | **Wed 10-14** | **S-07 + S-08** on Phone B (Pixel 7 `panther`, official Graphene; the default spike device per §7; confirm on Phone A `akita` later; changed 2026-10-18) with throwaway test APKs (non-destructive): actuator voice interaction service + `microphone` foreground service, pipe to the session, latency and AEC measurements on the speaker and BT. Same on the emulator. **S-22** house-voice check with Graphene Speech Services. | `docs/spikes/S-07.md`, `S-08.md`, `S-22.md`; M0-05 decided |
