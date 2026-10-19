@@ -9,9 +9,9 @@ Enrollment record for M0-06 (#131), from TARGET-PLAN §7 "Devices". Values marke
 | **Phone C:** mainstream non-Pixel (e.g. Samsung Galaxy A-series), Android 15+ | — | Tier S reach from M1. No SIM, so no real-comms tests. | **Deferred / not yet ordered** | Record order date and ETA in #4 when ordered. |
 | Headsets | — | Current classic BT; one LE Audio reference from M4 | Classic BT owned; LE Audio PENDING order | Route type logged on every turn. |
 | Workstation (the dev desktop) | — | Build, CI runner, emulators, image builds, Wi-Fi AP for edge captures | Present | No phone control in production; ADB is development-only. |
-| VPS | — | **Retired** from the phone path | Day 0 PENDING | Revoke ADB, delete the key copy, remove the phone from the tailnet ACL (`docs/runbooks/DAY0.md`). |
+| VPS | — | **Retired** | Retired (2026-10-18) | VPS retired; no VPS secrets remain; if a VPS is ever found still running, shut it down. |
 
-## Firmware trees (data-disk, `/media/caleb/data-disk1/vos/`)
+## Firmware trees (data-disk, `/media/caleb/data-disk/vos/`)
 
 | Path | Contents | Status |
 |---|---|---|
@@ -25,5 +25,5 @@ Enrollment record for M0-06 (#131), from TARGET-PLAN §7 "Devices". Values marke
 fastboot getvar product            # expect: panther
 fastboot flashing get_unlock_ability   # expect: 1 — record the output and date here
 # Firmware trees:
-ls -l /media/caleb/data-disk1/vos/firmware/panther/grapheneos/ /media/caleb/data-disk1/vos/firmware/akita/grapheneos/
+ls -l /media/caleb/data-disk/vos/firmware/panther/grapheneos/ /media/caleb/data-disk/vos/firmware/akita/grapheneos/
 ```
