@@ -28,6 +28,11 @@ T0="$(adb shell date '+%m-%d %H:%M:%S.000')"
 
 ## S-07: summon to first non-zero mic buffer
 
+> **Run notes (2026-10-18, Phone B, Graphene user build):**
+> - `cmd voiceinteraction show` / `hide` fail with `SecurityException: requires ACCESS_VOICE_INTERACTION_SERVICE` on a user build. The assist-gesture leg needs a real human gesture.
+> - `cmd statusbar click-tile` only reaches the tile while QS is expanded (`cmd statusbar expand-settings`). The run used real `input tap`s on the tile's bounds from `uiautomator dump`.
+> - `adb logcat -t "$T0"` with a space in `$T0` is mangled by the remote shell. Use `adb logcat -d -s VOS_S07` on a fresh install instead.
+
 App `com.vos.spike.s07` has a VoiceInteractionService (so it can hold the ASSISTANT role), a session, a stub
 recognition service, a QS tile `.ProbeTile` and a microphone FGS `.MicFgs`. Each summon runs one trial:
 
