@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- S-08 session probe: binds the actuator, reads frames from the pipe, logs added latency.
+     No mic permission, no INTERNET, no audio output. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="com.vos.spike.s08.permission.BIND_ACTUATOR" />
+
+    <queries>
+        <package android:name="com.vos.spike.s08.actuator" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="VOS S08 session probe">
+
+        <!-- No launcher entry and no buttons: started by `adb shell am start`. Guarded by DUMP,
+             which the shell holds and third-party apps cannot. -->
+        <activity
+            android:name=".RunActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|density"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>
