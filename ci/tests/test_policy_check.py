@@ -71,7 +71,14 @@ def make_dex(strings_):
 ACTUATOR_OK = dict(
     package="com.vos.actuator",
     permissions=["android.permission.RECORD_AUDIO"],
-    components=[("service", "com.vos.actuator.ActuatorService", True, "com.vos.permission.SESSION", [], [])],
+    components=[
+        ("service", "com.vos.actuator.ActuatorService", True, "com.vos.permission.SESSION", [], []),
+        ("service", "com.vos.actuator.HandsService", True, "android.permission.BIND_ACCESSIBILITY_SERVICE",
+         ["android.accessibilityservice.AccessibilityService"], ["android.accessibilityservice"]),
+        ("service", "com.vos.actuator.NotificationsService", True,
+         "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+         ["android.service.notification.NotificationListenerService"], []),
+    ],
 )
 SESSION_OK = dict(
     package="com.vos.session",
@@ -163,6 +170,27 @@ class ExportedRules(unittest.TestCase):
         f = facts("com.vos.actuator", components=[("service", "com.vos.actuator.ActuatorService", True, None, [], [])])
         fails = pc.check_exported("actuator", f, self.actuator_allow)
         self.assertTrue(any("has permission None" in x for x in fails))
+
+    def test_exported_a11y_service_without_bind_permission_fails(self):
+        comps = [c for c in ACTUATOR_OK["components"] if c[1] != "com.vos.actuator.HandsService"]
+        comps.append(("service", "com.vos.actuator.HandsService", True, None,
+                      ["android.accessibilityservice.AccessibilityService"], ["android.accessibilityservice"]))
+        fails = pc.check_exported("actuator", facts(**dict(ACTUATOR_OK, components=comps)), self.actuator_allow)
+        self.assertTrue(any("not guarded by android.permission.BIND_ACCESSIBILITY_SERVICE" in x for x in fails))
+
+    def test_exported_nls_with_wrong_permission_fails(self):
+        comps = [c for c in ACTUATOR_OK["components"] if c[1] != "com.vos.actuator.NotificationsService"]
+        comps.append(("service", "com.vos.actuator.NotificationsService", True, "com.vos.permission.SESSION",
+                      ["android.service.notification.NotificationListenerService"], []))
+        fails = pc.check_exported("actuator", facts(**dict(ACTUATOR_OK, components=comps)), self.actuator_allow)
+        self.assertTrue(any("not guarded by android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" in x for x in fails))
+
+    def test_unlisted_guarded_a11y_service_still_fails(self):
+        f = facts(**dict(ACTUATOR_OK, components=ACTUATOR_OK["components"] + [
+            ("service", "com.vos.actuator.OtherHands", True, "android.permission.BIND_ACCESSIBILITY_SERVICE",
+             ["android.accessibilityservice.AccessibilityService"], [])]))
+        self.assertTrue(any("OtherHands is not in the allowlist" in x
+                            for x in pc.check_exported("actuator", f, self.actuator_allow)))
 
     def test_stale_allowlist_fails(self):
         f = facts("com.vos.actuator", components=[("service", "com.vos.actuator.ActuatorService", False,
