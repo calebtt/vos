@@ -37,6 +37,12 @@ SENSITIVE_ACTIONS = {
     "android.service.voice.VoiceInteractionService",
 }
 SENSITIVE_META_DATA = {"android.accessibilityservice", "android.voice_interaction"}
+# The system-only permission an exported system-bound service must require, by its intent action.
+REQUIRED_BIND_PERMISSION = {
+    "android.accessibilityservice.AccessibilityService": "android.permission.BIND_ACCESSIBILITY_SERVICE",
+    "android.service.notification.NotificationListenerService": "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+    "android.service.voice.VoiceInteractionService": "android.permission.BIND_VOICE_INTERACTION",
+}
 
 # Where retired names must not appear: code, manifests, resources, build scripts, CI config.
 RETIRED_SCAN_DIRS = ("actuator", "session", "vtb-sdk", "ci", ".github", "gradle", "image", "fork", "eval")
@@ -208,6 +214,11 @@ def check_exported(app, facts, allowlist):
     for c in facts["components"]:
         if not c["exported"]:
             continue
+        for action in c["actions"]:
+            need = REQUIRED_BIND_PERMISSION.get(action)
+            if need and c["permission"] != need:
+                fails.append(f"{app}: exported {c['kind']} {c['name']} handles {action} but is not guarded by {need} "
+                             f"(has {c['permission']!r})")
         key = (c["kind"], c["name"])
         seen.add(key)
         if key not in allowlist:
