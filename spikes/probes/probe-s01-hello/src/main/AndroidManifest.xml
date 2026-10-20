@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- S-01 / S-03 hello priv-app: baked into /product/priv-app/VosHello by image/build.sh. It only
+     requests privileged permissions so `dumpsys package com.vos.hello` can show the grants. No code,
+     no INTERNET, no components. Every permission here must be in
+     image/overlays/s01-hello/etc/permissions/privapp-permissions-vos-hello.xml, or system_server
+     refuses to boot under ro.control_privapp_permissions=enforce. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_ROUTING" />
+    <uses-permission android:name="android.permission.CAPTURE_AUDIO_OUTPUT" />
+    <uses-permission android:name="android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT" />
+    <!-- The plan's CONCURRENT_AUDIO_RECORD_BYPASS does not exist on Android 17; this is the
+         platform's signature|privileged name for it (read on Phone B 2026-10-19). -->
+    <uses-permission android:name="android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION" />
+    <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" />
+
+    <application
+        android:allowBackup="false"
+        android:hasCode="false"
+        android:label="VOS hello" />
+</manifest>
