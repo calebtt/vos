@@ -11,7 +11,7 @@
 | Session: hosts no accessibility / NLS / voice-interaction service | bind permission, intent action, meta-data | — |
 | Only declared exported components, with the declared guard permission | manifest; fails on extra, mismatched or stale entries | `exported-components-{actuator,session}.txt` |
 | Release APKs not debuggable | manifest | — |
-| No Play services, Firebase, ML Kit (and Play Core) | Gradle dependency graph (`writePolicyDeps` → `build/policy/deps.txt`) + dex string tables + resource strings + zip entries + manifest | `forbidden-artifacts.txt` |
+| No Play services, Firebase, ML Kit (and Play Core) | Gradle dependency graph (`writePolicyDeps` → `build/policy/deps.txt`) + dex string tables + resource strings + zip entries + manifest. A dex string that only names such a package (OkHttp's Play-provider socket probe) is exempt by exact match, per app, with its reason | `forbidden-artifacts.txt`, `forbidden-exceptions.txt` |
 | Actuator holds no HTTP/WebSocket library | dex | `forbidden-artifacts.txt` (`actuator-class:`) |
 | No retired names | whole-token, case-insensitive, over code, manifests, resources, build scripts, CI config (`actuator/ session/ vtb-sdk/ ci/ .github/ gradle/ image/ fork/ eval/` + root build files) and the APK strings | `retired-names.txt` (the only file allowed to contain them) |
 | Signing: release cert ≠ debug cert; actuator and session release share one signer | `apksigner verify --print-certs` | — |
