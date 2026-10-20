@@ -19,7 +19,8 @@ public class FastToolsTest {
         final Map<Integer, Integer> volume = new HashMap<>(Map.of(MEDIA, 7, RING, 4));
         final List<String> acts = new ArrayList<>();
         String state = "playing"; // null = not observable
-        String track = "t:Song A|Artist|Album";
+        String id; // the session's media id, if it publishes one
+        String title = "Song A";
         java.util.function.Consumer<FakePlatform> onKey; // scripted reaction, replaces the default
         boolean dnd;
         Integer clampTo; // the phone sets this instead (e.g. a safe-volume cap)
@@ -54,13 +55,14 @@ public class FastToolsTest {
                 case 127: state = "paused"; break;
                 case 126: state = "playing"; break;
                 case 86: state = "stopped"; break;
-                case 87: track = "t:Song B|Artist|Album"; break;
+                case 87: title = "Song B"; break;
                 default: break;
             }
         }
 
         @Override public String mediaState() { return state; }
-        @Override public String mediaTrack() { return state == null ? null : track; }
+        @Override public String mediaId() { return state == null ? null : id; }
+        @Override public String mediaTitle() { return state == null ? null : title; }
         @Override public void sleep(long ms) { }
     }
 
@@ -195,21 +197,44 @@ public class FastToolsTest {
 
     @Test
     public void aSkipIsNotVerifiedByMetadataFillingInOrAFlicker() throws Exception {
-        // The player ignores "next"; its metadata appears late (null -> the same track).
-        platform.track = null;
-        platform.onKey = p -> { };
+        // No metadata at all before the key: unknown, not a skip.
+        platform.title = null;
+        platform.onKey = p -> p.title = "Song A";
         assertEquals("UNVERIFIED", run("media_control", "{\"action\":\"next\"}").getString("status"));
-        // The track token flickers for one poll and comes back: not a skip.
-        platform.track = "t:Song A|Artist|Album";
+        // Same title, and a media id appears and stays (the player ignored next): not a skip.
+        platform.title = "Song A";
+        platform.id = null;
+        platform.onKey = p -> p.id = "spotify:track:1";
+        assertEquals("UNVERIFIED", run("media_control", "{\"action\":\"next\"}").getString("status"));
+        // With ids on both sides, only the id decides; a changed title on the same id is not a skip.
+        platform.id = "spotify:track:1";
+        platform.onKey = p -> p.title = "Song A (Remastered)";
+        assertEquals("UNVERIFIED", run("media_control", "{\"action\":\"next\"}").getString("status"));
+        // A one-poll flicker of the title is not a skip either.
         int[] polls = {0};
         FakePlatform flicker = new FakePlatform() {
             @Override
-            public String mediaTrack() {
+            public String mediaTitle() {
                 polls[0]++;
-                return polls[0] == 2 ? "t:Other|Artist|Album" : "t:Song A|Artist|Album";
+                return polls[0] == 2 ? "Other" : "Song A";
             }
         };
         assertEquals("UNVERIFIED", new FastTools(flicker).run("media_control", "{\"action\":\"next\"}", media)
                 .json.getString("status"));
+        assertEquals("id:b", FastTools.newTrack("a", "T", "b", "T"));
+        assertEquals("t:U", FastTools.newTrack(null, "T", null, "U"));
+    }
+
+    @Test
+    public void aPlayOrPauseTheSessionVisiblyIgnoredLeavesTheAudioPlaneAlone() throws Exception {
+        platform.state = "paused";
+        platform.onKey = p -> { }; // stays paused (VOS still holds focus, or the player ignored the key)
+        assertEquals("UNVERIFIED", run("media_control", "{\"action\":\"play\"}").getString("status"));
+        platform.state = "playing";
+        assertEquals("UNVERIFIED", run("media_control", "{\"action\":\"pause\"}").getString("status"));
+        assertTrue("RESTORE must still resume what the turn paused", intents.isEmpty());
+        platform.state = null; // unobservable: the attempt stands
+        assertEquals("UNVERIFIED", run("media_control", "{\"action\":\"pause\"}").getString("status"));
+        assertEquals(List.of("paused"), intents);
     }
 }

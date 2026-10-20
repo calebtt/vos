@@ -93,25 +93,21 @@ final class AndroidFastToolsPlatform implements FastTools.Platform {
     }
 
     @Override
-    public String mediaTrack() {
+    public String mediaId() {
+        MediaMetadata m = metadata();
+        String id = m == null ? null : m.getString(MediaMetadata.METADATA_KEY_MEDIA_ID);
+        return id == null || id.isEmpty() ? null : id;
+    }
+
+    @Override
+    public String mediaTitle() {
+        MediaMetadata m = metadata();
+        return m == null ? null : m.getString(MediaMetadata.METADATA_KEY_TITLE);
+    }
+
+    private MediaMetadata metadata() {
         List<MediaController> sessions = sessions();
-        if (sessions == null || sessions.isEmpty()) {
-            return null;
-        }
-        MediaMetadata m = sessions.get(0).getMetadata();
-        if (m == null) {
-            return null;
-        }
-        String id = m.getString(MediaMetadata.METADATA_KEY_MEDIA_ID);
-        if (id != null && !id.isEmpty()) {
-            return "id:" + id;
-        }
-        String title = m.getString(MediaMetadata.METADATA_KEY_TITLE);
-        if (title == null) {
-            return null;
-        }
-        return "t:" + title + "|" + m.getString(MediaMetadata.METADATA_KEY_ARTIST) + "|"
-                + m.getString(MediaMetadata.METADATA_KEY_ALBUM);
+        return sessions == null || sessions.isEmpty() ? null : sessions.get(0).getMetadata();
     }
 
     @Override
