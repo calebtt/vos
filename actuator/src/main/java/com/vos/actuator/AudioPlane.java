@@ -1,5 +1,6 @@
 package com.vos.actuator;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -110,16 +111,26 @@ public final class AudioPlane {
         turnId = id;
         ownerPausedMedia = false;
         pausedPkg = null;
-        String playing = platform.playingMediaPackage();
-        if (playing != null && platform.pauseMedia(playing)) {
-            pausedPkg = playing;
+        boolean modeSet = false;
+        try {
+            String playing = platform.playingMediaPackage();
+            if (playing != null && platform.pauseMedia(playing)) {
+                pausedPkg = playing;
+            }
+            focusHeld = platform.requestFocus();
+            savedMode = platform.mode();
+            platform.setMode(MODE_IN_COMMUNICATION);
+            modeSet = true;
+            outDev = platform.setCommunicationDevice();
+            commDeviceSet = outDev != null;
+            inDev = platform.inputDevice();
+        } catch (RuntimeException e) { // the audio server is down: give back what was taken, open no turn
+            String undone = String.join(" ", undo(modeSet));
+            turnId = null;
+            refuse("summon", "audio error: " + e.getClass().getSimpleName()
+                    + (undone.isEmpty() ? "" : ", undo failed: " + undone), source);
+            return null;
         }
-        focusHeld = platform.requestFocus();
-        savedMode = platform.mode();
-        platform.setMode(MODE_IN_COMMUNICATION);
-        outDev = platform.setCommunicationDevice();
-        commDeviceSet = outDev != null;
-        inDev = platform.inputDevice();
         move(State.CAPTURE, source);
         return id;
     }
@@ -159,18 +170,54 @@ public final class AudioPlane {
             return false;
         }
         move(State.RESTORE, reason);
-        // Each undo is tried on its own: an audio-server failure in one (the same restart that kills
-        // a recording) must not skip the others or leave the plane stuck in RESTORE.
-        java.util.List<String> failed = new java.util.ArrayList<>();
         boolean callNow = false;
+        boolean modeKnown = true;
         String resumed = null;
+        String pkg = pausedPkg;
+        List<String> failed = new ArrayList<>();
         try {
             callNow = isCallMode(platform.mode());
         } catch (RuntimeException e) {
+            modeKnown = false; // a call may have started: media stays paused (setMode from VOS cannot take a call's mode)
             failed.add("mode");
         }
+        boolean mediaOk = modeKnown && !callNow;
+        // Each undo is tried on its own: an audio-server failure in one (the same restart that kills
+        // a recording) must not skip the others or leave the plane stuck in RESTORE.
+        failed.addAll(undo(!callNow)); // a call that started during the turn owns the mode now
+        if (mediaOk && pkg != null && !ownerPausedMedia) { // never start media into a (possible) call
+            try {
+                if (platform.playMedia(pkg)) {
+                    resumed = pkg;
+                }
+            } catch (RuntimeException e) {
+                failed.add("playMedia");
+            }
+        }
+        if (mediaOk && ownerPausedMedia && pkg != null) {
+            long armed = epoch;
+            for (long ms : RECHECK_MS) {
+                platform.schedule(() -> keepOwnerPause(id, pkg, armed), ms);
+            }
+        }
+        String left = !mediaOk && pkg != null && !ownerPausedMedia
+                ? ", " + pkg + " left paused" + (callNow ? " for the call" : "") : "";
+        move(State.IDLE, "restored" + (resumed != null ? ", resumed " + resumed : "")
+                + (callNow ? ", mode left to the call" : "") + left
+                + (failed.isEmpty() ? "" : ", failed: " + String.join(" ", failed)));
+        turnId = null;
+        return true;
+    }
+
+    /**
+     * Gives back the mode (if {@code restoreMode}), VOS's communication-device request and focus, each
+     * in its own try, and clears what the plane holds. Returns the steps that failed; media is the
+     * caller's.
+     */
+    private List<String> undo(boolean restoreMode) {
+        List<String> failed = new ArrayList<>();
         try {
-            if (!callNow) { // a call that started during the turn owns the mode now; leave it
+            if (restoreMode) {
                 platform.setMode(savedMode);
             }
         } catch (RuntimeException e) {
@@ -190,33 +237,12 @@ public final class AudioPlane {
         } catch (RuntimeException e) {
             failed.add("abandonFocus");
         }
-        if (!callNow) { // never start media into a call
-            try {
-                if (pausedPkg != null && !ownerPausedMedia && platform.playMedia(pausedPkg)) {
-                    resumed = pausedPkg;
-                }
-            } catch (RuntimeException e) {
-                failed.add("playMedia");
-            }
-            if (ownerPausedMedia && pausedPkg != null) {
-                String pkg = pausedPkg;
-                long armed = epoch;
-                for (long ms : RECHECK_MS) {
-                    platform.schedule(() -> keepOwnerPause(id, pkg, armed), ms);
-                }
-            }
-        }
         commDeviceSet = false;
         focusHeld = false;
         outDev = null;
         inDev = null;
-        String left = callNow && pausedPkg != null ? ", " + pausedPkg + " left paused for the call" : "";
         pausedPkg = null;
-        move(State.IDLE, "restored" + (resumed != null ? ", resumed " + resumed : "")
-                + (callNow ? ", mode left to the call" : "") + left
-                + (failed.isEmpty() ? "" : ", failed: " + String.join(" ", failed)));
-        turnId = null;
-        return true;
+        return failed;
     }
 
     /**
@@ -224,7 +250,13 @@ public final class AudioPlane {
      * itself. Ignored once any later summon has happened ({@code armed} is the epoch at RESTORE).
      */
     private synchronized void keepOwnerPause(String id, String pkg, long armed) {
-        if (epoch == armed && turnId == null && platform.isMediaPlaying(pkg) && platform.pauseMedia(pkg)) {
+        boolean repaused;
+        try {
+            repaused = epoch == armed && turnId == null && platform.isMediaPlaying(pkg) && platform.pauseMedia(pkg);
+        } catch (RuntimeException e) { // runs later on the main thread: never throw from here
+            return;
+        }
+        if (repaused) {
             Map<String, Object> l = line("audio.media_repaused", "player resumed itself after the turn; owner had paused it");
             l.put("turnId", id);
             l.put("pausedPkg", pkg);
@@ -256,12 +288,21 @@ public final class AudioPlane {
         audit.transition(l);
     }
 
+    /** The mode for an audit line, or -1 if the audio server cannot say (a line must never throw). */
+    private int modeForAudit() {
+        try {
+            return platform.mode();
+        } catch (RuntimeException e) {
+            return -1;
+        }
+    }
+
     private Map<String, Object> line(String event, String reason) {
         Map<String, Object> l = new LinkedHashMap<>();
         l.put("event", event);
         l.put("state", state.name());
         l.put("focus", focusHeld ? "GAIN_TRANSIENT" : "none");
-        l.put("mode", platform.mode());
+        l.put("mode", modeForAudit());
         l.put("inDev", inDev);
         l.put("outDev", outDev);
         l.put("pausedPkg", pausedPkg);
