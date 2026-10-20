@@ -30,6 +30,7 @@ public class AudioPlaneTest {
         boolean failSetMode; // the audio server died under RESTORE
         boolean failMode;
         boolean failMedia;
+        boolean ringOnFocus; // a call starts ringing while summon is taking audio
 
         @Override
         public boolean callActive() {
@@ -74,6 +75,9 @@ public class AudioPlaneTest {
 
         @Override
         public boolean requestFocus() {
+            if (ringOnFocus) {
+                mode = 1; // MODE_RINGTONE, set by Telecom from its own process
+            }
             calls.add("requestFocus");
             focus = true;
             return true;
@@ -373,6 +377,20 @@ public class AudioPlaneTest {
         assertEquals(MUSIC, platform.playing);
         assertTrue(platform.calls.isEmpty()); // nothing was taken
         assertEquals("audio.refused", last().get("event"));
+    }
+
+    @Test
+    public void aCallThatStartsDuringSummonOpensNoTurn() {
+        platform.playing = MUSIC;
+        platform.ringOnFocus = true;
+        assertNull(plane.summon("qs_tile"));
+        assertEquals(AudioPlane.State.IDLE, plane.state());
+        assertNull(plane.turnId());
+        assertEquals(1, platform.mode); // the call's mode is left alone
+        assertFalse(platform.focus);
+        assertNull("the paused music is not started into the call", platform.playing);
+        assertFalse(platform.calls.stream().anyMatch(c -> c.startsWith("setMode") || c.startsWith("setCommunicationDevice")));
+        assertEquals("call started during summon", last().get("reason"));
     }
 
     @Test

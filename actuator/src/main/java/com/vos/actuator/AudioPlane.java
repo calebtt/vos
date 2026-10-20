@@ -117,7 +117,13 @@ public final class AudioPlane {
                 pausedPkg = playing;
             }
             focusHeld = platform.requestFocus();
-            savedMode = platform.mode();
+            savedMode = platform.mode(); // read again just before taking the mode: a call may have started
+            if (isCallMode(savedMode)) {
+                undo(false); // the music this attempt paused stays paused: never start it into a call
+                turnId = null;
+                refuse("summon", "call started during summon", source);
+                return null;
+            }
             platform.setMode(MODE_IN_COMMUNICATION);
             modeSet = true;
             outDev = platform.setCommunicationDevice();
