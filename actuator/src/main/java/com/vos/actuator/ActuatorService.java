@@ -13,7 +13,10 @@ import com.vos.ipc.Ipc;
 
 /**
  * The session's entry point into the actuator. Every transaction, including the interface
- * descriptor query, runs the Binder guard before any argument is read (§5.3).
+ * descriptor query, runs the Binder guard before any argument is read (§5.3). Every method runs it
+ * again: an in-process caller gets this Stub from asInterface() and calls the method directly,
+ * without onTransact, and outside a transaction the calling UID is this app's own, which the guard
+ * refuses.
  */
 public final class ActuatorService extends Service {
     private BinderGuard guard;
@@ -27,6 +30,7 @@ public final class ActuatorService extends Service {
 
         @Override
         public int protocolVersion() {
+            guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
             return Ipc.PROTOCOL_VERSION;
         }
     };

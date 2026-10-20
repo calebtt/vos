@@ -129,26 +129,43 @@ public class BinderGuardTest {
     }
 
     @Test
-    public void decisionsAreCachedButEveryRefusalIsAudited() {
+    public void everyCallAsksThePlatformAndEveryRefusalIsAudited() {
         install(SESSION_UID, OWN_CERT, Ipc.SESSION_PACKAGE);
         install(OTHER_UID, OWN_CERT, "com.vos.fixture.wrongpkg");
         guard.check(SESSION_UID);
-        guard.check(SESSION_UID);
+        guard.require(SESSION_UID, Grant.SESSION_CORE);
         assertThrows(SecurityException.class, () -> guard.check(OTHER_UID));
         assertThrows(SecurityException.class, () -> guard.check(OTHER_UID));
-        assertEquals(2, platform.lookups);
+        assertEquals(4, platform.lookups);
         assertEquals(2, audit.size());
     }
 
     @Test
-    public void invalidateRechecksAfterAPackageChange() {
+    public void aReplacedPackageIsRefusedOnTheNextCall() {
         install(SESSION_UID, OWN_CERT, Ipc.SESSION_PACKAGE);
         guard.check(SESSION_UID);
-        // The session is replaced by an APK with another signer under the same UID.
+        // The session is replaced by an APK with another signer under the same UID; no broadcast
+        // has been delivered and nothing is invalidated.
         install(SESSION_UID, OTHER_CERT, Ipc.SESSION_PACKAGE);
-        guard.check(SESSION_UID); // still the cached decision
-        guard.invalidate();
         assertRefused(SESSION_UID, "certificate mismatch", Ipc.SESSION_PACKAGE);
+    }
+
+    @Test
+    public void aRemovedPackageWhoseUidIsReusedIsRefusedOnTheNextCall() {
+        install(SESSION_UID, OWN_CERT, Ipc.SESSION_PACKAGE);
+        guard.require(SESSION_UID, Grant.SESSION_CORE);
+        install(SESSION_UID, OWN_CERT, "com.example.reused.uid");
+        assertRefused(SESSION_UID, "package mismatch", "com.example.reused.uid");
+    }
+
+    @Test
+    public void aMissingGrantIsAuditedWithTheDecisionsOwnPackages() {
+        install(SESSION_UID, OWN_CERT, Ipc.SESSION_PACKAGE);
+        SecurityException e = assertThrows(SecurityException.class,
+                () -> guard.require(SESSION_UID, Grant.ACTUATOR_CORE));
+        assertEquals(BinderGuard.UNAUTHORIZED, e.getMessage());
+        assertEquals(1, platform.lookups);
+        assertArrayEquals(new String[] {Ipc.SESSION_PACKAGE}, audit.get(0).packages);
     }
 
     @Test
