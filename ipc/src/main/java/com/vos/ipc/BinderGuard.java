@@ -2,14 +2,14 @@ package com.vos.ipc;
 
 import java.util.Arrays;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The guard every incoming session ↔ actuator transaction runs before any argument is read
  * (§5.3): the calling UID must map to exactly the expected package, that package must be signed
- * with this app's own certificate, and it must have a grant set. Decisions are cached per UID until
- * {@link #invalidate()} (called on package changes). Every refusal is audited, cached or not, and
- * surfaces to the caller as {@code SecurityException("UNAUTHORIZED")}.
+ * with this app's own certificate, and it must have a grant set. Nothing is cached: a package can be
+ * replaced or removed before the package broadcast arrives, and Android reuses app UIDs, so every
+ * call asks PackageManager again. Every refusal is audited and surfaces to the caller as
+ * {@code SecurityException("UNAUTHORIZED")}.
  */
 public final class BinderGuard {
     public static final String UNAUTHORIZED = "UNAUTHORIZED";
@@ -46,7 +46,6 @@ public final class BinderGuard {
     private final GrantTable grants;
     private final Platform platform;
     private final Audit audit;
-    private final ConcurrentHashMap<Integer, Decision> cache = new ConcurrentHashMap<>();
 
     /**
      * @param service name used in audit lines, e.g. "ActuatorService"
@@ -68,7 +67,7 @@ public final class BinderGuard {
 
     /** Returns the caller's grants, or audits and throws {@code SecurityException("UNAUTHORIZED")}. */
     public Set<Grant> check(int uid) {
-        Decision d = cache.computeIfAbsent(uid, this::decide);
+        Decision d = decide(uid);
         if (d.grants == null) {
             refuse(uid, d.packages, d.reason);
         }
@@ -77,14 +76,13 @@ public final class BinderGuard {
 
     /** {@link #check(int)}, and the caller must also hold {@code grant}. */
     public void require(int uid, Grant grant) {
-        if (!check(uid).contains(grant)) {
-            refuse(uid, cache.get(uid).packages, "missing grant " + grant);
+        Decision d = decide(uid);
+        if (d.grants == null) {
+            refuse(uid, d.packages, d.reason);
         }
-    }
-
-    /** Drops every cached decision; the next transaction from each UID is checked afresh. */
-    public void invalidate() {
-        cache.clear();
+        if (!d.grants.contains(grant)) {
+            refuse(uid, d.packages, "missing grant " + grant);
+        }
     }
 
     private Decision decide(int uid) {

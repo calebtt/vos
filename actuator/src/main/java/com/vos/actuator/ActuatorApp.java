@@ -18,7 +18,6 @@ public final class ActuatorApp extends Application {
         sessionGuard = new BinderGuard("ActuatorService", Ipc.SESSION_PACKAGE,
                 AndroidGuardPlatform.ownCertSha256(this), GrantTable.of(Ipc.SESSION_PACKAGE, Grant.SESSION_CORE),
                 new AndroidGuardPlatform(getPackageManager()), new JsonlAudit(this));
-        AndroidGuardPlatform.invalidateOnPackageChanges(this, sessionGuard);
     }
 
     /** Guards ActuatorService: only the session package, signed with this app's cert (§5.3). */
