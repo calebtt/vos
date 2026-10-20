@@ -33,7 +33,7 @@ VOS must do the same without looking like a bot: one AudioPlane owns the path, t
 | Inject into another app's mic | `AudioMixingRule.MIX_ROLE_INJECTOR` (= `MIX_TYPE_RECORDERS`) + `RULE_MATCH_UID` (or session id) + `ROUTE_FLAG_LOOP_BACK` → `createAudioTrackSource(mix)` | `MODIFY_AUDIO_ROUTING` | **This is the duplex uplink.** AOSP sample: `VirtualDeviceManager` host `AudioInjector.java`. Writes to that `AudioTrack` become what the matched UID's `AudioRecord` hears. |
 | Per-UID device affinity | `AudioPolicy.setUidDeviceAffinity` / `setPreferredDevicesForStrategy` | `MODIFY_AUDIO_ROUTING` | "Play it on the speaker, keep me on the headset." |
 | Voice-comm playback capture | Mix flag `voiceCommunicationCaptureAllowed` + often `CAPTURE_VOICE_COMMUNICATION_OUTPUT` | Privileged | Needed if Maps / Gemini replies use `USAGE_VOICE_COMMUNICATION` or similar. Loopback-render public mixes only match UNKNOWN/MEDIA/GAME/VOICE_COMMUNICATION under restrictions; ASSISTANT / system usages need privileged rules. |
-| Concurrent-record bypass | `CAPTURE_AUDIO_OUTPUT` (legacy) or `CONCURRENT_AUDIO_RECORD_BYPASS` (Android 16+) | Privileged | Lets the actuator keep the mic while another app records (Maps listening). |
+| Concurrent-record bypass | `CAPTURE_AUDIO_OUTPUT` (legacy) or `BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION` (`signature|privileged`; checked on Android 17, 2026-10-19) | Privileged | Lets the actuator keep the mic while another app records (Maps listening). |
 
 **Unverified on Graphene (smoke on Phone B `panther`; confirm on `akita`):** whether a product priv-app's registered AudioPolicy receives focus callbacks, whether UID injector replaces (vs mixes with) the hardware mic, and latency for AEC. Spikes **S-04, S-05, S-27, S-28, S-31**. Both Pixel 7 and Pixel 8a are first-class Tier P targets; panther is the default flash/dev rig.
 
@@ -185,7 +185,7 @@ Full table lives in plan §6.0. Hardest first:
 | **S-28** | Privileged loopback captures that same app's spoken reply (`USAGE_ASSISTANT` / `VOICE_COMMUNICATION` / `MEDIA`) with usable latency | Usage matching + `CAPTURE_VOICE_COMMUNICATION_OUTPUT`; AEC reference quality |
 | **S-29** | `ACCESS_COMPUTER_CONTROL` (+ audio intercept flag) grantable to product VoiceInteractionService on Graphene 17; consent pre-grantable | OEM-only surface; may be stubbed or policy-blocked on Graphene |
 | **S-30** | `CREATE_VIRTUAL_DEVICE` + `VirtualAudioDevice` without a physical companion accessory | CDM association requirement |
-| **S-31** | Concurrent capture: actuator keeps VOS offline "stop" mic while target app records | `CONCURRENT_AUDIO_RECORD_BYPASS` / `CAPTURE_AUDIO_OUTPUT` behavior on Tensor |
+| **S-31** | Concurrent capture: actuator keeps VOS offline "stop" mic while target app records | `BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION` / `CAPTURE_AUDIO_OUTPUT` behavior on Tensor |
 | **S-32** | End-to-end "amazing" demo: headset on, music ducked, Maps nav, VOS asks traffic via Maps Gemini, reply heard, music resumes | Integration; defines the bar |
 | S-04/S-05/S-06 | Existing focus / loopback media / UID affinity spikes | Still required; S-05 extended for voice-comm |
 
