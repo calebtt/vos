@@ -193,8 +193,9 @@ public final class AudioPlane {
 
     /**
      * {@link #ownerResumedMedia}, taken before the media key; as {@link #ownerPausing}. If the turn
-     * ended while the oracle waited, RESTORE skipped the resume this took away, so a play that did not
-     * stand resumes that package itself (never into a call, never after a later turn opened).
+     * ended while the oracle waited, RESTORE acted on the cleared fields, so a play that did not stand
+     * puts back what RESTORE would have done: it resumes the package the turn paused, or, if the owner
+     * had paused it, arms the re-pause checks (never into a call, never after a later turn opened).
      */
     public synchronized Runnable ownerPlaying(String id) {
         if (!id.equals(turnId)) {
@@ -210,11 +211,30 @@ public final class AudioPlane {
                 if (id.equals(turnId)) {
                     ownerPausedMedia = before;
                     pausedPkg = pkg;
-                } else if (turnId == null && epoch == armed && pkg != null && !before) {
-                    resumeAfterTurn(id, pkg);
+                } else if (turnId == null && epoch == armed && pkg != null) {
+                    if (before) {
+                        repauseAfterTurn(id, pkg, armed);
+                    } else {
+                        resumeAfterTurn(id, pkg);
+                    }
                 }
             }
         };
+    }
+
+    /** Arms the re-pause checks RESTORE would have armed for {@code pkg}, unless a call has the audio. */
+    private void repauseAfterTurn(String id, String pkg, long armed) {
+        try {
+            int mode = platform.mode();
+            if (isCallMode(mode) || mode == MODE_IN_COMMUNICATION) {
+                return;
+            }
+        } catch (RuntimeException e) {
+            return; // the mode cannot be read: as at RESTORE, leave media alone
+        }
+        for (long ms : RECHECK_MS) {
+            platform.schedule(() -> keepOwnerPause(id, pkg, armed), ms);
+        }
     }
 
     /** Resumes {@code pkg} for turn {@code id} after it ended, unless a call has the audio. Never throws. */
