@@ -6,6 +6,9 @@ package com.vos.ipc;
  * results arrive with the M1 planes.
  */
 interface IVosSession {
-    /** {@link com.vos.ipc.Ipc#PROTOCOL_VERSION} of this build; a peer with another version is refused. */
+    /**
+     * {@link com.vos.ipc.Ipc#PROTOCOL_VERSION} of this build. PeerLink calls it on every new binder
+     * ({@link com.vos.ipc.Ipc#sessionHandshake()}) and drops a peer whose version differs.
+     */
     int protocolVersion();
 }

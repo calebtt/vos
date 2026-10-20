@@ -31,4 +31,14 @@ public final class Ipc {
     public static Intent sessionIntent() {
         return new Intent().setComponent(SESSION_SERVICE);
     }
+
+    /** PeerLink handshake for the session's link to the actuator: same protocol version or no link. */
+    public static PeerLink.Handshake actuatorHandshake() {
+        return b -> IVosActuator.Stub.asInterface(b).protocolVersion() == PROTOCOL_VERSION;
+    }
+
+    /** PeerLink handshake for the actuator's link to the session: same protocol version or no link. */
+    public static PeerLink.Handshake sessionHandshake() {
+        return b -> IVosSession.Stub.asInterface(b).protocolVersion() == PROTOCOL_VERSION;
+    }
 }
