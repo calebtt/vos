@@ -166,6 +166,46 @@ public class EgressTest {
     }
 
     @Test
+    public void sendsFromTheListenersCallbacksAreCountedToo() throws Exception {
+        CountDownLatch closed = new CountDownLatch(1);
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                if (text.equals("second")) {
+                    ws.close(1000, "done");
+                }
+            }
+        }));
+        egress.openWebSocket(new Request.Builder().url(url(ALLOWED, "/v1/realtime")).build(), "t-4",
+                new WebSocketListener() {
+                    @Override
+                    public void onOpen(WebSocket w, Response response) {
+                        w.send("first-from-onOpen"); // the usual place for a session's first message
+                        w.send("second");
+                    }
+
+                    @Override
+                    public void onClosing(WebSocket w, int code, String reason) {
+                        w.close(1000, null);
+                    }
+
+                    @Override
+                    public void onClosed(WebSocket w, int code, String reason) {
+                        closed.countDown();
+                    }
+                });
+        assertTrue(closed.await(10, TimeUnit.SECONDS));
+        List<JSONObject> l = lines();
+        assertEquals(1, l.size());
+        assertEquals("first-from-onOpen".length() + "second".length(), l.get(0).getLong("bytes_out"));
+    }
+
+    @Test
+    public void failedConnectionsAreNotSilentlyRetried() {
+        assertFalse(egress.client().retryOnConnectionFailure());
+    }
+
+    @Test
     public void aRefusedWebSocketIsLoggedOnce() throws Exception {
         CountDownLatch failed = new CountDownLatch(1);
         AtomicReference<Throwable> why = new AtomicReference<>();
