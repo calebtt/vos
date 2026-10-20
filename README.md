@@ -10,7 +10,7 @@ VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 7 (`pa
 
 ## Status
 
-**M0 (Ground).** Gradle skeleton, CI and the static policy check exist. The on-device spikes and Day 0 steps are written up but not run (`docs/spikes/`, `docs/runbooks/DAY0.md`).
+**M0 (Ground).** Gradle skeleton, CI and the static policy check exist. The VOS Image builder (`image/build.sh`) builds and verifies a re-signed panther OTA on the desk; flashing it waits for Caleb. Spike results so far are in `docs/spikes/`; Day 0 status is in `docs/runbooks/DAY0.md`.
 
 ## Layout
 
@@ -20,6 +20,7 @@ VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 7 (`pa
 | [session/](session/README.md) | `com.vos.session` app: voice, planner, egress; no sensors or actuation |
 | [vtb-sdk/](vtb-sdk/README.md) | `com.vos.vtb` library for VTB providers |
 | [ci/](ci/README.md) | static policy check (M0-02), its lists and negative tests |
+| [image/](image/README.md) | VOS Image (Tier P) builder, owner-key script, overlays, Graphene OTA pins |
 
 ## Build
 
