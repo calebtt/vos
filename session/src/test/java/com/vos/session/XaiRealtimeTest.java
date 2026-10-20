@@ -22,7 +22,7 @@ public class XaiRealtimeTest {
         @Override public void ownerTranscript(String t) { calls.add("owner " + t); }
         @Override public void audio(String rid, byte[] pcm) { calls.add("audio " + rid + " " + pcm.length); audio = pcm; }
         @Override public void replyTranscript(String t) { calls.add("reply " + t); }
-        @Override public void responseDone(String s) { calls.add("done " + s); }
+        @Override public void responseDone(String id, String s) { calls.add("done " + s); }
         @Override public void error(String c, String m) { calls.add("error " + c + " " + m); }
     }
 
