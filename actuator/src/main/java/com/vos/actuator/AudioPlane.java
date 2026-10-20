@@ -102,17 +102,16 @@ public final class AudioPlane {
             refuse("summon", "turn already open", source);
             return null;
         }
-        if (platform.callActive()) {
-            refuse("summon", "call active (HOLD: offline grammar only, not built yet)", source);
-            return null;
-        }
         String id = UUID.randomUUID().toString();
-        epoch++;
-        turnId = id;
-        ownerPausedMedia = false;
-        pausedPkg = null;
         boolean modeSet = false;
         try {
+            if (platform.callActive()) {
+                refuse("summon", "call active (HOLD: offline grammar only, not built yet)", source);
+                return null;
+            }
+            turnId = id;
+            ownerPausedMedia = false;
+            pausedPkg = null;
             String playing = platform.playingMediaPackage();
             if (playing != null && platform.pauseMedia(playing)) {
                 pausedPkg = playing;
@@ -125,12 +124,22 @@ public final class AudioPlane {
             commDeviceSet = outDev != null;
             inDev = platform.inputDevice();
         } catch (RuntimeException e) { // the audio server is down: give back what was taken, open no turn
-            String undone = String.join(" ", undo(modeSet));
+            List<String> failed = new ArrayList<>();
+            String paused = pausedPkg;
+            if (paused != null) { // this attempt paused it; nothing else will resume it
+                try {
+                    platform.playMedia(paused);
+                } catch (RuntimeException e2) {
+                    failed.add("playMedia");
+                }
+            }
+            failed.addAll(undo(modeSet));
             turnId = null;
             refuse("summon", "audio error: " + e.getClass().getSimpleName()
-                    + (undone.isEmpty() ? "" : ", undo failed: " + undone), source);
+                    + (failed.isEmpty() ? "" : ", undo failed: " + String.join(" ", failed)), source);
             return null;
         }
+        epoch++; // only a turn that opened retires the last turn's re-pause checks
         move(State.CAPTURE, source);
         return id;
     }
