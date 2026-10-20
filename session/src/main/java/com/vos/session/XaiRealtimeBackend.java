@@ -31,8 +31,9 @@ import org.json.JSONArray;
  *       response's queued audio and any of its deltas that arrive afterwards, so at most about one
  *       lead of it is still in the pipe;</li>
  *   <li>a tool call goes to the actuator ({@link ToolCaller}) off the WebSocket thread, and its result
- *       (VERIFIED, UNVERIFIED or FAILED from the actuator's oracle) goes back to the model, which then
- *       answers; {@code end_turn} closes the turn once the reply has played;</li>
+ *       (VERIFIED, UNVERIFIED or FAILED from the actuator's oracle) goes back to the model; when one
+ *       response holds several calls, the model is asked to answer once, after all their results;
+ *       {@code end_turn} closes the turn once the reply has played and no tool call is running;</li>
  *   <li>the turn ends when the owner stays quiet for {@link Timing#idleMs} after a reply (not while a
  *       tool call is in flight), never speaks within {@link Timing#firstSpeechMs}, reaches
  *       {@link Timing#maxTurnMs}, the model ends it, or on a vendor error; the actuator ending it
@@ -121,6 +122,11 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         volatile long endDeadline = Long.MAX_VALUE;
         volatile boolean responseHadCall;
         volatile boolean endRequested;
+        /** The tool calls of one response: answered with a single response.create after all of them. */
+        private final Object batchLock = new Object();
+        private int batchPending;
+        private boolean batchHasTools;
+        private boolean batchResponseDone;
         /** The response audio is arriving for, and the one a barge-in cut off ("" when the vendor sends no ids). */
         volatile String currentResponse = "";
         volatile String cancelledResponse = "";
@@ -286,7 +292,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                     if (c == null) {
                         if (responseDone && !speaking) {
                             long left = Math.max(0, written * 1000 / BYTES_PER_SECOND - (now() - start));
-                            if (endRequested && endDeadline == Long.MAX_VALUE) {
+                            if (endRequested && endDeadline == Long.MAX_VALUE && toolsInFlight.get() == 0) {
                                 endDeadline = now() + left + timing.leadMs;
                             } else if (!endRequested && idleDeadline == Long.MAX_VALUE && toolsInFlight.get() == 0) {
                                 idleDeadline = now() + left + timing.idleMs;
@@ -382,11 +388,38 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
             if (responseHadCall) {
                 responseHadCall = false;
-                if (!endRequested) {
-                    return; // the answer comes in the response after the tool result
+                boolean tools;
+                boolean go = false;
+                synchronized (batchLock) {
+                    tools = batchHasTools;
+                    batchResponseDone = true;
+                    if (tools && batchPending == 0) {
+                        go = true;
+                        resetBatch();
+                    }
+                }
+                if (go) {
+                    continueAfterTools();
+                }
+                if (tools || !endRequested) {
+                    return; // the answer comes in the response after the tool results
                 }
             }
             responseDone = true;
+        }
+
+        /** All of one response's tool results are in: let the model answer, once. */
+        private void continueAfterTools() {
+            WebSocket w = ws;
+            if (w != null && !over()) {
+                w.send(XaiRealtime.responseCreate());
+            }
+        }
+
+        private void resetBatch() {
+            batchPending = 0;
+            batchHasTools = false;
+            batchResponseDone = false;
         }
 
         @Override
@@ -402,6 +435,10 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 Log.i(TAG, "turn " + turnId + " tool " + name + " (the model ends the turn)");
                 return;
             }
+            synchronized (batchLock) {
+                batchPending++;
+                batchHasTools = true;
+            }
             toolsInFlight.incrementAndGet();
             idleDeadline = Long.MAX_VALUE;
             toolRunner.execute(() -> {
@@ -411,9 +448,19 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 WebSocket ws2 = ws;
                 if (ws2 != null && !over()) {
                     ws2.send(XaiRealtime.functionOutput(callId, result));
-                    ws2.send(XaiRealtime.responseCreate());
                 }
                 toolsInFlight.decrementAndGet();
+                boolean go;
+                synchronized (batchLock) {
+                    batchPending--;
+                    go = batchPending == 0 && batchResponseDone;
+                    if (go) {
+                        resetBatch();
+                    }
+                }
+                if (go) {
+                    continueAfterTools();
+                }
             });
         }
 
