@@ -6,24 +6,40 @@ import android.os.Binder;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.os.RemoteException;
+import com.vos.ipc.BinderGuard;
+import com.vos.ipc.Grant;
+import com.vos.ipc.IVosSession;
+import com.vos.ipc.Ipc;
 
 /**
- * The actuator's entry point into the session (IVosSession lands in M1). Every transaction is
- * rejected unless the caller is exactly the actuator package, before any argument is read (§5.3).
+ * The actuator's entry point into the session. Every transaction, including the interface
+ * descriptor query, runs the Binder guard before any argument is read (§5.3). Every method runs it
+ * again: an in-process caller gets this Stub from asInterface() and calls the method directly,
+ * without onTransact, and outside a transaction the calling UID is this app's own, which the guard
+ * refuses.
  */
 public final class SessionService extends Service {
-    static final String ACTUATOR_PACKAGE = "com.vos.actuator";
+    private BinderGuard guard;
 
-    private final Binder binder = new Binder() {
+    private final IVosSession.Stub binder = new IVosSession.Stub() {
         @Override
-        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
-            String[] callers = getPackageManager().getPackagesForUid(Binder.getCallingUid());
-            if (callers == null || callers.length != 1 || !ACTUATOR_PACKAGE.equals(callers[0])) {
-                throw new SecurityException("UNAUTHORIZED");
-            }
+        public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            guard.require(Binder.getCallingUid(), Grant.ACTUATOR_CORE);
             return super.onTransact(code, data, reply, flags);
         }
+
+        @Override
+        public int protocolVersion() {
+            guard.require(Binder.getCallingUid(), Grant.ACTUATOR_CORE);
+            return Ipc.PROTOCOL_VERSION;
+        }
     };
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        guard = ((SessionApp) getApplication()).actuatorGuard();
+    }
 
     @Override
     public IBinder onBind(Intent intent) {
