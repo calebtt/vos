@@ -20,13 +20,18 @@ CI = Path(__file__).resolve().parents[1]
 NS = "http://schemas.android.com/apk/res/android:"
 
 
-def xmltree(package, permissions=(), components=(), app_attrs=()):
-    """A dump in aapt2 `dump xmltree` layout. components: (kind, name, exported, permission, actions, meta)."""
+def xmltree(package, permissions=(), components=(), app_attrs=(), defines=()):
+    """A dump in aapt2 `dump xmltree` layout. components: (kind, name, exported, permission, actions, meta);
+    defines: (name, protectionLevel int or None) for <permission> elements."""
     lines = [
         "N: android=http://schemas.android.com/apk/res/android (line=2)",
         "  E: manifest (line=2)",
         f'    A: package="{package}" (Raw: "{package}")',
     ]
+    for name, level in defines:
+        lines += ["      E: permission (line=4)", f'        A: {NS}name(0x01010003)="{name}" (Raw: "{name}")']
+        if level is not None:
+            lines.append(f"        A: {NS}protectionLevel(0x01010009)=0x{level:08x}")
     for p in permissions:
         lines += ["      E: uses-permission (line=5)", f'        A: {NS}name(0x01010003)="{p}" (Raw: "{p}")']
     lines.append("      E: application (line=9)")
@@ -70,7 +75,8 @@ def make_dex(strings_):
 
 ACTUATOR_OK = dict(
     package="com.vos.actuator",
-    permissions=["android.permission.RECORD_AUDIO"],
+    defines=[("com.vos.permission.SESSION", 0x2)],
+    permissions=["android.permission.RECORD_AUDIO", "com.vos.permission.ACTUATOR"],
     components=[
         ("service", "com.vos.actuator.ActuatorService", True, "com.vos.permission.SESSION", [], []),
         ("service", "com.vos.actuator.HandsService", True, "android.permission.BIND_ACCESSIBILITY_SERVICE",
@@ -82,12 +88,24 @@ ACTUATOR_OK = dict(
 )
 SESSION_OK = dict(
     package="com.vos.session",
-    permissions=["android.permission.INTERNET", "android.permission.POST_NOTIFICATIONS"],
+    defines=[("com.vos.permission.ACTUATOR", 0x2)],
+    permissions=["android.permission.INTERNET", "android.permission.POST_NOTIFICATIONS", "com.vos.permission.SESSION"],
     components=[
         ("activity", "com.vos.session.MainActivity", True, None, ["android.intent.action.MAIN"], []),
         ("service", "com.vos.session.SessionService", True, "com.vos.permission.ACTUATOR", [], []),
     ],
 )
+
+
+# Protection levels as the framework manifest in android.jar defines them (android-35).
+PLATFORM_LEVELS = {
+    "android.permission.INTERNET": 0x0,
+    "android.permission.POST_NOTIFICATIONS": 0x1,
+    "android.permission.RECORD_AUDIO": 0x1001,
+    "android.permission.CAPTURE_AUDIO_HOTWORD": 0x04000012,
+    "android.permission.ACCESS_ULTRASOUND": 0x12,
+    "android.permission.BIND_ACCESSIBILITY_SERVICE": 0x2,
+}
 
 
 class PermissionRules(unittest.TestCase):
@@ -116,6 +134,43 @@ class PermissionRules(unittest.TestCase):
                      "android.permission.WRITE_SECURE_SETTINGS"):
             f = facts("com.vos.session", ["android.permission.INTERNET", perm])
             self.assertTrue(pc.check_denied_permissions("session", f, self.session_denied), perm)
+
+    def test_own_guard_permissions_are_signature(self):
+        self.assertEqual([], pc.check_own_permission("actuator", facts(**ACTUATOR_OK)))
+        self.assertEqual([], pc.check_own_permission("session", facts(**SESSION_OK)))
+
+    def test_own_guard_permission_downgraded_or_missing_fails(self):
+        # normal, dangerous, signature|privileged, signature|knownSigner, no level, not defined at all
+        for defines in ([("com.vos.permission.ACTUATOR", 0x0)], [("com.vos.permission.ACTUATOR", 0x1)],
+                        [("com.vos.permission.ACTUATOR", 0x12)], [("com.vos.permission.ACTUATOR", 0x08000002)],
+                        [("com.vos.permission.ACTUATOR", None)], []):
+            f = facts(**{**SESSION_OK, "defines": defines})
+            fails = pc.check_own_permission("session", f)
+            self.assertEqual(1, len(fails), defines)
+            self.assertIn("com.vos.permission.ACTUATOR", fails[0])
+
+    def test_session_with_unlisted_privileged_permission_fails(self):
+        self.assertEqual([], pc.check_no_privileged_permissions("session", facts(**SESSION_OK), PLATFORM_LEVELS))
+        for perm in ("android.permission.CAPTURE_AUDIO_HOTWORD", "android.permission.ACCESS_ULTRASOUND"):
+            self.assertNotIn(perm, self.session_denied)  # caught by its protection flags, not the fixed list
+            f = facts("com.vos.session", ["android.permission.INTERNET", perm])
+            fails = pc.check_no_privileged_permissions("session", f, PLATFORM_LEVELS)
+            self.assertEqual(1, len(fails), perm)
+            self.assertIn(perm, fails[0])
+        self.assertTrue(pc.is_signature_privileged(0x3))  # legacy signatureOrSystem
+        self.assertFalse(pc.is_signature_privileged(0x2))
+
+    def test_platform_levels_from_the_sdk(self):
+        try:
+            sdk = pc.find_sdk(CI.parent)
+            aapt2 = pc.build_tool(sdk, "aapt2")
+            _, levels = pc.platform_permission_levels(aapt2, sdk)
+        except SystemExit as e:
+            self.skipTest(f"no Android SDK: {e}")
+        self.assertTrue(pc.is_signature_privileged(levels["android.permission.CAPTURE_AUDIO_HOTWORD"]))
+        self.assertTrue(pc.is_signature_privileged(levels["android.permission.MODIFY_AUDIO_ROUTING"]))
+        self.assertFalse(pc.is_signature_privileged(levels["android.permission.INTERNET"]))
+        self.assertFalse(pc.is_signature_privileged(levels["android.permission.POST_NOTIFICATIONS"]))
 
     def test_session_with_a11y_or_nls_permission_fails(self):
         for perm in ("android.permission.BIND_ACCESSIBILITY_SERVICE",

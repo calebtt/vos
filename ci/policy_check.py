@@ -24,6 +24,11 @@ from pathlib import Path
 ANDROID_NS = "http://schemas.android.com/apk/res/android:"
 APPS = ("actuator", "session")
 PACKAGES = {"actuator": "com.vos.actuator", "session": "com.vos.session"}
+# The permission each app defines to guard its Binder entry; it must stay exactly `signature` (§5.3).
+OWN_PERMISSIONS = {"actuator": "com.vos.permission.SESSION", "session": "com.vos.permission.ACTUATOR"}
+PROTECTION_SIGNATURE = 0x2
+PROTECTION_SIGNATURE_OR_SYSTEM = 0x3
+PROTECTION_FLAG_PRIVILEGED = 0x10
 
 # Components bound by the system for accessibility, notification access and voice interaction.
 SENSITIVE_BIND_PERMISSIONS = {
@@ -138,6 +143,25 @@ def _truthy(value):
     return value is not None and value.lower() in ("true", "0xffffffff", "-1")
 
 
+def _protection_level(value):
+    """aapt2 prints a compiled protectionLevel as hex (signature is 0x00000002); None if absent or unreadable."""
+    if value is None:
+        return None
+    try:
+        return int(value, 0)
+    except ValueError:
+        return None
+
+
+def declared_permissions(root):
+    """{name: protectionLevel int or None} for every <permission> a manifest defines."""
+    manifest = next(root.find_all("manifest"), None)
+    if manifest is None:
+        raise ValueError("no <manifest> element in xmltree dump")
+    return {n.attrs.get("name", ""): _protection_level(n.attrs.get("protectionLevel"))
+            for n in manifest.find_all("permission")}
+
+
 def manifest_facts(root):
     manifest = next(root.find_all("manifest"), None)
     if manifest is None:
@@ -174,6 +198,7 @@ def manifest_facts(root):
     return {
         "package": package,
         "uses_permissions": uses,
+        "declared_permissions": declared_permissions(root),
         "components": components,
         "app_meta": meta,
         "debuggable": app is not None and _truthy(app.attrs.get("debuggable")),
@@ -192,6 +217,33 @@ def check_package(app, facts):
 def check_denied_permissions(app, facts, denied):
     denied = set(denied)
     return [f"{app}: requests denied permission {p}" for p in facts["uses_permissions"] if p in denied]
+
+
+def check_own_permission(app, facts):
+    """The app's Binder guard permission must be defined, and be plain `signature` with no extra flags."""
+    name = OWN_PERMISSIONS[app]
+    declared = facts["declared_permissions"]
+    if name not in declared:
+        return [f"{app}: does not define {name}"]
+    level = declared[name]
+    if level != PROTECTION_SIGNATURE:
+        shown = "missing" if level is None else f"0x{level:08x}"
+        return [f"{app}: {name} has protectionLevel {shown}, want signature (0x{PROTECTION_SIGNATURE:08x})"]
+    return []
+
+
+def is_signature_privileged(level):
+    return (level & 0xF) == PROTECTION_SIGNATURE_OR_SYSTEM or bool(level & PROTECTION_FLAG_PRIVILEGED)
+
+
+def check_no_privileged_permissions(app, facts, platform_levels):
+    """Fail on any requested platform permission whose protection level is signature|privileged."""
+    fails = []
+    for p in facts["uses_permissions"]:
+        level = platform_levels.get(p)
+        if level is not None and is_signature_privileged(level):
+            fails.append(f"{app}: requests signature|privileged permission {p} (protectionLevel 0x{level:08x})")
+    return fails
 
 
 def check_no_sensitive_components(app, facts):
@@ -484,6 +536,19 @@ def aapt2_out(aapt2, *args):
     return subprocess.run([aapt2, *args], check=True, capture_output=True, text=True).stdout
 
 
+def platform_permission_levels(aapt2, sdk):
+    """(jar, {permission: protectionLevel}) from the framework manifest inside the newest SDK android.jar."""
+    jars = sorted((p for p in (sdk / "platforms").glob("android-*/android.jar")),
+                  key=lambda p: [int(x) if x.isdigit() else 0 for x in re.split(r"[-.]", p.parent.name)])
+    if not jars:
+        raise SystemExit(f"policy_check: no platforms/android-*/android.jar under {sdk}")
+    xml = aapt2_out(aapt2, "dump", "xmltree", "--file", "AndroidManifest.xml", str(jars[-1]))
+    levels = {k: v for k, v in declared_permissions(parse_xmltree(xml)).items() if v is not None}
+    if not levels:
+        raise SystemExit(f"policy_check: no permission protection levels in {jars[-1]}")
+    return jars[-1], levels
+
+
 def resource_strings(aapt2, apk):
     out = aapt2_out(aapt2, "dump", "strings", str(apk))
     return [m.group(1) for m in re.finditer(r"^String #\d+ : (.*)$", out, re.MULTILINE)]
@@ -508,6 +573,9 @@ def main(argv=None):
     apksigner = build_tool(sdk, "apksigner")
     groups, class_prefixes, actuator_classes = read_forbidden(ci / "forbidden-artifacts.txt")
     retired = read_list(ci / "retired-names.txt")
+    platform_jar, platform_levels = platform_permission_levels(aapt2, sdk)
+    print(f"session permissions are checked against {len(platform_levels)} platform protection levels "
+          f"({platform_jar.relative_to(sdk)})")
     denied = {
         "actuator": read_list(ci / "actuator-denied-permissions.txt"),
         "session": read_list(ci / "session-denied-permissions.txt") + read_list(ci / "privileged-permissions.txt"),
@@ -527,7 +595,9 @@ def main(argv=None):
             entries = apk_entries(apk)
             fails += check_package(app, facts)
             fails += check_denied_permissions(app, facts, denied[app])
+            fails += check_own_permission(app, facts)
             if app == "session":
+                fails += check_no_privileged_permissions(app, facts, platform_levels)
                 fails += check_no_sensitive_components(app, facts)
             fails += check_exported(app, facts, read_exported_allowlist(ci / f"exported-components-{app}.txt"))
             prefixes = class_prefixes + (actuator_classes if app == "actuator" else [])
