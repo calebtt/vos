@@ -174,6 +174,15 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 }
 
                 @Override
+                public void onClosing(WebSocket w, int code, String reason) {
+                    // The vendor closed first. OkHttp reports that here (onClosed comes only after our
+                    // own close), so the turn ends now, not at the cap. Our close completes the handshake;
+                    // 1000 is always sendable, unlike some codes a peer may report (e.g. 1005).
+                    finish("vendor closed: " + code);
+                    w.close(1000, null);
+                }
+
+                @Override
                 public void onClosed(WebSocket w, int code, String reason) {
                     finish("vendor closed: " + code);
                 }
