@@ -376,6 +376,37 @@ public class XaiRealtimeBackendTest {
     }
 
     @Test
+    public void theVendorClosingWhileTheOwnerSpeaksEndsTheTurnAtOnce() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean sent;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                if (text.contains("\"session.update\"")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (text.contains("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !sent) {
+                    sent = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}"); // no quiet clock while speaking
+                    ws.close(1001, "going away");
+                }
+            }
+        }));
+        Mic mic = new Mic();
+        long t0 = System.nanoTime();
+        String reason = backend(500).run("t-21", mic.in, new ByteArrayOutputStream(), () -> { });
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        mic.close();
+        assertEquals("vendor closed: 1001", reason);
+        assertTrue("ended at once, not at a cap: " + ms + " ms", ms < 4_000);
+    }
+
+    @Test
     public void pacingHoldsTheLeadAcrossGapsLongerThanThePoll() throws Exception {
         vault.put(KeyVault.XAI, "xai-test-key");
         byte[] answer = filled(51200, 0x44); // 1.6 s in four 400 ms deltas, 250 ms apart
