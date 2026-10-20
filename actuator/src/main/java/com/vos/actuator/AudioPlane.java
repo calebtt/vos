@@ -162,17 +162,51 @@ public final class AudioPlane {
 
     /** The owner asked for a media pause or stop during the turn (fast tools); RESTORE must not resume. */
     public synchronized void ownerPausedMedia(String id) {
-        if (id.equals(turnId)) {
-            ownerPausedMedia = true;
-        }
+        ownerPausing(id);
     }
 
     /** The owner asked for playback during the turn; media is theirs again, not ours to resume. */
     public synchronized void ownerResumedMedia(String id) {
-        if (id.equals(turnId)) {
-            ownerPausedMedia = false;
-            pausedPkg = null;
+        ownerPlaying(id);
+    }
+
+    /**
+     * {@link #ownerPausedMedia}, taken before the media key is sent, so a turn that ends while the
+     * oracle waits leaves the media paused. Returns the undo for a pause that did not stand; it does
+     * nothing once the turn has ended.
+     */
+    public synchronized Runnable ownerPausing(String id) {
+        if (!id.equals(turnId)) {
+            return () -> { };
         }
+        boolean before = ownerPausedMedia;
+        ownerPausedMedia = true;
+        return () -> {
+            synchronized (this) {
+                if (id.equals(turnId)) {
+                    ownerPausedMedia = before;
+                }
+            }
+        };
+    }
+
+    /** {@link #ownerResumedMedia}, taken before the media key; as {@link #ownerPausing}. */
+    public synchronized Runnable ownerPlaying(String id) {
+        if (!id.equals(turnId)) {
+            return () -> { };
+        }
+        boolean before = ownerPausedMedia;
+        String pkg = pausedPkg;
+        ownerPausedMedia = false;
+        pausedPkg = null;
+        return () -> {
+            synchronized (this) {
+                if (id.equals(turnId)) {
+                    ownerPausedMedia = before;
+                    pausedPkg = pkg;
+                }
+            }
+        };
     }
 
     /**

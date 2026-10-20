@@ -69,9 +69,16 @@ public class FastToolsTest {
     private final FakePlatform platform = new FakePlatform();
     private final FastTools tools = new FastTools(platform);
     private final List<String> intents = new ArrayList<>();
+    /** Records the owner intents that stand: an undo takes its own entry back out. */
     private final FastTools.MediaIntent media = new FastTools.MediaIntent() {
-        @Override public void ownerPaused() { intents.add("paused"); }
-        @Override public void ownerPlayed() { intents.add("played"); }
+        @Override public Runnable ownerPausing() { return take("paused"); }
+        @Override public Runnable ownerPlaying() { return take("played"); }
+
+        private Runnable take(String intent) {
+            intents.add(intent);
+            int at = intents.size() - 1;
+            return () -> intents.remove(at);
+        }
     };
 
     private JSONObject run(String name, String args) throws Exception {

@@ -99,6 +99,11 @@ final class XaiRealtime {
         return "{\"type\":\"response.create\"}";
     }
 
+    /** Cancels the active response (accepted without an error by xAI, 2026-10-20). */
+    static String responseCancel() {
+        return "{\"type\":\"response.cancel\"}";
+    }
+
     /** Parses one server event and calls the handler. Unknown events and bad JSON are ignored. */
     static void dispatch(String text, Handler h) {
         JSONObject m;
