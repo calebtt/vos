@@ -524,6 +524,12 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                         + (stands ? " (the model ends the turn)" : " (ignored: the owner talked over that response)"));
                 return;
             }
+            if (cancelled(responseId)) { // a stale act from a response the owner talked over is not run
+                w.send(XaiRealtime.functionOutput(callId,
+                        "{\"status\":\"FAILED\",\"detail\":\"not run: the owner talked over this response\"}"));
+                Log.i(TAG, "turn " + turnId + " tool " + name + " not run (the owner talked over that response)");
+                return; // not part of any batch, so no response.create follows
+            }
             int gen;
             synchronized (batchLock) {
                 gen = batchGen;

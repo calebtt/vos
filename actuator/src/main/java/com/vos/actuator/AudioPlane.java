@@ -191,13 +191,18 @@ public final class AudioPlane {
         };
     }
 
-    /** {@link #ownerResumedMedia}, taken before the media key; as {@link #ownerPausing}. */
+    /**
+     * {@link #ownerResumedMedia}, taken before the media key; as {@link #ownerPausing}. If the turn
+     * ended while the oracle waited, RESTORE skipped the resume this took away, so a play that did not
+     * stand resumes that package itself (never into a call, never after a later turn opened).
+     */
     public synchronized Runnable ownerPlaying(String id) {
         if (!id.equals(turnId)) {
             return () -> { };
         }
         boolean before = ownerPausedMedia;
         String pkg = pausedPkg;
+        long armed = epoch;
         ownerPausedMedia = false;
         pausedPkg = null;
         return () -> {
@@ -205,9 +210,29 @@ public final class AudioPlane {
                 if (id.equals(turnId)) {
                     ownerPausedMedia = before;
                     pausedPkg = pkg;
+                } else if (turnId == null && epoch == armed && pkg != null && !before) {
+                    resumeAfterTurn(id, pkg);
                 }
             }
         };
+    }
+
+    /** Resumes {@code pkg} for turn {@code id} after it ended, unless a call has the audio. Never throws. */
+    private void resumeAfterTurn(String id, String pkg) {
+        try {
+            int mode = platform.mode();
+            if (isCallMode(mode) || mode == MODE_IN_COMMUNICATION) {
+                return;
+            }
+            if (platform.playMedia(pkg)) {
+                Map<String, Object> l = line("audio.media_resumed", "the owner's play did not stand and the turn had ended");
+                l.put("turnId", id);
+                l.put("pausedPkg", pkg);
+                audit.transition(l);
+            }
+        } catch (RuntimeException e) {
+            // the audio server or the player is gone; nothing to resume
+        }
     }
 
     /**
