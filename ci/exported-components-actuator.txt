@@ -4,3 +4,4 @@
 service com.vos.actuator.ActuatorService com.vos.permission.SESSION
 service com.vos.actuator.HandsService android.permission.BIND_ACCESSIBILITY_SERVICE
 service com.vos.actuator.NotificationsService android.permission.BIND_NOTIFICATION_LISTENER_SERVICE
+service com.vos.actuator.SummonTile android.permission.BIND_QUICK_SETTINGS_TILE

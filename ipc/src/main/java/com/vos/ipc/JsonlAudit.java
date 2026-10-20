@@ -6,6 +6,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
+import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -38,6 +40,31 @@ public final class JsonlAudit implements BinderGuard.Audit {
             }
             o.put("packages", p);
             o.put("reason", reason);
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+        append(o.toString());
+    }
+
+    /**
+     * One audit line from a map whose {@code "event"} entry names it (e.g. the AudioPlane's
+     * transitions). Values: strings, numbers, booleans, null, or collections of those.
+     */
+    public void record(Map<String, Object> fields) {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("ts", System.currentTimeMillis());
+            for (Map.Entry<String, Object> e : fields.entrySet()) {
+                Object v = e.getValue();
+                if (v instanceof Collection) {
+                    JSONArray a = new JSONArray();
+                    for (Object x : (Collection<?>) v) {
+                        a.put(x);
+                    }
+                    v = a;
+                }
+                o.put(e.getKey(), v == null ? JSONObject.NULL : v);
+            }
         } catch (JSONException e) {
             throw new IllegalStateException(e);
         }

@@ -1,0 +1,4 @@
+# Exported components that exist in the actuator's DEBUG build only (src/debug). They are allowed in
+# the debug APK and fail the check if they ever reach the release APK.
+# kind name permission
+activity com.vos.actuator.DebugSummonActivity android.permission.DUMP

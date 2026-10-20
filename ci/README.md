@@ -9,7 +9,7 @@
 | Session: no signature\|privileged permissions | each requested permission's `protectionLevel` in the framework manifest of the SDK's `android.jar` (fails on the `privileged` flag or legacy `signatureOrSystem`), plus a fixed denylist for names that manifest lacks | `privileged-permissions.txt` |
 | Each app's Binder guard permission (`SESSION` defined by the actuator, `ACTUATOR` by the session) is defined and exactly `signature` (`0x2`, no added flags) | `<permission>` in the merged manifest | — |
 | Session: hosts no accessibility / NLS / voice-interaction service | bind permission, intent action, meta-data | — |
-| Only declared exported components, with the declared guard permission | manifest; fails on extra, mismatched or stale entries | `exported-components-{actuator,session}.txt` |
+| Only declared exported components, with the declared guard permission; system-bound services (accessibility, NLS, voice interaction, QS tiles) must require their system `BIND_*` permission | manifest; fails on extra, mismatched or stale entries. Debug APKs also allow the debug-only list, which fails the check if one of its components reaches a release APK | `exported-components-{actuator,session}.txt`, `exported-components-actuator-debug.txt` |
 | Release APKs not debuggable | manifest | — |
 | No Play services, Firebase, ML Kit (and Play Core) | Gradle dependency graph (`writePolicyDeps` → `build/policy/deps.txt`) + dex string tables + resource strings + zip entries + manifest. A dex string that only names such a package (OkHttp's Play-provider socket probe) is exempt by exact match, per app, with its reason | `forbidden-artifacts.txt`, `forbidden-exceptions.txt` |
 | Actuator holds no HTTP/WebSocket library | dex | `forbidden-artifacts.txt` (`actuator-class:`) |
