@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- S-01 / S-03: privileged-permission allowlist for the hello priv-app in /product/priv-app/VosHello.
+     The first five are what the baked APK requests. CAPTURE_MEDIA_OUTPUT and CAPTURE_AUDIO_HOTWORD are
+     allowlisted ahead of the S-04, S-05 and S-27a probe builds, which are installed over the system copy
+     with `adb install -r` and keep its privileged status. An allowlisted permission the APK does not
+     request is ignored. -->
+<permissions>
+    <privapp-permissions package="com.vos.hello">
+        <permission name="android.permission.MODIFY_AUDIO_ROUTING" />
+        <permission name="android.permission.CAPTURE_AUDIO_OUTPUT" />
+        <permission name="android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT" />
+        <permission name="android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION" />
+        <permission name="android.permission.MEDIA_CONTENT_CONTROL" />
+        <permission name="android.permission.CAPTURE_MEDIA_OUTPUT" />
+        <permission name="android.permission.CAPTURE_AUDIO_HOTWORD" />
+    </privapp-permissions>
+</permissions>
