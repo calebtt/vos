@@ -10,6 +10,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import okhttp3.Call;
+import okhttp3.Cookie;
+import okhttp3.CookieJar;
 import okhttp3.Dns;
 import okhttp3.EventListener;
 import okhttp3.HttpUrl;
@@ -26,8 +28,9 @@ import okio.ByteString;
  *   <li>an application interceptor refuses any other host before a connection is made;</li>
  *   <li>the DNS resolver refuses to resolve any other host, so nothing below the interceptor can
  *       reach one either;</li>
- *   <li>redirects are not followed, no proxy is used, and nothing is resent within a call (no
- *       connection-failure retry, no 503 Retry-After resend).</li>
+ *   <li>redirects are not followed, no proxy is used, and a call sends one request: OkHttp's own
+ *       follow-ups (a connection-failure retry, the resend on a 503 with "Retry-After: 0") are off or
+ *       refused, the WebSocket handshake included.</li>
  * </ul>
  * Every HTTP request and WebSocket connection is written to the {@link RequestLog} with its host,
  * bytes and turn.
@@ -41,6 +44,47 @@ public final class Egress {
         RefusedException(String host) {
             super("egress refused: " + host + " is not on the allowlist");
         }
+    }
+
+    /** Thrown (as the call's failure) when OkHttp tries to send a call's request a second time. */
+    public static final class ResendRefusedException extends IOException {
+        ResendRefusedException(String host) {
+            super("egress refused: OkHttp tried to resend a request to " + host);
+        }
+    }
+
+    /**
+     * Attempts of the call running on this thread. OkHttp runs a call's whole interceptor chain,
+     * follow-ups included, on one thread, inside the application interceptor that sets this.
+     */
+    private static final ThreadLocal<int[]> ATTEMPTS = new ThreadLocal<>();
+
+    /**
+     * One request per call. OkHttp's BridgeInterceptor asks the cookie jar before every request it
+     * sends, follow-ups included, and that is the only hook that also runs on a WebSocket handshake
+     * (OkHttp 4.12 gives that call no network interceptors and no event listener). A second ask
+     * within one call fails the call before the request is written; with no connection-failure
+     * retry, OkHttp passes that failure to the caller. No cookies are ever stored or sent.
+     */
+    private static final CookieJar ONE_REQUEST_PER_CALL = new CookieJar() {
+        @Override
+        public void saveFromResponse(HttpUrl url, List<Cookie> cookies) {
+        }
+
+        @Override
+        public List<Cookie> loadForRequest(HttpUrl url) {
+            int[] n = ATTEMPTS.get();
+            if (n != null && ++n[0] > 1) {
+                throw Egress.<RuntimeException>sneaky(new ResendRefusedException(url.host()));
+            }
+            return List.of();
+        }
+    };
+
+    /** Throws a checked exception through an interface that does not declare it (OkHttp's are Kotlin). */
+    @SuppressWarnings("unchecked")
+    private static <E extends Throwable> E sneaky(Throwable t) throws E {
+        throw (E) t;
     }
 
     /** Request tag: the turn a request belongs to, for the log. */
@@ -73,7 +117,9 @@ public final class Egress {
                 // No silent replays: a call the server may already have read is not sent twice
                 // under one log line. A caller that wants another attempt makes a new call.
                 .retryOnConnectionFailure(false)
-                // OkHttp also resends once on a 503 with "Retry-After: 0"; without the header it does not.
+                .cookieJar(ONE_REQUEST_PER_CALL)
+                // OkHttp also resends once on a 503 with "Retry-After: 0". For HTTP calls this drops the
+                // header so the caller sees the 503 itself; the cookie jar stops the resend everywhere.
                 .addNetworkInterceptor(chain -> {
                     Response r = chain.proceed(chain.request());
                     return r.code() == 503 && r.header("Retry-After") != null
@@ -96,7 +142,12 @@ public final class Egress {
                         }
                         throw new RefusedException(r.url().host());
                     }
-                    return chain.proceed(r);
+                    ATTEMPTS.set(new int[1]);
+                    try {
+                        return chain.proceed(r);
+                    } finally {
+                        ATTEMPTS.remove();
+                    }
                 })
                 .eventListenerFactory(call -> call.request().tag(WebSocketTag.class) != null
                         ? EventListener.NONE : new HttpLogger())
@@ -171,7 +222,8 @@ public final class Egress {
                 if (response != null) {
                     status[0] = response.code();
                 }
-                finish(t instanceof RefusedException ? "refused" : "failed:" + t.getClass().getSimpleName());
+                finish(t instanceof RefusedException ? "refused"
+                        : t instanceof ResendRefusedException ? "resend refused" : "failed:" + t.getClass().getSimpleName());
                 listener.onFailure(counted, t, response);
             }
         };
