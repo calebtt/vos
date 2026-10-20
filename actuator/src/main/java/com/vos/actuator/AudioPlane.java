@@ -77,6 +77,8 @@ public final class AudioPlane {
     private boolean focusHeld;
     private String pausedPkg;
     private boolean ownerPausedMedia;
+    /** The package a play that stood took back from the turn; a later pause re-pauses it. */
+    private String ownerPlayedPkg;
     /** Bumped by every summon, so RESTORE's media re-checks never act after a later turn has begun. */
     private long epoch;
 
@@ -112,6 +114,7 @@ public final class AudioPlane {
             turnId = id;
             ownerPausedMedia = false;
             pausedPkg = null;
+            ownerPlayedPkg = null;
             String playing = platform.playingMediaPackage();
             if (playing != null && platform.pauseMedia(playing)) {
                 pausedPkg = playing;
@@ -189,7 +192,10 @@ public final class AudioPlane {
             try {
                 pausedPkg = platform.playingMediaPackage();
             } catch (RuntimeException e) {
-                // the media session is gone: nothing to re-pause later
+                // the media session is gone: fall back below
+            }
+            if (pausedPkg == null) { // not STATE_PLAYING right now (buffering, or already paused)
+                pausedPkg = ownerPlayedPkg;
             }
         }
         return () -> {
@@ -214,14 +220,19 @@ public final class AudioPlane {
         }
         boolean before = ownerPausedMedia;
         String pkg = pausedPkg;
+        String playedBefore = ownerPlayedPkg;
         long armed = epoch;
         ownerPausedMedia = false;
         pausedPkg = null;
+        if (pkg != null) {
+            ownerPlayedPkg = pkg;
+        }
         return () -> {
             synchronized (this) {
                 if (id.equals(turnId)) {
                     ownerPausedMedia = before;
                     pausedPkg = pkg;
+                    ownerPlayedPkg = playedBefore;
                 } else if (turnId == null && epoch == armed && pkg != null) {
                     if (before) {
                         repauseAfterTurn(id, pkg, armed);

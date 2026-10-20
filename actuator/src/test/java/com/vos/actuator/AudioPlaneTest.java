@@ -465,6 +465,20 @@ public class AudioPlaneTest {
     }
 
     @Test
+    public void aPauseWhileThePlayerIsNotPlayingStillGuardsThePackageThePlayTookBack() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // VOS pauses the music
+        plane.ownerPlaying(id); // "play" stood (verified on buffering)
+        platform.playing = null; // buffering, or already paused: no session in STATE_PLAYING
+        plane.ownerPausing(id); // "pause" stood
+        plane.end(id, "idle");
+        assertEquals(List.of(600L, 2000L), platform.delays);
+        platform.playing = MUSIC; // the player resumes itself
+        platform.runScheduled();
+        assertNull("re-paused", platform.playing);
+    }
+
+    @Test
     public void aPauseOfMusicVosDidNotPauseIsAlsoGuardedAndItsUndoPutsTheTurnBack() {
         String id = plane.summon("qs_tile"); // nothing playing at summon
         platform.playing = MUSIC; // the owner started something during the turn
