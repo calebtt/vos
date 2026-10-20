@@ -31,6 +31,7 @@ public class AudioPlaneTest {
         boolean failMode;
         boolean failMedia;
         boolean ringOnFocus; // a call starts ringing while summon is taking audio
+        boolean voipOnFocus; // a VoIP app takes MODE_IN_COMMUNICATION while summon is taking audio
 
         @Override
         public boolean callActive() {
@@ -77,6 +78,9 @@ public class AudioPlaneTest {
         public boolean requestFocus() {
             if (ringOnFocus) {
                 mode = 1; // MODE_RINGTONE, set by Telecom from its own process
+            }
+            if (voipOnFocus) {
+                mode = AudioPlane.MODE_IN_COMMUNICATION; // another app's VoIP call
             }
             calls.add("requestFocus");
             focus = true;
@@ -327,6 +331,7 @@ public class AudioPlaneTest {
         assertTrue(platform.calls.contains("clearCommunicationDevice")); // the other undos still ran
         assertTrue(platform.calls.contains("abandonFocus"));
         platform.failSetMode = false;
+        platform.mode = MODE_NORMAL; // the audio server restarted; the mode it reports is NORMAL again
         assertNotNull(plane.summon("qs_tile"));
     }
 
@@ -413,6 +418,18 @@ public class AudioPlaneTest {
         plane.ownerPausing(id).run(); // "pause", but it did not stand either
         plane.end(id, "idle");
         assertEquals("RESTORE still resumes what the turn paused", MUSIC, platform.playing);
+    }
+
+    @Test
+    public void aVoipCallThatStartsDuringSummonOpensNoTurn() {
+        platform.playing = MUSIC;
+        platform.voipOnFocus = true;
+        assertNull(plane.summon("qs_tile"));
+        assertEquals(AudioPlane.State.IDLE, plane.state());
+        assertFalse(platform.focus);
+        assertNull(platform.playing);
+        assertFalse(platform.calls.stream().anyMatch(c -> c.startsWith("setMode") || c.startsWith("setCommunicationDevice")));
+        assertEquals("call started during summon", last().get("reason"));
     }
 
     @Test
