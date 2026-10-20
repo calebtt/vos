@@ -28,7 +28,8 @@ final class XaiRealtime {
 
         void replyTranscript(String text);
 
-        void responseDone(String status);
+        /** A response finished; {@code status} is e.g. "completed" or "cancelled" (the owner talked over it). */
+        void responseDone(String responseId, String status);
 
         /** The model calls a tool; {@code argsJson} is the model's argument object as text. */
         void functionCall(String callId, String name, String argsJson);
@@ -137,7 +138,7 @@ final class XaiRealtime {
                 break;
             case "response.done":
                 JSONObject r = m.optJSONObject("response");
-                h.responseDone(r == null ? "" : r.optString("status", ""));
+                h.responseDone(r == null ? "" : r.optString("id", ""), r == null ? "" : r.optString("status", ""));
                 break;
             case "error":
                 JSONObject e = m.optJSONObject("error");

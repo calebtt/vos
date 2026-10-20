@@ -43,9 +43,11 @@ public final class MainActivity extends Activity {
 
         keyField = new EditText(this);
         keyField.setHint(R.string.key_hint);
+        // A single-line password field: the text input type is already single-line, and calling
+        // setSingleLine() afterwards would replace the password mask (it installs its own
+        // transformation), showing the key on screen and to accessibility.
         keyField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         keyField.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
-        keyField.setSingleLine(true);
         root.addView(keyField);
 
         Button save = new Button(this);

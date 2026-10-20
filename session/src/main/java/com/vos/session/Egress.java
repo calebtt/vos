@@ -26,7 +26,8 @@ import okio.ByteString;
  *   <li>an application interceptor refuses any other host before a connection is made;</li>
  *   <li>the DNS resolver refuses to resolve any other host, so nothing below the interceptor can
  *       reach one either;</li>
- *   <li>redirects are not followed, no proxy is used, and a failed connection is not retried.</li>
+ *   <li>redirects are not followed, no proxy is used, and nothing is resent within a call (no
+ *       connection-failure retry, no 503 Retry-After resend).</li>
  * </ul>
  * Every HTTP request and WebSocket connection is written to the {@link RequestLog} with its host,
  * bytes and turn.
@@ -72,6 +73,12 @@ public final class Egress {
                 // No silent replays: a call the server may already have read is not sent twice
                 // under one log line. A caller that wants another attempt makes a new call.
                 .retryOnConnectionFailure(false)
+                // OkHttp also resends once on a 503 with "Retry-After: 0"; without the header it does not.
+                .addNetworkInterceptor(chain -> {
+                    Response r = chain.proceed(chain.request());
+                    return r.code() == 503 && r.header("Retry-After") != null
+                            ? r.newBuilder().removeHeader("Retry-After").build() : r;
+                })
                 .dns(new Dns() {
                     @Override
                     public List<InetAddress> lookup(String hostname) throws UnknownHostException {

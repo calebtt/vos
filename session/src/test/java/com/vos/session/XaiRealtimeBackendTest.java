@@ -307,6 +307,60 @@ public class XaiRealtimeBackendTest {
         assertArrayEquals(REPLY, speaker.toByteArray());
     }
 
+    @Test
+    public void aBargeInDuringAToolSendsItsResultButNoFollowUp() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean asked;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (type.equals("session.update")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !asked) {
+                    asked = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    ws.send(call("c-a", "media_control", "{\"action\":\"pause\"}"));
+                    // The owner talks while the tool runs; the vendor cancels r1 and answers in r2 itself.
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r1\",\"status\":\"cancelled\"}}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    ws.send(delta("r2", REPLY));
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r2\",\"status\":\"completed\"}}");
+                } else if (type.equals("conversation.item.create")) {
+                    vendorSaw.add("output " + m.optJSONObject("item").optString("call_id"));
+                } else if (type.equals("response.create")) {
+                    vendorSaw.add("response.create"); // the real vendor errors: a response is already active
+                    ws.send("{\"type\":\"error\",\"error\":{\"code\":\"conversation_already_has_active_response\"}}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        toolDelayMs = 600;
+        Mic mic = new Mic();
+        String reason = backend(1_500).run("t-12", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertEquals(List.of("output c-a"), vendorSaw);
+    }
+
     /** An open mic: some audio, then silence until the test closes it. */
     private static final class Mic {
         final PipedOutputStream out = new PipedOutputStream();
@@ -426,6 +480,88 @@ public class XaiRealtimeBackendTest {
         }
         assertEquals("no audio from the interrupted response's late deltas", 0, tail);
         assertEquals(next.length, r2);
+    }
+
+    /** Records when each write landed and how many bytes had been written by then. */
+    private static final class TimedSpeaker extends ByteArrayOutputStream {
+        final List<long[]> writes = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        @Override
+        public synchronized void write(byte[] b, int off, int len) {
+            super.write(b, off, len);
+            writes.add(new long[] {System.nanoTime() / 1_000_000L, size()});
+        }
+    }
+
+    @Test
+    public void aCancelledResponseDoesNotStartTheQuietClockAndTheNextReplyPlaysWhole() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        byte[] first = filled(3200, 0x11);
+        byte[] answer = filled(48000, 0x33); // 1.5 s, longer than the 500 ms quiet time
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean sent;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                if (text.contains("\"session.update\"")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (text.contains("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !sent) {
+                    sent = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    ws.send(delta("r1", first));
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r1\",\"status\":\"cancelled\"}}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    new Thread(() -> { // the answer starts 300 ms later (inside the quiet time), in four pieces
+                        try {
+                            Thread.sleep(300);
+                            for (int i = 0; i < 4; i++) {
+                                ws.send(delta("r2", java.util.Arrays.copyOfRange(answer, i * 12000, (i + 1) * 12000)));
+                                Thread.sleep(150);
+                            }
+                            ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r2\",\"status\":\"completed\"}}");
+                        } catch (InterruptedException ignored) {
+                            // test
+                        }
+                    }).start();
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        TimedSpeaker speaker = new TimedSpeaker();
+        String reason = backend(500).run("t-11", mic.in, speaker, () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        int r2 = 0;
+        for (byte b : speaker.toByteArray()) {
+            r2 += b == 0x33 ? 1 : 0;
+        }
+        assertEquals("the whole answer was played before the quiet end", answer.length, r2);
+        // Pacing: never more than the 300 ms lead (plus scheduling slack) ahead of real time.
+        long t0 = -1;
+        long base = 0;
+        for (long[] w : speaker.writes) {
+            if (t0 < 0 && w[1] > first.length) { // from the answer's first write
+                t0 = w[0];
+                base = w[1];
+                continue;
+            }
+            if (t0 >= 0) {
+                long aheadMs = (w[1] - base) * 1000 / 32000 - (w[0] - t0);
+                assertTrue("ahead " + aheadMs + " ms", aheadMs <= 300 + 60);
+            }
+        }
     }
 
     private static byte[] filled(int n, int v) {

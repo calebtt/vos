@@ -27,6 +27,7 @@ public class AudioPlaneTest {
         final List<String> calls = new ArrayList<>();
         final List<Runnable> scheduled = new ArrayList<>();
         final List<Long> delays = new ArrayList<>();
+        boolean failSetMode; // the audio server died under RESTORE
 
         @Override
         public boolean callActive() {
@@ -40,6 +41,9 @@ public class AudioPlaneTest {
 
         @Override
         public void setMode(int m) {
+            if (failSetMode) {
+                throw new RuntimeException(new android.os.DeadObjectException());
+            }
             calls.add("setMode " + m);
             mode = m;
         }
@@ -283,6 +287,34 @@ public class AudioPlaneTest {
         assertEquals("restored, mode left to the call", last().get("reason"));
         assertTrue(AudioPlane.isCallMode(1) && AudioPlane.isCallMode(2) && AudioPlane.isCallMode(4));
         assertFalse(AudioPlane.isCallMode(0) || AudioPlane.isCallMode(3));
+    }
+
+    @Test
+    public void restoreNeverStartsMediaIntoACallButStillDropsVosOwnRequests() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // pauses the music
+        platform.mode = 1; // MODE_RINGTONE: a call is ringing
+        platform.calls.clear();
+        plane.end(id, "call started");
+        assertNull("no play into the call", platform.playing);
+        assertTrue(platform.scheduled.isEmpty());
+        // VOS's communication-device request and focus are its own; the call routes by its own request.
+        assertEquals(List.of("clearCommunicationDevice", "abandonFocus"), platform.calls);
+        assertEquals("restored, mode left to the call, " + MUSIC + " left paused for the call", last().get("reason"));
+    }
+
+    @Test
+    public void aFailingUndoStillReachesIdleAndTheNextSummonWorks() {
+        String id = plane.summon("qs_tile");
+        platform.failSetMode = true;
+        assertTrue(plane.end(id, "mic read error -6"));
+        assertEquals(AudioPlane.State.IDLE, plane.state());
+        assertNull(plane.turnId());
+        assertTrue((String) last().get("reason"), ((String) last().get("reason")).endsWith("failed: setMode"));
+        assertTrue(platform.calls.contains("clearCommunicationDevice")); // the other undos still ran
+        assertTrue(platform.calls.contains("abandonFocus"));
+        platform.failSetMode = false;
+        assertNotNull(plane.summon("qs_tile"));
     }
 
     @Test
