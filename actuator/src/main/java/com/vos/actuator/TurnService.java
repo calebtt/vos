@@ -171,8 +171,10 @@ public final class TurnService extends Service {
         ((ActuatorApp) getApplication()).audioPlatform().watchCalls(() -> MAIN.post(() -> finishIf(id, "call started")));
         try {
             turn.start();
-        } catch (IOException e) {
-            finish("turn did not start: " + e.getMessage());
+        } catch (IOException | RuntimeException e) { // e.g. PeerLink.bind's SecurityException
+            // The plane has already paused media and taken the mode: RESTORE gives them back.
+            finish("turn did not start: " + e.getClass().getSimpleName()
+                    + (e.getMessage() == null ? "" : " " + e.getMessage()));
             return;
         }
         MAIN.postDelayed(cap, MAX_TURN_MS);
