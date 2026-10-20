@@ -6,6 +6,7 @@ import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.util.Log;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
@@ -81,6 +82,14 @@ final class AndroidAudioPlatform implements AudioPlane.Platform {
             }
         };
         am.addOnModeChangedListener(context.getMainExecutor(), callWatch);
+        // The listener reports changes only; a call that started before it was added is checked once here.
+        try {
+            if (AudioPlane.isCallMode(am.getMode())) {
+                onCall.run();
+            }
+        } catch (RuntimeException e) { // the audio server is down; the turn's own errors end it
+            Log.w(VoiceTurn.TAG, "call check failed: " + e.getClass().getSimpleName());
+        }
     }
 
     void unwatchCalls() {
