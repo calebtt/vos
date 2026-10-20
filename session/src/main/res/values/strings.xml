@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">VOS</string>
-    <string name="skeleton_notice">VOS session (M0 skeleton)</string>
+    <string name="skeleton_notice">VOS session</string>
+    <string name="key_hint">Paste the xAI API key</string>
+    <string name="key_save">Save key</string>
+    <string name="key_remove">Remove key</string>
+    <string name="key_present">xAI API key: saved</string>
+    <string name="key_absent">xAI API key: not set</string>
+    <string name="key_not_saved">The key was not saved. Check it and try again.</string>
+    <string name="key_rejected_kept">That was not a usable key, so the saved key is unchanged.</string>
 </resources>

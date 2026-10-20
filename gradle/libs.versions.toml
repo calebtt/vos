@@ -1,9 +1,17 @@
 [versions]
 agp = "8.13.2"
 junit = "4.13.2"
+okhttp = "4.12.0"
+orgjson = "20240303"
 
 [libraries]
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+# Session only (§5.8): the egress client and the realtime WebSocket. The policy check keeps HTTP
+# libraries out of the actuator.
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+# JVM unit tests only: android.jar's org.json is a stub there.
+orgjson = { group = "org.json", name = "json", version.ref = "orgjson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

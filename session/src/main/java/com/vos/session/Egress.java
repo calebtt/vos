@@ -1,0 +1,334 @@
+package com.vos.session;
+
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.Proxy;
+import java.net.UnknownHostException;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import okhttp3.Call;
+import okhttp3.Cookie;
+import okhttp3.CookieJar;
+import okhttp3.Dns;
+import okhttp3.EventListener;
+import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
+import okio.ByteString;
+
+/**
+ * The session's only way out (§5.8). One OkHttp client that reaches only allowlisted hosts:
+ * <ul>
+ *   <li>an application interceptor refuses any other host before a connection is made;</li>
+ *   <li>the DNS resolver refuses to resolve any other host, so nothing below the interceptor can
+ *       reach one either;</li>
+ *   <li>redirects are not followed, no proxy is used, and a call sends one request: OkHttp's own
+ *       follow-ups (a connection-failure retry, the resend on a 503 with "Retry-After: 0") are off or
+ *       refused, the WebSocket handshake included.</li>
+ * </ul>
+ * Every HTTP request and WebSocket connection is written to the {@link RequestLog} with its host,
+ * bytes and turn.
+ */
+public final class Egress {
+    /** v0 allowlist: the voice vendor only. Vision, RSS and MCP hosts join with their features. */
+    public static final Set<String> HOSTS_V0 = Set.of("api.x.ai");
+
+    /** Thrown (as the call's failure) for a host that is not on the allowlist. */
+    public static final class RefusedException extends IOException {
+        RefusedException(String host) {
+            super("egress refused: " + host + " is not on the allowlist");
+        }
+    }
+
+    /** Thrown (as the call's failure) when OkHttp tries to send a call's request a second time. */
+    public static final class ResendRefusedException extends IOException {
+        ResendRefusedException(String host) {
+            super("egress refused: OkHttp tried to resend a request to " + host);
+        }
+    }
+
+    /**
+     * Attempts of the call running on this thread. OkHttp runs a call's whole interceptor chain,
+     * follow-ups included, on one thread, inside the application interceptor that sets this.
+     */
+    private static final ThreadLocal<int[]> ATTEMPTS = new ThreadLocal<>();
+
+    /**
+     * One request per call. OkHttp's BridgeInterceptor asks the cookie jar before every request it
+     * sends, follow-ups included, and that is the only hook that also runs on a WebSocket handshake
+     * (OkHttp 4.12 gives that call no network interceptors and no event listener). A second ask
+     * within one call fails the call before the request is written; with no connection-failure
+     * retry, OkHttp passes that failure to the caller. No cookies are ever stored or sent.
+     */
+    private static final CookieJar ONE_REQUEST_PER_CALL = new CookieJar() {
+        @Override
+        public void saveFromResponse(HttpUrl url, List<Cookie> cookies) {
+        }
+
+        @Override
+        public List<Cookie> loadForRequest(HttpUrl url) {
+            int[] n = ATTEMPTS.get();
+            if (n != null && ++n[0] > 1) {
+                throw Egress.<RuntimeException>sneaky(new ResendRefusedException(url.host()));
+            }
+            return List.of();
+        }
+    };
+
+    /** Throws a checked exception through an interface that does not declare it (OkHttp's are Kotlin). */
+    @SuppressWarnings("unchecked")
+    private static <E extends Throwable> E sneaky(Throwable t) throws E {
+        throw (E) t;
+    }
+
+    /** Request tag: the turn a request belongs to, for the log. */
+    public static final class TurnTag {
+        final String turnId;
+
+        public TurnTag(String turnId) {
+            this.turnId = turnId;
+        }
+    }
+
+    private static final class WebSocketTag {
+    }
+
+    private final EgressAllowlist allowlist;
+    private final RequestLog log;
+    private final OkHttpClient client;
+
+    public Egress(EgressAllowlist allowlist, RequestLog log) {
+        this(allowlist, log, Dns.SYSTEM);
+    }
+
+    Egress(EgressAllowlist allowlist, RequestLog log, Dns system) {
+        this.allowlist = allowlist;
+        this.log = log;
+        this.client = new OkHttpClient.Builder()
+                .proxy(Proxy.NO_PROXY)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                // No silent replays: a call the server may already have read is not sent twice
+                // under one log line. A caller that wants another attempt makes a new call.
+                .retryOnConnectionFailure(false)
+                .cookieJar(ONE_REQUEST_PER_CALL)
+                // OkHttp also resends once on a 503 with "Retry-After: 0". For HTTP calls this drops the
+                // header so the caller sees the 503 itself; the cookie jar stops the resend everywhere.
+                .addNetworkInterceptor(chain -> {
+                    Response r = chain.proceed(chain.request());
+                    return r.code() == 503 && r.header("Retry-After") != null
+                            ? r.newBuilder().removeHeader("Retry-After").build() : r;
+                })
+                .dns(new Dns() {
+                    @Override
+                    public List<InetAddress> lookup(String hostname) throws UnknownHostException {
+                        if (!allowlist.isAllowed(hostname)) {
+                            throw new UnknownHostException("egress refused: " + hostname + " is not on the allowlist");
+                        }
+                        return system.lookup(hostname);
+                    }
+                })
+                .addInterceptor(chain -> {
+                    Request r = chain.request();
+                    if (!allowlist.isAllowed(r.url().host())) {
+                        if (r.tag(WebSocketTag.class) == null) { // a WebSocket logs its own line on failure
+                            log.write(entry(r, 0, 0, -1, "refused"));
+                        }
+                        throw new RefusedException(r.url().host());
+                    }
+                    ATTEMPTS.set(new int[1]);
+                    try {
+                        return chain.proceed(r);
+                    } finally {
+                        ATTEMPTS.remove();
+                    }
+                })
+                .eventListenerFactory(call -> call.request().tag(WebSocketTag.class) != null
+                        ? EventListener.NONE : new HttpLogger())
+                .pingInterval(15, TimeUnit.SECONDS)
+                .build();
+    }
+
+    public OkHttpClient client() {
+        return client;
+    }
+
+    public RequestLog log() {
+        return log;
+    }
+
+    /**
+     * Opens a WebSocket through the allowlist. Every byte sent (through the returned socket or the one
+     * handed to {@code listener}'s callbacks, which are the same counting socket) and received is
+     * counted, and one log line is written when the connection ends.
+     */
+    public WebSocket openWebSocket(Request request, String turnId, WebSocketListener listener) {
+        Request tagged = request.newBuilder().tag(WebSocketTag.class, new WebSocketTag())
+                .tag(TurnTag.class, new TurnTag(turnId)).build();
+        CountingWebSocket counted = new CountingWebSocket();
+        AtomicLong in = new AtomicLong();
+        AtomicBoolean logged = new AtomicBoolean();
+        int[] status = {-1};
+        WebSocketListener counting = new WebSocketListener() {
+            private void finish(String outcome) {
+                if (logged.compareAndSet(false, true)) {
+                    log.write(entry(tagged, counted.out.get(), in.get(), status[0], outcome));
+                }
+            }
+
+            @Override
+            public void onOpen(WebSocket ws, Response response) {
+                counted.attach(ws);
+                status[0] = response.code();
+                listener.onOpen(counted, response);
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                counted.attach(ws);
+                in.addAndGet(ByteString.encodeUtf8(text).size());
+                listener.onMessage(counted, text);
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, ByteString bytes) {
+                counted.attach(ws);
+                in.addAndGet(bytes.size());
+                listener.onMessage(counted, bytes);
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                counted.attach(ws);
+                listener.onClosing(counted, code, reason);
+            }
+
+            @Override
+            public void onClosed(WebSocket ws, int code, String reason) {
+                counted.attach(ws);
+                finish("closed:" + code);
+                listener.onClosed(counted, code, reason);
+            }
+
+            @Override
+            public void onFailure(WebSocket ws, Throwable t, Response response) {
+                counted.attach(ws);
+                if (response != null) {
+                    status[0] = response.code();
+                }
+                finish(t instanceof RefusedException ? "refused"
+                        : t instanceof ResendRefusedException ? "resend refused" : "failed:" + t.getClass().getSimpleName());
+                listener.onFailure(counted, t, response);
+            }
+        };
+        counted.attach(client.newWebSocket(tagged, counting));
+        return counted;
+    }
+
+    /**
+     * The one socket the caller sees, from {@link #openWebSocket}'s return and in every callback, so
+     * every send is counted. The OkHttp socket is attached by whichever comes first: newWebSocket's
+     * return or a callback on the dispatcher thread.
+     */
+    private static final class CountingWebSocket implements WebSocket {
+        final AtomicLong out = new AtomicLong();
+        private final java.util.concurrent.atomic.AtomicReference<WebSocket> delegate =
+                new java.util.concurrent.atomic.AtomicReference<>();
+
+        void attach(WebSocket ws) {
+            delegate.compareAndSet(null, ws);
+        }
+
+        @Override
+        public Request request() {
+            return delegate.get().request();
+        }
+
+        @Override
+        public long queueSize() {
+            return delegate.get().queueSize();
+        }
+
+        @Override
+        public boolean send(String text) {
+            boolean ok = delegate.get().send(text);
+            if (ok) {
+                out.addAndGet(ByteString.encodeUtf8(text).size());
+            }
+            return ok;
+        }
+
+        @Override
+        public boolean send(ByteString bytes) {
+            boolean ok = delegate.get().send(bytes);
+            if (ok) {
+                out.addAndGet(bytes.size());
+            }
+            return ok;
+        }
+
+        @Override
+        public boolean close(int code, String reason) {
+            return delegate.get().close(code, reason);
+        }
+
+        @Override
+        public void cancel() {
+            delegate.get().cancel();
+        }
+    }
+
+    private static RequestLog.Entry entry(Request r, long out, long in, int status, String outcome) {
+        HttpUrl u = r.url();
+        TurnTag t = r.tag(TurnTag.class);
+        String kind = r.tag(WebSocketTag.class) != null ? "ws" : "http";
+        return new RequestLog.Entry(kind, u.host(), r.method(), u.encodedPath(), out, in, status,
+                t == null ? null : t.turnId, outcome);
+    }
+
+    /** Logs one line per HTTP call when it ends. */
+    private final class HttpLogger extends EventListener {
+        private long out;
+        private long in;
+        private int status = -1;
+
+        @Override
+        public void requestHeadersEnd(Call call, Request request) {
+            out += request.headers().byteCount();
+        }
+
+        @Override
+        public void requestBodyEnd(Call call, long byteCount) {
+            out += byteCount;
+        }
+
+        @Override
+        public void responseHeadersEnd(Call call, Response response) {
+            status = response.code();
+            in += response.headers().byteCount();
+        }
+
+        @Override
+        public void responseBodyEnd(Call call, long byteCount) {
+            in += byteCount;
+        }
+
+        @Override
+        public void callEnd(Call call) {
+            log.write(entry(call.request(), out, in, status, "ok"));
+        }
+
+        @Override
+        public void callFailed(Call call, IOException ioe) {
+            if (!(ioe instanceof RefusedException)) { // the interceptor already logged a refusal
+                log.write(entry(call.request(), out, in, status, "failed:" + ioe.getClass().getSimpleName()));
+            }
+        }
+    }
+}

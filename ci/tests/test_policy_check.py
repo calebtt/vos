@@ -297,6 +297,36 @@ class GoogleArtifactRules(unittest.TestCase):
         self.assertTrue(pc.check_forbidden_in_apk("actuator", dex, [], [], facts(**ACTUATOR_OK),
                                                   self.classes + self.actuator_classes))
 
+    def test_documented_dex_exception_is_exact_and_per_app(self):
+        exceptions = pc.read_exceptions(CI / "forbidden-exceptions.txt")
+        allowed = exceptions["session"]
+        probe = "com.google.android.gms.org.conscrypt"
+        self.assertIn(probe, allowed)
+        self.assertEqual([], pc.check_forbidden_in_apk("session", [probe], [], [], facts(**SESSION_OK),
+                                                       self.classes, allowed))
+        # Not a prefix: a class under it, or any other gms string, still fails.
+        for other in ("com.google.android.gms.org.conscrypt.OpenSSLProvider",
+                      "Lcom/google/android/gms/org/conscrypt/Conscrypt;", "com.google.android.gms.common"):
+            self.assertTrue(pc.check_forbidden_in_apk("session", [probe, other], [], [], facts(**SESSION_OK),
+                                                      self.classes, allowed), other)
+        # Not for the other app.
+        self.assertTrue(pc.check_forbidden_in_apk("actuator", [probe], [], [], facts(**ACTUATOR_OK),
+                                                  self.classes, exceptions.get("actuator", frozenset())))
+        # Not for resources, zip entries or manifest names, each on its own.
+        self.assertTrue(pc.check_forbidden_in_apk("session", [], [probe], [], facts(**SESSION_OK),
+                                                  self.classes, allowed))
+        self.assertTrue(pc.check_forbidden_in_apk("session", [], [], [probe], facts(**SESSION_OK),
+                                                  self.classes, allowed))
+        manifest = facts("com.vos.session", components=[("service", probe + ".Svc", False, None, [], [])])
+        self.assertTrue(pc.check_forbidden_in_apk("session", [], [], [], manifest, self.classes, allowed))
+
+    def test_exceptions_file_rejects_malformed_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "x.txt"
+            bad.write_text("nobody com.google.android.gms.x\n")
+            with self.assertRaises(ValueError):
+                pc.read_exceptions(bad)
+
     def test_clean_apk_passes(self):
         dex = ["Lcom/vos/session/MainActivity;", "Landroid/app/Activity;"]
         self.assertEqual([], pc.check_forbidden_in_apk("session", dex, ["VOS"], ["classes.dex"],

@@ -77,6 +77,17 @@ def read_forbidden(path):
     return groups, classes, actuator_classes
 
 
+def read_exceptions(path):
+    """{app: {exact dex string}} from forbidden-exceptions.txt."""
+    out = {}
+    for line in read_list(path):
+        app, _, value = line.partition(" ")
+        if app not in APPS or not value.strip() or " " in value.strip():
+            raise ValueError(f"bad line in {path}: {line!r}")
+        out.setdefault(app, set()).add(value.strip())
+    return out
+
+
 def read_exported_allowlist(path):
     """{(kind, name): permission or None}."""
     out = {}
@@ -336,13 +347,16 @@ def _prefix_forms(prefix):
     return dotted, slashed, "L" + slashed + "/"
 
 
-def check_forbidden_in_apk(app, dex, res_strings, entries, facts, class_prefixes):
-    """Fail if any forbidden package shows up in dex types/strings, resources, zip entries or manifest."""
+def check_forbidden_in_apk(app, dex, res_strings, entries, facts, class_prefixes, dex_exceptions=frozenset()):
+    """Fail if any forbidden package shows up in dex types/strings, resources, zip entries or manifest.
+
+    dex_exceptions: exact dex strings (not descriptors or prefixes) documented in forbidden-exceptions.txt.
+    """
     fails = []
     manifest_names = facts["uses_permissions"] + facts["app_meta"] + [c["name"] for c in facts["components"]]
     for prefix in class_prefixes:
         dotted, slashed, descriptor = _prefix_forms(prefix)
-        hits = [s for s in dex if s.startswith(descriptor) or s.startswith(dotted + ".")]
+        hits = [s for s in dex if (s.startswith(descriptor) or s.startswith(dotted + ".")) and s not in dex_exceptions]
         if hits:
             fails.append(f"{app}: dex references {prefix} ({len(hits)} strings, e.g. {hits[0]})")
         rhits = [s for s in res_strings if dotted in s]
@@ -572,6 +586,7 @@ def main(argv=None):
     aapt2 = build_tool(sdk, "aapt2")
     apksigner = build_tool(sdk, "apksigner")
     groups, class_prefixes, actuator_classes = read_forbidden(ci / "forbidden-artifacts.txt")
+    exceptions = read_exceptions(ci / "forbidden-exceptions.txt")
     retired = read_list(ci / "retired-names.txt")
     platform_jar, platform_levels = platform_permission_levels(aapt2, sdk)
     print(f"session permissions are checked against {len(platform_levels)} platform protection levels "
@@ -601,7 +616,7 @@ def main(argv=None):
                 fails += check_no_sensitive_components(app, facts)
             fails += check_exported(app, facts, read_exported_allowlist(ci / f"exported-components-{app}.txt"))
             prefixes = class_prefixes + (actuator_classes if app == "actuator" else [])
-            fails += check_forbidden_in_apk(app, dex, res, entries, facts, prefixes)
+            fails += check_forbidden_in_apk(app, dex, res, entries, facts, prefixes, exceptions.get(app, frozenset()))
             if build_type == "release":
                 fails += check_not_debuggable(app, facts)
                 apk_text[f"{app}-release/manifest.txt"] = xml

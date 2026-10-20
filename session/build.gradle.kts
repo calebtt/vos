@@ -42,6 +42,10 @@ android {
 
     sourceSets["androidTest"].java.srcDir(rootProject.file("eval/m1/auth-probe/java"))
 
+    buildFeatures {
+        buildConfig = true // BuildConfig.DEBUG gates debug-only code paths
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -50,5 +54,8 @@ android {
 
 dependencies {
     implementation(project(":ipc"))
+    implementation(libs.okhttp)
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.orgjson)
 }
