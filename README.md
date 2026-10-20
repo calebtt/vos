@@ -10,7 +10,7 @@ VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 8a (`a
 
 ## Status
 
-**M0 (Ground).** Gradle skeleton, CI and the static policy check exist. The on-device spikes and Day 0 steps are written up but not run (`docs/spikes/`, `docs/runbooks/DAY0.md`).
+**M0 (Ground).** Gradle skeleton, CI and the static policy check exist.
 
 ## Layout
 
@@ -37,7 +37,3 @@ ci/fetch-gitleaks.sh        # optional locally: pinned, checksum-verified gitlea
 - [docs/TARGET-PLAN.md](docs/TARGET-PLAN.md) — the target plan (architecture, platform, security, milestones, spike register).
 - [docs/AUDIO-DUPLEX-RESEARCH.md](docs/AUDIO-DUPLEX-RESEARCH.md) — research behind the AudioPlane and app-assistant duplex.
 - [docs/TRACKING.md](docs/TRACKING.md) — how milestones, spikes, and labels map onto GitHub issues.
-- [docs/DECISIONS.md](docs/DECISIONS.md) — M0 platform and audio decisions (pending spikes).
-- [docs/DEVICES.md](docs/DEVICES.md) — device enrollment (M0-06).
-- [docs/spikes/](docs/spikes/) — spike report templates (S-01, S-02, S-03, S-07, S-08, S-27a).
-- [docs/runbooks/DAY0.md](docs/runbooks/DAY0.md) — Day 0 steps for Caleb (key rotation, ADB revocation, fstab pin, archive, Graphene downloads, OTA cert pin).
