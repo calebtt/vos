@@ -8,7 +8,8 @@ plugins {
 }
 
 // Release signing comes from env vars, else from the ignored keystore.properties. A release key is
-// never committed. With neither present, release APKs build unsigned (app-release-unsigned.apk).
+// never committed. With neither present, release APKs build unsigned (actuator-release-unsigned.apk,
+// session-release-unsigned.apk). A relative storeFile is resolved against the repo root.
 // Debug builds use AGP's per-machine debug keystore, so debug and release certs always differ;
 // ci/policy_check.py fails if a signed release shares its cert with the debug build.
 val keystoreProps = Properties().apply {
@@ -26,7 +27,14 @@ val releaseSigning: Map<String, String>? = run {
         "keyAlias" to signingValue("VOS_RELEASE_KEY_ALIAS", "keyAlias"),
         "keyPassword" to signingValue("VOS_RELEASE_KEY_PASSWORD", "keyPassword"),
     )
-    if (values.values.all { it != null }) values.mapValues { it.value!! } else null
+    val missing = values.filterValues { it == null }.keys
+    when {
+        missing.size == values.size -> null
+        missing.isNotEmpty() -> throw GradleException(
+            "Release signing is partly configured; missing ${missing.joinToString()} (VOS_RELEASE_* or keystore.properties)"
+        )
+        else -> values.mapValues { it.value!! } + ("storeFile" to rootProject.file(values.getValue("storeFile")!!).absolutePath)
+    }
 }
 extra["vosReleaseSigning"] = releaseSigning
 
