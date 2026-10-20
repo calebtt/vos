@@ -10,6 +10,12 @@
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="com.vos.permission.ACTUATOR" />
+    <!-- Voice turns (§3.2, §3.3): the microphone foreground service, its notification, and the
+         communication mode and device. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- Defense in depth: strip INTERNET even if a library asks for it. ci/policy_check.py checks the APK. -->
     <uses-permission
@@ -30,6 +36,25 @@
             android:name=".ActuatorService"
             android:exported="true"
             android:permission="com.vos.permission.SESSION" />
+
+        <!-- The open voice turn (§3.2). Started only by actuator components with a foreground moment. -->
+        <service
+            android:name=".TurnService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- Summon / stop (M1-STOP-01). Only the system (BIND_QUICK_SETTINGS_TILE) can bind it;
+             ci/policy_check.py enforces the guard. -->
+        <service
+            android:name=".SummonTile"
+            android:exported="true"
+            android:icon="@drawable/ic_vos"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- Hands (§3.1): exported so the system can bind it; only holders of the system-only
              BIND_* permission (i.e. system_server) can. ci/policy_check.py enforces the guard. -->
