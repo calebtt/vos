@@ -51,6 +51,11 @@ public final class AuthProbe extends Instrumentation {
     public void onStart() {
         super.onStart();
         Context ctx = getTargetContext();
+        if ("mic".equals(args.getString("probe"))) { // M1-AUD-02 (MicProbe)
+            Bundle r = com.vos.eval.mic.MicProbe.run(ctx);
+            finish("true".equals(r.getString("pass")) ? Activity.RESULT_OK : Activity.RESULT_CANCELED, r);
+            return;
+        }
         String target = args.getString("target", "actuator");
         String expect = args.getString("expect", "ok");
         String via = args.getString("via", "link");

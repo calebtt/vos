@@ -1,0 +1,27 @@
+{
+  "version": 0,
+  "_comment": "ModelRouter v0 (TARGET-PLAN §3.2.1): the model registry and, per task class, the ordered backends to try. Only chat_voice is bound in this build. debug_only entries exist in debug builds only. The router records the model the vendor reports serving, which can differ from the one asked for.",
+  "registry": [
+    {
+      "id": "xai:grok-voice-3.0",
+      "kind": "realtime_voice",
+      "where": "cloud:xai",
+      "vendor": "xai",
+      "model": "grok-voice-3.0",
+      "voice": "ara",
+      "url": "wss://api.x.ai/v1/realtime",
+      "egress_hosts": ["api.x.ai"],
+      "cost_tier": 2
+    },
+    {
+      "id": "debug:echo",
+      "kind": "realtime_voice",
+      "where": "on_device_session",
+      "debug_only": true,
+      "cost_tier": 0
+    }
+  ],
+  "policy": {
+    "chat_voice": ["xai:grok-voice-3.0"]
+  }
+}

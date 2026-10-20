@@ -1,6 +1,15 @@
 # session — `com.vos.session`
 
-Networked brain: voice, planner, egress. **No `RECORD_AUDIO`, accessibility, NLS, camera, location, SMS/call or privileged permissions** (TARGET-PLAN §3.1, §5.2). M0 skeleton:
+Networked brain: voice, planner, egress. **No `RECORD_AUDIO`, accessibility, NLS, camera, location, SMS/call or privileged permissions** (TARGET-PLAN §3.1, §5.2; M1-AUD-02 checks it on a device).
+
+**Voice turns (§3.2).**
+
+- `SessionTurns` — the session's side of a turn: on `onTurnOpened` a backend reads the mic pipe and writes the speaker pipe on its own thread, reports `turnReady` when its vendor session is up, and a turn the session ends is reported with `endTurn` before its pipes close (the actuator then records the session's reason). A broken pipe means the actuator ended the turn and is not reported back. `ActuatorLink` binds the actuator through PeerLink.
+- `ModelPolicy` — ModelRouter v0 (§3.2.1): `res/raw/model_policy.json` holds the registry and, per task class, the ordered backends; the first available one is used (a vendor backend needs its key). Only `chat_voice` is bound: `xai:grok-voice-3.0`. Each pick is audited (`model.pick` in `files/audit/audit.jsonl`). Debug builds can put an id first with `files/debug/chat_voice` (e.g. `debug:echo`, `EchoBackend`, used by `eval/m1/turn-pipes.sh`).
+- `XaiRealtimeBackend` — `chat_voice` on `wss://api.x.ai/v1/realtime` (`XaiRealtime` is the protocol: 16 kHz PCM both ways, server VAD, its own event names). The mic is buffered from the summon and streamed once the session is configured; reply audio is written paced to real time plus 300 ms, so a barge-in drops what has not been sent; the turn ends after 8 s of quiet following a reply, 10 s with no speech, 3 minutes, a vendor error, or the actuator's close. The key is read from `KeyVault` per turn and goes only into the Authorization header. The vendor serves its default model for unknown names, so the served model is logged next to the requested one. The instructions carry the phone's local time.
+- `TranscriptLog` — owner and reply transcripts in `files/transcripts/transcripts.jsonl` (never logcat; 30-day retention comes with the task record).
+
+**M0 skeleton and keys:**
 
 - `MainActivity` — launcher entry (the chat window lands in M1). Takes the xAI key by paste; the window is `FLAG_SECURE`.
 - `SessionService` — the actuator's Binder entry (`IVosSession`, from `:ipc`), guarded by the `com.vos.permission.ACTUATOR` signature permission and by `BinderGuard` (exact package, own cert, grant table); refusals go to the session's local `files/audit/audit.jsonl` until audit v1 forwards them (§5.3).
@@ -16,4 +25,4 @@ Networked brain: voice, planner, egress. **No `RECORD_AUDIO`, accessibility, NLS
 
 OkHttp is the session's only direct external library; the APK also carries its transitive Okio and Kotlin standard library jars, which the policy check allows. The policy check keeps HTTP libraries out of the actuator. One OkHttp dex string names a Play package without using it; `ci/forbidden-exceptions.txt` documents that exception.
 
-Tests: `./gradlew :session:testDebugUnitTest` (`EgressAllowlistTest`, `KeyVaultTest`, `EgressTest` with MockWebServer); on a device, `eval/m1/auth-01.sh` (M1-AUTH-01).
+Tests: `./gradlew :session:testDebugUnitTest` (`EgressAllowlistTest`, `KeyVaultTest`, `EgressTest`, `ModelPolicyTest`, `XaiRealtimeTest`, and `XaiRealtimeBackendTest` against a scripted fake of the xAI endpoint on MockWebServer); on a device, `eval/m1/auth-01.sh` (M1-AUTH-01), `eval/m1/turn-pipes.sh` and `eval/m1/voice-roundtrip.sh` (the spoken round trip, M1-KEY-01 debug scan, M1-AUD-02).
