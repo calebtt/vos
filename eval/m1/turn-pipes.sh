@@ -60,6 +60,8 @@ open(sys.argv[1], "wb").write(struct.pack("<%dh" % len(s), *s))
 PY
 
 adb shell "run-as com.vos.actuator sh -c 'rm -rf files/debug'"
+# The session's echo backend is debug-only and opt-in (files/debug/chat_voice puts it first, #241).
+adb shell "run-as com.vos.session sh -c 'mkdir -p files/debug && echo debug:echo > files/debug/chat_voice'"
 if (( ! live )); then
     adb shell "run-as com.vos.actuator sh -c 'umask 077 && mkdir -p files/debug && cat > files/debug/mic-inject.pcm'" < "$fixture"
 fi
@@ -106,5 +108,6 @@ mode_after="$(actual_mode)"
 check "platform audio mode back to $mode_before (now $mode_after)" "[[ -n '$mode_after' && '$mode_after' == '$mode_before' ]]"
 check "the session did not report an error for the actuator's stop" "! grep -q 'ended by the session: backend error' '$out/logcat.txt'"
 adb shell "run-as com.vos.actuator sh -c 'rm -rf files/debug'"
+adb shell "run-as com.vos.session rm -f files/debug/chat_voice"
 
 if (( fails == 0 )); then echo "turn-pipes: PASS"; else echo "turn-pipes: FAIL ($fails)"; exit 1; fi

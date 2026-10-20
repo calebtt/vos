@@ -196,6 +196,70 @@ public class XaiRealtimeBackendTest {
     }
 
     @Test
+    public void bargeInDropsTheRestOfTheInterruptedResponse() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        byte[] first = filled(3200, 0x11);
+        byte[] lateTail = filled(32000, 0x22); // a second of r1 arriving after the owner spoke
+        byte[] next = filled(3200, 0x33);
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean sent;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                if (text.contains("\"session.update\"")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (text.contains("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !sent) {
+                    sent = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    ws.send(delta("r1", first));
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}"); // the owner talks over r1
+                    ws.send(delta("r1", lateTail));
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"cancelled\"}}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    ws.send(delta("r2", next));
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        String reason = backend(300).run("t-8", mic.in, speaker, () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        byte[] played = speaker.toByteArray();
+        int tail = 0;
+        int r2 = 0;
+        for (byte b : played) {
+            tail += b == 0x22 ? 1 : 0;
+            r2 += b == 0x33 ? 1 : 0;
+        }
+        assertEquals("no audio from the interrupted response's late deltas", 0, tail);
+        assertEquals(next.length, r2);
+    }
+
+    private static byte[] filled(int n, int v) {
+        byte[] b = new byte[n];
+        java.util.Arrays.fill(b, (byte) v);
+        return b;
+    }
+
+    private static String delta(String responseId, byte[] pcm) {
+        return "{\"type\":\"response.output_audio.delta\",\"response_id\":\"" + responseId + "\",\"delta\":\""
+                + Base64.getEncoder().encodeToString(pcm) + "\"}";
+    }
+
+    @Test
     public void theActuatorClosingTheMicEndsTheTurnWithoutAReport() throws Exception {
         vault.put(KeyVault.XAI, "xai-test-key");
         enqueueVendor(null);
