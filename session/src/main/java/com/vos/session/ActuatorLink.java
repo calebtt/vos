@@ -73,7 +73,19 @@ final class ActuatorLink {
         }
     }
 
+    /**
+     * The actuator dropped (died, or failed the protocol handshake, after which PeerLink unbinds for
+     * good): unbind and forget queued calls meant for that peer; the next call binds afresh.
+     */
     private synchronized void down() {
         actuator = null;
+        if (!pending.isEmpty()) {
+            Log.w(SessionTurns.TAG, "dropped " + pending.size() + " calls for an actuator that went away");
+            pending.clear();
+        }
+        if (bound) {
+            bound = false;
+            link.unbind();
+        }
     }
 }

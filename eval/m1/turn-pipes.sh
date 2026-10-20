@@ -82,7 +82,14 @@ states="$(sed -n 's/.*"state":"\([A-Z_]*\)".*/\1/p' "$out/audit.jsonl" | tr '\n'
 echo "audit states: $states"
 check "audit CAPTURE CONVERSE RESTORE IDLE" "[[ '$states' == 'CAPTURE CONVERSE RESTORE IDLE ' ]]"
 idle_mode="$(grep '"state":"IDLE"' "$out/audit.jsonl" | sed -n 's/.*"mode":\([0-9]*\).*/\1/p' | tail -1)"
-check "mode restored ($idle_mode)" "[[ -n '$idle_mode' && '$idle_mode' == '0' ]]"
+mode_number() { # AudioManager mode name -> its value
+    case "$1" in
+        MODE_NORMAL) echo 0 ;; MODE_RINGTONE) echo 1 ;; MODE_IN_CALL) echo 2 ;; MODE_IN_COMMUNICATION) echo 3 ;;
+        MODE_CALL_SCREENING) echo 4 ;; MODE_CALL_REDIRECT) echo 5 ;; MODE_COMMUNICATION_REDIRECT) echo 6 ;; *) echo "?" ;;
+    esac
+}
+want_mode="$(mode_number "$mode_before")"
+check "audit: mode restored to the one before the turn ($idle_mode, want $want_mode)" "[[ -n '$idle_mode' && '$idle_mode' == '$want_mode' ]]"
 
 speaker_bytes="$(adb shell "run-as com.vos.actuator sh -c 'wc -c < files/debug/speaker-$turn_id.pcm'" | tr -d '\r ')"
 echo "speaker bytes: $speaker_bytes"
