@@ -49,12 +49,11 @@ public final class FastTools {
          */
         String mediaState();
 
-        /**
-         * A token that changes when the track changes and not otherwise: the media id when the session
-         * has one, else title, artist and album (never the duration, which players fill in late); null
-         * when there is no metadata yet.
-         */
-        String mediaTrack();
+        /** The playing item's media id, or null when the session publishes none. */
+        String mediaId();
+
+        /** The playing item's title, or null when there is no metadata yet. */
+        String mediaTitle();
 
         void sleep(long ms) throws InterruptedException;
     }
@@ -188,8 +187,10 @@ public final class FastTools {
 
     /**
      * Media keys, then the oracle. A request that cannot stand (nothing to pause) is FAILED before any
-     * key is sent. The owner's intent (pause or play) is passed to the AudioPlane only for a call that
-     * stands: VERIFIED, or an attempt left in place (UNVERIFIED), never a FAILED one.
+     * key is sent. The owner's intent (pause or play) is passed to the AudioPlane only when it stands:
+     * VERIFIED, or UNVERIFIED because media state cannot be observed at all. A visible session that
+     * never reached the requested state leaves the AudioPlane as it was, so RESTORE still resumes what
+     * the turn paused.
      */
     private Result mediaControl(JSONObject args, MediaIntent media) throws BadArgs, InterruptedException {
         allowOnly(args, "action");
@@ -202,23 +203,26 @@ public final class FastTools {
         if ("none".equals(stateBefore) && !action.equals("play")) {
             return Result.of(Status.FAILED, "action", action, "detail", "nothing is playing");
         }
-        String trackBefore = platform.mediaTrack();
+        String idBefore = platform.mediaId();
+        String titleBefore = platform.mediaTitle();
         platform.mediaKey(key);
-        Result r = mediaOracle(action, stateBefore, trackBefore);
-        if (action.equals("pause") || action.equals("stop")) {
+        Result r = mediaOracle(action, stateBefore, idBefore, titleBefore);
+        boolean stands = r.status == Status.VERIFIED || (r.status == Status.UNVERIFIED && stateBefore == null);
+        if (stands && (action.equals("pause") || action.equals("stop"))) {
             media.ownerPaused();
-        } else if (action.equals("play")) {
+        } else if (stands && action.equals("play")) {
             media.ownerPlayed();
         }
         return r;
     }
 
-    private Result mediaOracle(String action, String stateBefore, String trackBefore) throws InterruptedException {
+    private Result mediaOracle(String action, String stateBefore, String idBefore, String titleBefore)
+            throws InterruptedException {
         if (stateBefore == null) {
             return Result.of(Status.UNVERIFIED, "action", action, "detail", "media state is not observable");
         }
         boolean skip = action.equals("next") || action.equals("previous");
-        if (skip && trackBefore == null) {
+        if (skip && idBefore == null && titleBefore == null) {
             return Result.of(Status.UNVERIFIED, "action", action, "detail", "the track is not observable");
         }
         String seen = null; // a skip counts once the new track is seen on two polls in a row
@@ -226,10 +230,9 @@ public final class FastTools {
             String state = platform.mediaState();
             boolean ok;
             if (skip) {
-                String track = platform.mediaTrack();
-                boolean changed = track != null && !track.equals(trackBefore);
-                ok = changed && track.equals(seen);
-                seen = changed ? track : null;
+                String now = newTrack(idBefore, titleBefore, platform.mediaId(), platform.mediaTitle());
+                ok = now != null && now.equals(seen);
+                seen = now;
             } else if (action.equals("play")) {
                 ok = "playing".equals(state) || "buffering".equals(state);
             } else { // pause, stop
@@ -242,6 +245,21 @@ public final class FastTools {
         }
         return Result.of(Status.UNVERIFIED, "action", action, "state", platform.mediaState(),
                 "detail", "no change seen within " + MEDIA_ORACLE_MS + " ms");
+    }
+
+    /**
+     * The identity of a different track now playing, or null if it is the same one (or unknown). Media
+     * ids are compared when both sides have one; otherwise only titles, so metadata filling in later
+     * (an id, an artist, an album on the same title) is not a skip.
+     */
+    static String newTrack(String idBefore, String titleBefore, String idNow, String titleNow) {
+        if (idBefore != null && idNow != null) {
+            return idNow.equals(idBefore) ? null : "id:" + idNow;
+        }
+        if (titleBefore != null && titleNow != null && !titleNow.equals(titleBefore)) {
+            return "t:" + titleNow;
+        }
+        return null;
     }
 
     private static int percent(int index, int min, int max) {
