@@ -11,7 +11,10 @@ import android.os.Bundle;
  * <pre>
  * am start -n com.vos.actuator/.DebugSummonActivity --es op start [--ez mic_file true] [--ez speaker_file true]
  * am start -n com.vos.actuator/.DebugSummonActivity --es op stop
+ * am start -n com.vos.actuator/.DebugSummonActivity --es op volume --ei stream 3 --ei index 7
  * </pre>
+ * {@code op volume} restores a stream volume after an eval (the shell's own volume command does not
+ * apply on Phone B's Android 17).
  */
 public final class DebugSummonActivity extends Activity {
     @Override
@@ -19,7 +22,10 @@ public final class DebugSummonActivity extends Activity {
         super.onCreate(savedInstanceState);
         Intent in = getIntent();
         Intent i = new Intent(this, TurnService.class).putExtra(TurnService.EXTRA_SOURCE, "debug_shell");
-        if ("stop".equals(in.getStringExtra("op"))) {
+        if ("volume".equals(in.getStringExtra("op"))) {
+            getSystemService(android.media.AudioManager.class).setStreamVolume(
+                    in.getIntExtra("stream", android.media.AudioManager.STREAM_MUSIC), in.getIntExtra("index", 0), 0);
+        } else if ("stop".equals(in.getStringExtra("op"))) {
             startService(i.setAction(TurnService.ACTION_STOP));
         } else {
             startForegroundService(i.setAction(TurnService.ACTION_SUMMON)

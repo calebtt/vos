@@ -57,4 +57,5 @@ dependencies {
     implementation(project(":vtb-sdk"))
     implementation(project(":ipc"))
     testImplementation(libs.junit)
+    testImplementation(libs.orgjson) // android.jar's org.json is a stub in JVM tests
 }

@@ -46,9 +46,9 @@ final class VoiceTurn {
     private static final int FRAME = Ipc.TURN_FRAME_BYTES;
 
     final String turnId;
+    final boolean speakerToFile;
     private final Context context;
     private final boolean micFromFile;
-    private final boolean speakerToFile;
     private final Consumer<String> ender;
     private final long openedAt = SystemClock.elapsedRealtime();
     private final List<AudioEffect> effects = new ArrayList<>();
