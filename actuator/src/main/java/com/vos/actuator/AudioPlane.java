@@ -118,7 +118,8 @@ public final class AudioPlane {
             }
             focusHeld = platform.requestFocus();
             savedMode = platform.mode(); // read again just before taking the mode: a call may have started
-            if (isCallMode(savedMode)) {
+            // Before VOS sets it, MODE_IN_COMMUNICATION is another app's VoIP call (as in callActive()).
+            if (isCallMode(savedMode) || savedMode == MODE_IN_COMMUNICATION) {
                 undo(false); // the music this attempt paused stays paused: never start it into a call
                 turnId = null;
                 refuse("summon", "call started during summon", source);
