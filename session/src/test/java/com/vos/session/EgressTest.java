@@ -206,6 +206,19 @@ public class EgressTest {
     }
 
     @Test
+    public void a503WithRetryAfterZeroIsNotResent() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(503).setHeader("Retry-After", "0"));
+        server.enqueue(new MockResponse().setBody("second"));
+        Request r = new Request.Builder().url(url(ALLOWED, "/v1/x"))
+                .post(okhttp3.RequestBody.create("{}", okhttp3.MediaType.get("application/json"))).build();
+        try (Response resp = egress.client().newCall(r).execute()) {
+            assertEquals(503, resp.code());
+        }
+        assertEquals(1, server.getRequestCount());
+        assertEquals(1, lines().size());
+    }
+
+    @Test
     public void aRefusedWebSocketIsLoggedOnce() throws Exception {
         CountDownLatch failed = new CountDownLatch(1);
         AtomicReference<Throwable> why = new AtomicReference<>();
