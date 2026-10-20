@@ -1236,7 +1236,7 @@ Every incoming transaction runs the same guard **before parsing args**:
 3. `PackageManager.hasSigningCertificate(uid, VOS_RELEASE_CERT_SHA256, CERT_INPUT_SHA256)` must be true.
 4. Look up the grant set for that UID.
 
-The result is cached per UID and invalidated on `ACTION_PACKAGE_REPLACED/REMOVED`. A failure returns `UNAUTHORIZED` and is audited with the UID and package. Callbacks are Binder objects passed over the authenticated channel (capability style) and are never exported. Each side watches the other with `linkToDeath`.
+The guard runs on every call and caches nothing: a package can be replaced, or its UID reused, before `ACTION_PACKAGE_REPLACED/REMOVED` arrives (M1-AUTH-01 review, 2026-10-20). Each AIDL method runs it too, because an in-process caller reaches the Stub without `onTransact`. A failure returns `UNAUTHORIZED` and is audited with the UID and package. Callbacks are Binder objects passed over the authenticated channel (capability style) and are never exported. Each side watches the other with `linkToDeath`, and drops a peer whose `protocolVersion()` differs from its own.
 
 Payloads too large for Binder's ~1 MB transaction limit (screenshots, audio, blobs) travel as `ParcelFileDescriptor` or `SharedMemory`, with a JSON header in the transaction.
 
