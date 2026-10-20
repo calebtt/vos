@@ -49,7 +49,11 @@ public final class FastTools {
          */
         String mediaState();
 
-        /** A token that changes when the track changes (e.g. title + duration), or null. */
+        /**
+         * A token that changes when the track changes and not otherwise: the media id when the session
+         * has one, else title, artist and album (never the duration, which players fill in late); null
+         * when there is no metadata yet.
+         */
         String mediaTrack();
 
         void sleep(long ms) throws InterruptedException;
@@ -182,6 +186,11 @@ public final class FastTools {
                 "detail", s == Status.VERIFIED ? "read back" : "the phone set " + percent(after, min, max) + "% instead");
     }
 
+    /**
+     * Media keys, then the oracle. A request that cannot stand (nothing to pause) is FAILED before any
+     * key is sent. The owner's intent (pause or play) is passed to the AudioPlane only for a call that
+     * stands: VERIFIED, or an attempt left in place (UNVERIFIED), never a FAILED one.
+     */
     private Result mediaControl(JSONObject args, MediaIntent media) throws BadArgs, InterruptedException {
         allowOnly(args, "action");
         String action = args.optString("action");
@@ -190,34 +199,41 @@ public final class FastTools {
             throw new BadArgs("action must be one of " + MEDIA_KEYS.keySet());
         }
         String stateBefore = platform.mediaState();
+        if ("none".equals(stateBefore) && !action.equals("play")) {
+            return Result.of(Status.FAILED, "action", action, "detail", "nothing is playing");
+        }
         String trackBefore = platform.mediaTrack();
         platform.mediaKey(key);
+        Result r = mediaOracle(action, stateBefore, trackBefore);
         if (action.equals("pause") || action.equals("stop")) {
             media.ownerPaused();
         } else if (action.equals("play")) {
             media.ownerPlayed();
         }
+        return r;
+    }
+
+    private Result mediaOracle(String action, String stateBefore, String trackBefore) throws InterruptedException {
         if (stateBefore == null) {
             return Result.of(Status.UNVERIFIED, "action", action, "detail", "media state is not observable");
         }
-        if (stateBefore.equals("none") && !action.equals("play")) {
-            return Result.of(Status.FAILED, "action", action, "detail", "nothing is playing");
+        boolean skip = action.equals("next") || action.equals("previous");
+        if (skip && trackBefore == null) {
+            return Result.of(Status.UNVERIFIED, "action", action, "detail", "the track is not observable");
         }
+        String seen = null; // a skip counts once the new track is seen on two polls in a row
         for (long waited = 0; waited <= MEDIA_ORACLE_MS; waited += POLL_MS) {
             String state = platform.mediaState();
             boolean ok;
-            switch (action) {
-                case "pause":
-                case "stop":
-                    ok = "paused".equals(state) || "stopped".equals(state) || "none".equals(state);
-                    break;
-                case "play":
-                    ok = "playing".equals(state) || "buffering".equals(state);
-                    break;
-                default: // next, previous: the track changed
-                    String track = platform.mediaTrack();
-                    ok = track != null && !track.equals(trackBefore);
-                    break;
+            if (skip) {
+                String track = platform.mediaTrack();
+                boolean changed = track != null && !track.equals(trackBefore);
+                ok = changed && track.equals(seen);
+                seen = changed ? track : null;
+            } else if (action.equals("play")) {
+                ok = "playing".equals(state) || "buffering".equals(state);
+            } else { // pause, stop
+                ok = "paused".equals(state) || "stopped".equals(state) || "none".equals(state);
             }
             if (ok) {
                 return Result.of(Status.VERIFIED, "action", action, "state", state);

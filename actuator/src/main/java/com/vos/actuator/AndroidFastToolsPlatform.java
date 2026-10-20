@@ -102,7 +102,16 @@ final class AndroidFastToolsPlatform implements FastTools.Platform {
         if (m == null) {
             return null;
         }
-        return m.getString(MediaMetadata.METADATA_KEY_TITLE) + "|" + m.getLong(MediaMetadata.METADATA_KEY_DURATION);
+        String id = m.getString(MediaMetadata.METADATA_KEY_MEDIA_ID);
+        if (id != null && !id.isEmpty()) {
+            return "id:" + id;
+        }
+        String title = m.getString(MediaMetadata.METADATA_KEY_TITLE);
+        if (title == null) {
+            return null;
+        }
+        return "t:" + title + "|" + m.getString(MediaMetadata.METADATA_KEY_ARTIST) + "|"
+                + m.getString(MediaMetadata.METADATA_KEY_ALBUM);
     }
 
     @Override

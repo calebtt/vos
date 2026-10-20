@@ -15,11 +15,12 @@ public class FastToolsTest {
     private static final int RING = 2;
 
     /** Volumes per stream, a scripted media player, and a record of every act. */
-    private static final class FakePlatform implements FastTools.Platform {
+    private static class FakePlatform implements FastTools.Platform {
         final Map<Integer, Integer> volume = new HashMap<>(Map.of(MEDIA, 7, RING, 4));
         final List<String> acts = new ArrayList<>();
         String state = "playing"; // null = not observable
-        String track = "Song A|180000";
+        String track = "t:Song A|Artist|Album";
+        java.util.function.Consumer<FakePlatform> onKey; // scripted reaction, replaces the default
         boolean dnd;
         Integer clampTo; // the phone sets this instead (e.g. a safe-volume cap)
         boolean playerReacts = true;
@@ -42,6 +43,10 @@ public class FastToolsTest {
         @Override
         public void mediaKey(int keyCode) {
             acts.add("key " + keyCode);
+            if (onKey != null) {
+                onKey.accept(this);
+                return;
+            }
             if (!playerReacts || state == null) {
                 return;
             }
@@ -49,7 +54,7 @@ public class FastToolsTest {
                 case 127: state = "paused"; break;
                 case 126: state = "playing"; break;
                 case 86: state = "stopped"; break;
-                case 87: track = "Song B|200000"; break;
+                case 87: track = "t:Song B|Artist|Album"; break;
                 default: break;
             }
         }
@@ -179,8 +184,32 @@ public class FastToolsTest {
     }
 
     @Test
-    public void controllingNothingIsFailed() throws Exception {
+    public void controllingNothingIsFailedBeforeAnyKeyOrIntent() throws Exception {
         platform.state = "none";
-        assertEquals("FAILED", run("media_control", "{\"action\":\"pause\"}").getString("status"));
+        for (String action : new String[] {"pause", "stop", "next"}) {
+            assertEquals(action, "FAILED", run("media_control", "{\"action\":\"" + action + "\"}").getString("status"));
+        }
+        assertTrue("no key may be sent for a refused call", platform.acts.isEmpty());
+        assertTrue("a refused call must not tell the AudioPlane the owner paused", intents.isEmpty());
+    }
+
+    @Test
+    public void aSkipIsNotVerifiedByMetadataFillingInOrAFlicker() throws Exception {
+        // The player ignores "next"; its metadata appears late (null -> the same track).
+        platform.track = null;
+        platform.onKey = p -> { };
+        assertEquals("UNVERIFIED", run("media_control", "{\"action\":\"next\"}").getString("status"));
+        // The track token flickers for one poll and comes back: not a skip.
+        platform.track = "t:Song A|Artist|Album";
+        int[] polls = {0};
+        FakePlatform flicker = new FakePlatform() {
+            @Override
+            public String mediaTrack() {
+                polls[0]++;
+                return polls[0] == 2 ? "t:Other|Artist|Album" : "t:Song A|Artist|Album";
+            }
+        };
+        assertEquals("UNVERIFIED", new FastTools(flicker).run("media_control", "{\"action\":\"next\"}", media)
+                .json.getString("status"));
     }
 }

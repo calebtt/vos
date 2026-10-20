@@ -227,6 +227,86 @@ public class XaiRealtimeBackendTest {
         assertEquals(List.of("tools true", "output c-end {\"status\":\"VERIFIED\"}"), vendorSaw);
     }
 
+    /** A fake vendor whose first answer is the given calls, all in one response; follow-ups get audio. */
+    private void enqueueBatchVendor(String... calls) {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean asked;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (type.equals("session.update")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !asked) {
+                    asked = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    for (String c : calls) {
+                        ws.send(c);
+                    }
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                } else if (type.equals("conversation.item.create")) {
+                    vendorSaw.add("output " + m.optJSONObject("item").optString("call_id"));
+                } else if (type.equals("response.create")) {
+                    vendorSaw.add("response.create");
+                    ws.send(delta("r-follow", REPLY));
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+    }
+
+    private static String call(String id, String name, String args) {
+        return "{\"type\":\"response.function_call_arguments.done\",\"call_id\":\"" + id + "\",\"name\":\""
+                + name + "\",\"arguments\":" + JSONObject.quote(args) + "}";
+    }
+
+    @Test
+    public void twoCallsInOneResponseGetOneFollowUpAfterBothResults() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueBatchVendor(call("c-a", "media_control", "{\"action\":\"pause\"}"),
+                call("c-b", "volume_set", "{\"percent\":30}"));
+        toolDelayMs = 400;
+        Mic mic = new Mic();
+        String reason = backend(300).run("t-9", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertEquals(2, toolCalls.size());
+        assertEquals(List.of("output c-a", "output c-b", "response.create"), vendorSaw);
+    }
+
+    @Test
+    public void endTurnWaitsForAToolInTheSameResponseAndItsReport() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueBatchVendor(call("c-a", "media_control", "{\"action\":\"pause\"}"), call("c-end", "end_turn", "{}"));
+        toolDelayMs = 800; // longer than the goodbye's end deadline
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        String reason = backend(10_000).run("t-10", mic.in, speaker, () -> { });
+        mic.close();
+        assertEquals("model end", reason);
+        assertEquals(List.of("t-10 media_control {\"action\":\"pause\"}"), toolCalls);
+        // The tool's result reached the model, which then reported it before the turn ended.
+        assertEquals(List.of("output c-end", "output c-a", "response.create"), vendorSaw);
+        assertArrayEquals(REPLY, speaker.toByteArray());
+    }
+
     /** An open mic: some audio, then silence until the test closes it. */
     private static final class Mic {
         final PipedOutputStream out = new PipedOutputStream();
