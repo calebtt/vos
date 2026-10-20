@@ -369,6 +369,67 @@ public class XaiRealtimeBackendTest {
     }
 
     @Test
+    public void aToolFollowUpCreatedWhileTheOwnerSpeaksIsDroppedAndCancelled() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        byte[] stale = filled(3200, 0x55);
+        byte[] answer = filled(3200, 0x66);
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean asked;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (type.equals("session.update")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !asked) {
+                    asked = true;
+                    ws.send(STARTED);
+                    ws.send(STOPPED);
+                    ws.send(call("r1", "c-a", "media_control", "{\"action\":\"pause\"}"));
+                    ws.send(done("r1", "completed"));
+                } else if (type.equals("response.create")) {
+                    vendorSaw.add("response.create");
+                    // The owner is already talking again when the follow-up opens.
+                    ws.send(STARTED);
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r2\",\"status\":\"in_progress\"}}");
+                    ws.send(delta("r2", stale));
+                    ws.send(done("r2", "cancelled"));
+                    ws.send(STOPPED);
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r3\",\"status\":\"in_progress\"}}");
+                    ws.send(delta("r3", answer));
+                    ws.send(done("r3", "completed"));
+                } else if (type.equals("response.cancel")) {
+                    vendorSaw.add("response.cancel");
+                } else if (type.equals("conversation.item.create")) {
+                    vendorSaw.add("output " + m.optJSONObject("item").optString("call_id"));
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        assertEquals("idle", backend(500).run("t-19", mic.in, speaker, () -> { }));
+        mic.close();
+        assertArrayEquals("only the answer to the new speech plays", answer, speaker.toByteArray());
+        assertEquals(List.of("output c-a", "response.create", "response.cancel"), vendorSaw);
+    }
+
+    @Test
     public void anActiveResponseErrorDoesNotEndTheTurn() throws Exception {
         vault.put(KeyVault.XAI, "xai-test-key");
         server.enqueue(new MockResponse().withWebSocketUpgrade(scripted(

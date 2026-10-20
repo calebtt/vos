@@ -394,6 +394,28 @@ public class AudioPlaneTest {
     }
 
     @Test
+    public void aPauseTakenBeforeTheKeyHoldsWhenTheTurnEndsDuringTheOracle() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // VOS pauses the music
+        Runnable undo = plane.ownerPausing(id); // the owner said pause; the oracle is still waiting
+        plane.end(id, "stop"); // the owner taps stop meanwhile
+        assertNull("RESTORE does not resume what the owner paused", platform.playing);
+        assertEquals(List.of(600L, 2000L), platform.delays); // the re-pause checks are armed
+        undo.run(); // the oracle's verdict comes after the turn: nothing to take back
+        assertEquals(AudioPlane.State.IDLE, plane.state());
+    }
+
+    @Test
+    public void anOwnerIntentThatDidNotStandIsTakenBack() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile");
+        plane.ownerPlaying(id).run(); // "play", but the player stayed paused
+        plane.ownerPausing(id).run(); // "pause", but it did not stand either
+        plane.end(id, "idle");
+        assertEquals("RESTORE still resumes what the turn paused", MUSIC, platform.playing);
+    }
+
+    @Test
     public void aFailedSummonKeepsTheLastTurnsRepauseChecks() {
         platform.playing = MUSIC;
         String a = plane.summon("qs_tile");

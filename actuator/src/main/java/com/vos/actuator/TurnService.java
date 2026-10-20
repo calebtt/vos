@@ -75,16 +75,16 @@ public final class TurnService extends Service {
         } else {
             r = app.fastTools().run(name, argsJson, new FastTools.MediaIntent() {
                 @Override
-                public void ownerPaused() {
-                    app.audioPlane().ownerPausedMedia(turnId);
+                public Runnable ownerPausing() {
+                    return app.audioPlane().ownerPausing(turnId);
                 }
 
                 @Override
-                public void ownerPlayed() {
-                    app.audioPlane().ownerResumedMedia(turnId);
+                public Runnable ownerPlaying() {
+                    return app.audioPlane().ownerPlaying(turnId);
                 }
             });
-            Earcons.play(app, r.status, t.speakerToFile);
+            Earcons.play(app, r.status, t.speakerToFile); // never throws: the result and audit line follow
         }
         Map<String, Object> line = new LinkedHashMap<>();
         line.put("event", "tool.call");

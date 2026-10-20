@@ -60,9 +60,14 @@ public final class FastTools {
 
     /** Tells the AudioPlane what the owner asked of media during the turn (RESTORE honours it). */
     public interface MediaIntent {
-        void ownerPaused();
+        /**
+         * The owner asked for a pause or stop. Taken before the media key, so a turn that ends while the
+         * oracle waits already knows; returns how to take it back if the pause does not stand.
+         */
+        Runnable ownerPausing();
 
-        void ownerPlayed();
+        /** The owner asked for playback; as {@link #ownerPausing}. */
+        Runnable ownerPlaying();
     }
 
     /** One tool result: its status plus fields for the model and the audit line. */
@@ -187,10 +192,11 @@ public final class FastTools {
 
     /**
      * Media keys, then the oracle. A request that cannot stand (nothing to pause) is FAILED before any
-     * key is sent. The owner's intent (pause or play) is passed to the AudioPlane only when it stands:
-     * VERIFIED, or UNVERIFIED because media state cannot be observed at all. A visible session that
-     * never reached the requested state leaves the AudioPlane as it was, so RESTORE still resumes what
-     * the turn paused.
+     * key is sent. The owner's intent (pause or play) goes to the AudioPlane before the key, so a turn
+     * that ends while the oracle waits already knows it, and is taken back unless it stands: VERIFIED,
+     * or UNVERIFIED because media state cannot be observed at all. A visible session that never
+     * reached the requested state leaves the AudioPlane as it was, so RESTORE still resumes what the
+     * turn paused.
      */
     private Result mediaControl(JSONObject args, MediaIntent media) throws BadArgs, InterruptedException {
         allowOnly(args, "action");
@@ -205,15 +211,19 @@ public final class FastTools {
         }
         String idBefore = platform.mediaId();
         String titleBefore = platform.mediaTitle();
-        platform.mediaKey(key);
-        Result r = mediaOracle(action, stateBefore, idBefore, titleBefore);
-        boolean stands = r.status == Status.VERIFIED || (r.status == Status.UNVERIFIED && stateBefore == null);
-        if (stands && (action.equals("pause") || action.equals("stop"))) {
-            media.ownerPaused();
-        } else if (stands && action.equals("play")) {
-            media.ownerPlayed();
+        Runnable undo = action.equals("pause") || action.equals("stop") ? media.ownerPausing()
+                : action.equals("play") ? media.ownerPlaying() : null;
+        boolean stands = false;
+        try {
+            platform.mediaKey(key);
+            Result r = mediaOracle(action, stateBefore, idBefore, titleBefore);
+            stands = r.status == Status.VERIFIED || (r.status == Status.UNVERIFIED && stateBefore == null);
+            return r;
+        } finally {
+            if (!stands && undo != null) {
+                undo.run();
+            }
         }
-        return r;
     }
 
     private Result mediaOracle(String action, String stateBefore, String idBefore, String titleBefore)

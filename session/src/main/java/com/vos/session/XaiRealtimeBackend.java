@@ -140,7 +140,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         private boolean batchResponseDone;
         /** The response audio is arriving for, and the one a barge-in cut off ("" when the vendor sends no ids). */
         volatile String currentResponse = "";
-        volatile String cancelledResponse = "";
+        /** Responses the owner talked over; their late deltas and calls are dropped. */
+        final java.util.Set<String> cancelledResponses = java.util.concurrent.ConcurrentHashMap.newKeySet();
         private String endReason;
         private boolean ended;
         private boolean actuatorEnded;
@@ -238,7 +239,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         /** A response the owner talked over. Without vendor ids nothing is "cancelled": barge-in only clears the queue. */
         private boolean cancelled(String responseId) {
-            return !responseId.isEmpty() && responseId.equals(cancelledResponse);
+            return !responseId.isEmpty() && cancelledResponses.contains(responseId);
         }
 
         private boolean over() {
@@ -373,7 +374,9 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             }
             abandonBatch(); // results of calls in flight still go back, but nothing asks the model to answer
             anySpeech = true;
-            cancelledResponse = currentResponse; // barge-in: the rest of that response is not played
+            if (!currentResponse.isEmpty()) {
+                cancelledResponses.add(currentResponse); // barge-in: the rest of that response is not played
+            }
             int dropped = replyQueue.size();
             replyQueue.clear();
             Log.i(TAG, "turn " + turnId + " speech started" + (dropped > 0 ? ", dropped " + dropped + " reply chunks" : ""));
@@ -381,8 +384,20 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void responseCreated(String responseId) {
-            if (!responseId.isEmpty()) {
-                currentResponse = responseId; // so a barge-in before its first audio still drops it
+            if (responseId.isEmpty()) {
+                return;
+            }
+            currentResponse = responseId; // so a barge-in before its first audio still drops it
+            if (speaking) {
+                // Only our tool follow-up can open a response while the owner talks (the vendor's VAD
+                // opens one when speech stops). It answers what came before the new speech: drop it, and
+                // cancel it so the vendor answers the owner instead.
+                cancelledResponses.add(responseId);
+                WebSocket w = ws;
+                if (w != null && !over()) {
+                    w.send(XaiRealtime.responseCancel());
+                }
+                Log.i(TAG, "turn " + turnId + " dropped a follow-up created while the owner was speaking");
             }
         }
 
