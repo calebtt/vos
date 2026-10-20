@@ -159,34 +159,62 @@ public final class AudioPlane {
             return false;
         }
         move(State.RESTORE, reason);
-        boolean callNow = isCallMode(platform.mode());
-        if (!callNow) { // a call that started during the turn owns the mode now; leave it
-            platform.setMode(savedMode);
-        }
-        if (commDeviceSet) {
-            platform.clearCommunicationDevice();
-        }
-        if (focusHeld) {
-            platform.abandonFocus();
-        }
+        // Each undo is tried on its own: an audio-server failure in one (the same restart that kills
+        // a recording) must not skip the others or leave the plane stuck in RESTORE.
+        java.util.List<String> failed = new java.util.ArrayList<>();
+        boolean callNow = false;
         String resumed = null;
-        if (pausedPkg != null && !ownerPausedMedia && platform.playMedia(pausedPkg)) {
-            resumed = pausedPkg;
+        try {
+            callNow = isCallMode(platform.mode());
+        } catch (RuntimeException e) {
+            failed.add("mode");
         }
-        if (ownerPausedMedia && pausedPkg != null) {
-            String pkg = pausedPkg;
-            long armed = epoch;
-            for (long ms : RECHECK_MS) {
-                platform.schedule(() -> keepOwnerPause(id, pkg, armed), ms);
+        try {
+            if (!callNow) { // a call that started during the turn owns the mode now; leave it
+                platform.setMode(savedMode);
+            }
+        } catch (RuntimeException e) {
+            failed.add("setMode");
+        }
+        try {
+            if (commDeviceSet) { // VOS's own request only; a call's route is the call's own
+                platform.clearCommunicationDevice();
+            }
+        } catch (RuntimeException e) {
+            failed.add("clearCommunicationDevice");
+        }
+        try {
+            if (focusHeld) {
+                platform.abandonFocus();
+            }
+        } catch (RuntimeException e) {
+            failed.add("abandonFocus");
+        }
+        if (!callNow) { // never start media into a call
+            try {
+                if (pausedPkg != null && !ownerPausedMedia && platform.playMedia(pausedPkg)) {
+                    resumed = pausedPkg;
+                }
+            } catch (RuntimeException e) {
+                failed.add("playMedia");
+            }
+            if (ownerPausedMedia && pausedPkg != null) {
+                String pkg = pausedPkg;
+                long armed = epoch;
+                for (long ms : RECHECK_MS) {
+                    platform.schedule(() -> keepOwnerPause(id, pkg, armed), ms);
+                }
             }
         }
         commDeviceSet = false;
         focusHeld = false;
         outDev = null;
         inDev = null;
+        String left = callNow && pausedPkg != null ? ", " + pausedPkg + " left paused for the call" : "";
         pausedPkg = null;
         move(State.IDLE, "restored" + (resumed != null ? ", resumed " + resumed : "")
-                + (callNow ? ", mode left to the call" : ""));
+                + (callNow ? ", mode left to the call" : "") + left
+                + (failed.isEmpty() ? "" : ", failed: " + String.join(" ", failed)));
         turnId = null;
         return true;
     }

@@ -20,17 +20,40 @@ import java.util.List;
  * media and leaves media alone.
  */
 final class AndroidAudioPlatform implements AudioPlane.Platform {
-    /** Communication devices in order of preference; the speaker when no headset is connected. */
-    private static final int[] PREFERRED = {
+    /**
+     * Communication devices in order of preference: headsets with a mic, then output-only devices the
+     * owner is wearing or chose (headphones, a hearing aid, an LE Audio speaker), and the phone's
+     * speaker only when none of those is connected.
+     */
+    static final int[] PREFERRED = {
         AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET,
-        AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_HEARING_AID,
+        AudioDeviceInfo.TYPE_BLE_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
     };
+    /** Of {@link #PREFERRED}, the types whose own mic VOS can capture from. */
+    static final int[] WITH_MIC = {
+        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET,
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+    };
+
+    /** The preferred type among those available, or -1. Pure, for the JVM test. */
+    static int pick(int[] available) {
+        for (int type : PREFERRED) {
+            for (int a : available) {
+                if (a == type) {
+                    return type;
+                }
+            }
+        }
+        return -1;
+    }
 
     private final Context context;
     private final AudioManager am;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private AudioFocusRequest focus;
     private String commType;
+    private boolean commHasMic;
     private AudioManager.OnModeChangedListener callWatch;
 
     AndroidAudioPlatform(Context context) {
@@ -80,15 +103,17 @@ final class AndroidAudioPlatform implements AudioPlane.Platform {
     @Override
     public String setCommunicationDevice() {
         List<AudioDeviceInfo> devices = am.getAvailableCommunicationDevices();
-        for (int type : PREFERRED) {
-            for (AudioDeviceInfo d : devices) {
-                if (d.getType() == type && am.setCommunicationDevice(d)) {
-                    commType = typeName(type);
-                    return commType;
-                }
+        int[] types = devices.stream().mapToInt(AudioDeviceInfo::getType).toArray();
+        int type = pick(types);
+        for (AudioDeviceInfo d : devices) {
+            if (d.getType() == type && am.setCommunicationDevice(d)) {
+                commType = typeName(type);
+                commHasMic = java.util.Arrays.stream(WITH_MIC).anyMatch(t -> t == type);
+                return commType;
             }
         }
         commType = null;
+        commHasMic = false;
         return null;
     }
 
@@ -100,10 +125,7 @@ final class AndroidAudioPlatform implements AudioPlane.Platform {
 
     @Override
     public String inputDevice() {
-        if (commType == null || commType.equals("BUILTIN_SPEAKER")) {
-            return "BUILTIN_MIC";
-        }
-        return commType; // a headset's own mic
+        return commHasMic ? commType : "BUILTIN_MIC"; // a headset's own mic, else the phone's
     }
 
     @Override
@@ -199,6 +221,12 @@ final class AndroidAudioPlatform implements AudioPlane.Platform {
                 return "BLUETOOTH_SCO";
             case AudioDeviceInfo.TYPE_BUILTIN_SPEAKER:
                 return "BUILTIN_SPEAKER";
+            case AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+                return "WIRED_HEADPHONES";
+            case AudioDeviceInfo.TYPE_HEARING_AID:
+                return "HEARING_AID";
+            case AudioDeviceInfo.TYPE_BLE_SPEAKER:
+                return "BLE_SPEAKER";
             default:
                 return "TYPE_" + type;
         }
