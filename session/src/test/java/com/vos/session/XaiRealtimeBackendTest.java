@@ -72,6 +72,9 @@ public class XaiRealtimeBackendTest {
         server.shutdown();
     }
 
+    private final List<String> toolCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private volatile long toolDelayMs;
+
     private XaiRealtimeBackend backend(long idleMs) throws Exception {
         String policy = "{\"registry\":[{\"id\":\"xai:test\",\"kind\":\"realtime_voice\",\"vendor\":\"xai\","
                 + "\"model\":\"grok-voice-3.0\",\"voice\":\"ara\",\"url\":\"ws://" + HOST + ":" + server.getPort()
@@ -81,7 +84,18 @@ public class XaiRealtimeBackendTest {
         t.idleMs = idleMs;
         t.firstSpeechMs = 5_000;
         t.maxTurnMs = 20_000;
-        return new XaiRealtimeBackend(egress, vault, e, transcripts, () -> "be brief", t);
+        org.json.JSONArray schemas = new org.json.JSONArray(
+                "[{\"type\":\"function\",\"name\":\"volume_set\",\"parameters\":{\"type\":\"object\"}}]");
+        return new XaiRealtimeBackend(egress, vault, e, transcripts, () -> "be brief", schemas,
+                (turn, name, args) -> {
+                    toolCalls.add(turn + " " + name + " " + args);
+                    try {
+                        Thread.sleep(toolDelayMs);
+                    } catch (InterruptedException ignored) {
+                        // test
+                    }
+                    return "{\"status\":\"VERIFIED\",\"percent\":30}";
+                }, t);
     }
 
     /** A fake vendor: configures, and after a few mic appends hears speech and answers once. */
@@ -125,6 +139,92 @@ public class XaiRealtimeBackendTest {
                 ws.close(1000, null);
             }
         }));
+    }
+
+    /** A fake vendor that calls volume_set, or end_turn, and checks the session's tool messages. */
+    private final List<String> vendorSaw = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    private void enqueueToolVendor(boolean endTurn) {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean asked;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (type.equals("session.update")) {
+                    vendorSaw.add("tools " + (m.optJSONObject("session").has("tools")));
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !asked) {
+                    asked = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    if (endTurn) {
+                        ws.send("{\"type\":\"response.output_audio.delta\",\"delta\":\""
+                                + Base64.getEncoder().encodeToString(REPLY) + "\"}");
+                        ws.send("{\"type\":\"response.function_call_arguments.done\",\"call_id\":\"c-end\","
+                                + "\"name\":\"end_turn\",\"arguments\":\"{}\"}");
+                    } else {
+                        ws.send("{\"type\":\"response.function_call_arguments.done\",\"call_id\":\"c-1\","
+                                + "\"name\":\"volume_set\",\"arguments\":\"{\\\"percent\\\":30}\"}");
+                    }
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                } else if (type.equals("conversation.item.create")) {
+                    JSONObject item = m.optJSONObject("item");
+                    vendorSaw.add("output " + item.optString("call_id") + " " + item.optString("output"));
+                } else if (type.equals("response.create")) {
+                    vendorSaw.add("response.create");
+                    ws.send("{\"type\":\"response.output_audio.delta\",\"delta\":\""
+                            + Base64.getEncoder().encodeToString(REPLY) + "\"}");
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+    }
+
+    @Test
+    public void aToolCallRunsInTheActuatorAndTheModelAnswersAfterItsResult() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueToolVendor(false);
+        toolDelayMs = 600; // longer than the idle time: a pending tool must not end the turn
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        String reason = backend(300).run("t-6", mic.in, speaker, () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertEquals(List.of("t-6 volume_set {\"percent\":30}"), toolCalls);
+        assertEquals(List.of("tools true", "output c-1 {\"status\":\"VERIFIED\",\"percent\":30}", "response.create"),
+                vendorSaw);
+        assertArrayEquals(REPLY, speaker.toByteArray());
+    }
+
+    @Test
+    public void endTurnClosesTheTurnAfterTheGoodbyeHasPlayed() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueToolVendor(true);
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        String reason = backend(10_000).run("t-7", mic.in, speaker, () -> { });
+        mic.close();
+        assertEquals("model end", reason);
+        assertArrayEquals(REPLY, speaker.toByteArray());
+        assertTrue(toolCalls.isEmpty()); // end_turn never reaches the actuator
+        assertEquals(List.of("tools true", "output c-end {\"status\":\"VERIFIED\"}"), vendorSaw);
     }
 
     /** An open mic: some audio, then silence until the test closes it. */

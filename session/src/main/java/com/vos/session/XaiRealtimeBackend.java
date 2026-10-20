@@ -9,13 +9,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
+import org.json.JSONArray;
 
 /**
  * The {@code chat_voice} backend on the xAI realtime API (§3.2). Per turn:
@@ -24,9 +28,13 @@ import okhttp3.WebSocketListener;
  *       spoken while the WebSocket connects are kept, then streamed once the session is configured;</li>
  *   <li>reply audio is written to the speaker pipe paced to real time plus {@link Timing#leadMs}, so a
  *       barge-in (the vendor's VAD hears the owner) can drop what has not been sent yet;</li>
- *   <li>the turn ends when the owner stays quiet for {@link Timing#idleMs} after a reply, never speaks
- *       within {@link Timing#firstSpeechMs}, reaches {@link Timing#maxTurnMs}, or on a vendor error;
- *       the actuator ending it (the mic pipe closes) is not reported back.</li>
+ *   <li>a tool call goes to the actuator ({@link ToolCaller}) off the WebSocket thread, and its result
+ *       (VERIFIED, UNVERIFIED or FAILED from the actuator's oracle) goes back to the model, which then
+ *       answers; {@code end_turn} closes the turn once the reply has played;</li>
+ *   <li>the turn ends when the owner stays quiet for {@link Timing#idleMs} after a reply (not while a
+ *       tool call is in flight), never speaks within {@link Timing#firstSpeechMs}, reaches
+ *       {@link Timing#maxTurnMs}, the model ends it, or on a vendor error; the actuator ending it
+ *       (the mic pipe closes) is not reported back.</li>
  * </ul>
  * The key comes from the {@link KeyVault} at the start of each turn and only ever goes into the
  * WebSocket's Authorization header. Transcripts go to the {@link TranscriptLog}; logcat gets event
@@ -34,6 +42,12 @@ import okhttp3.WebSocketListener;
  */
 final class XaiRealtimeBackend implements SessionTurns.Backend {
     static final String TAG = "VOS_VOICE";
+    static final String END_TURN = "end_turn";
+
+    /** Runs a tool in the actuator for this turn; returns the result JSON (never throws). */
+    interface ToolCaller {
+        String call(String turnId, String name, String argsJson);
+    }
     private static final int BYTES_PER_SECOND = Ipc.TURN_SAMPLE_RATE * 2;
     private static final int FRAMES_PER_SEND = 5; // 100 ms per append message
 
@@ -50,15 +64,19 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
     private final ModelPolicy.Entry model;
     private final TranscriptLog transcripts;
     private final Supplier<String> instructions;
+    private final JSONArray toolSchemas;
+    private final ToolCaller tools;
     private final Timing timing;
 
     XaiRealtimeBackend(Egress egress, KeyVault vault, ModelPolicy.Entry model, TranscriptLog transcripts,
-            Supplier<String> instructions, Timing timing) {
+            Supplier<String> instructions, JSONArray toolSchemas, ToolCaller tools, Timing timing) {
         this.egress = egress;
         this.vault = vault;
         this.model = model;
         this.transcripts = transcripts;
         this.instructions = instructions;
+        this.toolSchemas = toolSchemas;
+        this.tools = tools;
         this.timing = timing;
     }
 
@@ -86,6 +104,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         final CountDownLatch done = new CountDownLatch(1);
         final long openedAt = now();
         final List<Thread> threads = new ArrayList<>();
+        final ExecutorService toolRunner = Executors.newSingleThreadExecutor(r -> new Thread(r, "vos-tool"));
+        final AtomicInteger toolsInFlight = new AtomicInteger();
 
         volatile WebSocket ws;
         volatile boolean configured;
@@ -96,6 +116,9 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         volatile long configuredAt;
         volatile long speechEndedAt;
         volatile long idleDeadline = Long.MAX_VALUE;
+        volatile long endDeadline = Long.MAX_VALUE;
+        volatile boolean responseHadCall;
+        volatile boolean endRequested;
         private String endReason;
         private boolean ended;
         private boolean actuatorEnded;
@@ -118,7 +141,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             ws = egress.openWebSocket(req, turnId, new WebSocketListener() {
                 @Override
                 public void onOpen(WebSocket w, Response response) {
-                    w.send(XaiRealtime.sessionUpdate(instructions.get(), model.get("voice"), Ipc.TURN_SAMPLE_RATE));
+                    w.send(XaiRealtime.sessionUpdate(instructions.get(), model.get("voice"), Ipc.TURN_SAMPLE_RATE,
+                            toolSchemas));
                 }
 
                 @Override
@@ -146,6 +170,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                         finish("no speech");
                     } else if (!speaking && now > idleDeadline) {
                         finish("idle");
+                    } else if (!speaking && now > endDeadline) {
+                        finish("model end");
                     }
                 }
             } catch (InterruptedException e) {
@@ -159,6 +185,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             for (Thread t : threads) {
                 t.interrupt();
             }
+            toolRunner.shutdownNow();
             synchronized (this) {
                 Log.i(TAG, "turn " + turnId + " over after_ms=" + (now() - openedAt) + " reason="
                         + (actuatorEnded ? "actuator" : endReason));
@@ -246,9 +273,13 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 while (!over()) {
                     byte[] b = replyQueue.poll(100, TimeUnit.MILLISECONDS);
                     if (b == null) {
-                        if (responseDone && idleDeadline == Long.MAX_VALUE && !speaking) {
+                        if (responseDone && !speaking) {
                             long left = Math.max(0, written * 1000 / BYTES_PER_SECOND - (now() - start));
-                            idleDeadline = now() + left + timing.idleMs;
+                            if (endRequested && endDeadline == Long.MAX_VALUE) {
+                                endDeadline = now() + left + timing.leadMs;
+                            } else if (!endRequested && idleDeadline == Long.MAX_VALUE && toolsInFlight.get() == 0) {
+                                idleDeadline = now() + left + timing.idleMs;
+                            }
                         }
                         start = -1;
                         continue;
@@ -293,6 +324,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             anySpeech = true;
             responseDone = false;
             idleDeadline = Long.MAX_VALUE;
+            endRequested = false; // the owner kept talking
+            endDeadline = Long.MAX_VALUE;
             int dropped = replyQueue.size();
             replyQueue.clear(); // barge-in: what is not yet in the pipe is not played
             Log.i(TAG, "turn " + turnId + " speech started" + (dropped > 0 ? ", dropped " + dropped + " reply chunks" : ""));
@@ -327,14 +360,56 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void responseDone(String status) {
-            responseDone = true;
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
+            if (responseHadCall) {
+                responseHadCall = false;
+                if (!endRequested) {
+                    return; // the answer comes in the response after the tool result
+                }
+            }
+            responseDone = true;
+        }
+
+        @Override
+        public void functionCall(String callId, String name, String argsJson) {
+            responseHadCall = true;
+            WebSocket w = ws;
+            if (w == null) {
+                return;
+            }
+            if (END_TURN.equals(name)) {
+                endRequested = true;
+                w.send(XaiRealtime.functionOutput(callId, "{\"status\":\"VERIFIED\"}"));
+                Log.i(TAG, "turn " + turnId + " tool " + name + " (the model ends the turn)");
+                return;
+            }
+            toolsInFlight.incrementAndGet();
+            idleDeadline = Long.MAX_VALUE;
+            toolRunner.execute(() -> {
+                long t0 = now();
+                String result = tools.call(turnId, name, argsJson);
+                Log.i(TAG, "turn " + turnId + " tool " + name + " " + statusOf(result) + " ms=" + (now() - t0));
+                WebSocket ws2 = ws;
+                if (ws2 != null && !over()) {
+                    ws2.send(XaiRealtime.functionOutput(callId, result));
+                    ws2.send(XaiRealtime.responseCreate());
+                }
+                toolsInFlight.decrementAndGet();
+            });
         }
 
         @Override
         public void error(String code, String message) {
             Log.w(TAG, "turn " + turnId + " vendor error code=" + code);
             finish("vendor error: " + code);
+        }
+    }
+
+    private static String statusOf(String resultJson) {
+        try {
+            return new org.json.JSONObject(resultJson).optString("status", "?");
+        } catch (Exception e) {
+            return "?";
         }
     }
 

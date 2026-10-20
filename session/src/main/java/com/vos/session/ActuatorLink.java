@@ -9,6 +9,8 @@ import com.vos.ipc.Ipc;
 import com.vos.ipc.PeerLink;
 import java.util.ArrayDeque;
 import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -53,6 +55,20 @@ final class ActuatorLink {
                 Log.w(SessionTurns.TAG, "endTurn not delivered: " + e.getClass().getSimpleName());
             }
         });
+    }
+
+    /**
+     * Runs a fast tool in the actuator (a two-way Binder call; not on the WebSocket thread). Waits up
+     * to 2 s for the link; any failure comes back as a FAILED result, never an exception.
+     */
+    String callTool(String turnId, String name, String argsJson) {
+        CompletableFuture<IVosActuator> ready = new CompletableFuture<>();
+        send(ready::complete);
+        try {
+            return ready.get(2, TimeUnit.SECONDS).callTool(turnId, name, argsJson);
+        } catch (Exception e) {
+            return "{\"status\":\"FAILED\",\"detail\":\"the actuator could not be reached\"}";
+        }
     }
 
     private synchronized void send(Consumer<IVosActuator> call) {
