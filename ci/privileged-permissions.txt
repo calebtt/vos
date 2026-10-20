@@ -1,0 +1,29 @@
+# signature|privileged permissions the session must never request (TARGET-PLAN §5.2, §5.3, §5.8).
+# policy_check.py already fails any session permission whose protection level in the SDK's framework
+# manifest is signature|privileged. This list is the backstop for names that manifest may lack
+# (permissions newer than the SDK platform, VOS's own) and documents the ones the plan cares about.
+# Keep it in sync with the actuator's privapp allowlist as it grows (M4-PRIV-01).
+android.permission.MODIFY_AUDIO_ROUTING
+android.permission.CAPTURE_AUDIO_OUTPUT
+android.permission.CAPTURE_VOICE_COMMUNICATION_OUTPUT
+android.permission.CAPTURE_MEDIA_OUTPUT
+android.permission.BYPASS_CONCURRENT_RECORD_AUDIO_RESTRICTION
+android.permission.CALL_AUDIO_INTERCEPTION
+android.permission.MEDIA_CONTENT_CONTROL
+android.permission.WRITE_SECURE_SETTINGS
+android.permission.MODIFY_PHONE_STATE
+android.permission.INSTALL_PACKAGES
+android.permission.DELETE_PACKAGES
+android.permission.PROVIDE_TRUST_AGENT
+android.permission.EXECUTE_APP_FUNCTIONS
+android.permission.ACCESS_COMPUTER_CONTROL
+android.permission.CREATE_VIRTUAL_DEVICE
+android.permission.READ_FRAME_BUFFER
+android.permission.INJECT_EVENTS
+android.permission.CAPTURE_SECURE_VIDEO_OUTPUT
+android.permission.DEVICE_POWER
+android.permission.MANAGE_ACTIVITY_TASKS
+android.permission.INTERACT_ACROSS_USERS_FULL
+android.permission.PACKAGE_USAGE_STATS
+android.permission.BIND_DEVICE_ADMIN
+com.vos.permission.BIND_VTB_PROVIDER

@@ -1,2 +1,53 @@
 docs/nav-evals/failures/
 docs/nav-evals/records/
+
+# Gradle / Android build outputs
+.gradle/
+build/
+**/build/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Signing material: never commit a keystore or its passwords
+*.jks
+*.keystore
+*.p12
+*.pk8
+*.pem
+keystore.properties
+release-signing.properties
+
+# Local tool downloads (gitleaks, etc.)
+.tools/
+
+# Data that never goes into the repo
+research/*.json
+*.err
+*.jsonl
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.pcap
+*.wav
+
+# Public pins (Graphene OTA cert) are committed on purpose
+!image/pins/
+!image/pins/**
+
+# Python bytecode
+__pycache__/
+*.pyc

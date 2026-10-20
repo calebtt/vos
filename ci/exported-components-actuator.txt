@@ -1,0 +1,6 @@
+# Every exported component of com.vos.actuator, with the permission that guards it ("-" = none).
+# The policy check fails on any exported component not listed here, or listed with another permission.
+# kind name permission
+service com.vos.actuator.ActuatorService com.vos.permission.SESSION
+service com.vos.actuator.HandsService android.permission.BIND_ACCESSIBILITY_SERVICE
+service com.vos.actuator.NotificationsService android.permission.BIND_NOTIFICATION_LISTENER_SERVICE

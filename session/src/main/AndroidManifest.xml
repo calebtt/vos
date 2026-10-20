@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Session: networked brain, NO sensors, NO actuation, NO privileged permissions (§3.1, §5.2). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Only the actuator (same signer) may bind SessionService (§5.3). -->
+    <permission
+        android:name="com.vos.permission.ACTUATOR"
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="com.vos.permission.SESSION" />
+
+    <!-- Defense in depth: strip sensor permissions even if a library asks. ci/policy_check.py checks the APK. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
+
+    <!-- Package visibility for the Binder guard and the peer binding (§5.3). -->
+    <queries>
+        <package android:name="com.vos.actuator" />
+    </queries>
+
+    <application
+        android:name=".SessionApp"
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <!-- Chat window entry point (decision 21); the real UI arrives in M1. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".SessionService"
+            android:exported="true"
+            android:permission="com.vos.permission.ACTUATOR" />
+    </application>
+</manifest>
