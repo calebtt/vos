@@ -28,6 +28,8 @@ public class AudioPlaneTest {
         final List<Runnable> scheduled = new ArrayList<>();
         final List<Long> delays = new ArrayList<>();
         boolean failSetMode; // the audio server died under RESTORE
+        boolean failMode;
+        boolean failMedia;
 
         @Override
         public boolean callActive() {
@@ -36,6 +38,9 @@ public class AudioPlaneTest {
 
         @Override
         public int mode() {
+            if (failMode) {
+                throw new RuntimeException(new android.os.DeadObjectException());
+            }
             return mode;
         }
 
@@ -102,6 +107,9 @@ public class AudioPlaneTest {
 
         @Override
         public boolean isMediaPlaying(String pkg) {
+            if (failMedia) {
+                throw new IllegalStateException("media session gone");
+            }
             return pkg.equals(playing);
         }
 
@@ -315,6 +323,52 @@ public class AudioPlaneTest {
         assertTrue(platform.calls.contains("abandonFocus"));
         platform.failSetMode = false;
         assertNotNull(plane.summon("qs_tile"));
+    }
+
+    @Test
+    public void aDeadAudioServerAtRestoreStillReachesIdleAndUndoesWhatItCan() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile");
+        platform.failMode = true; // every mode read throws, including the audit lines'
+        assertTrue(plane.end(id, "mic read error -6"));
+        assertEquals(AudioPlane.State.IDLE, plane.state());
+        assertNull(plane.turnId());
+        assertEquals(-1, last().get("mode"));
+        assertTrue((String) last().get("reason"), ((String) last().get("reason")).contains("failed: mode"));
+        // A call may have started: the mode is put back (a call's own mode cannot be taken), the
+        // device and focus dropped, and the music left paused rather than started into a call.
+        assertEquals(List.of("setMode 0", "clearCommunicationDevice", "abandonFocus"),
+                platform.calls.subList(platform.calls.size() - 3, platform.calls.size()));
+        assertFalse(platform.focus);
+        assertNull(platform.commDevice);
+        assertNull(platform.playing);
+        assertTrue((String) last().get("reason"), ((String) last().get("reason")).contains(MUSIC + " left paused,"));
+        platform.failMode = false;
+        assertNotNull(plane.summon("qs_tile"));
+    }
+
+    @Test
+    public void aSummonThatHitsADeadAudioServerOpensNoTurnAndGivesBackWhatItTook() {
+        platform.failSetMode = true;
+        assertNull(plane.summon("qs_tile"));
+        assertEquals(AudioPlane.State.IDLE, plane.state());
+        assertNull(plane.turnId());
+        assertFalse(platform.focus);
+        assertEquals("audio.refused", last().get("event"));
+        assertTrue((String) last().get("reason"), ((String) last().get("reason")).startsWith("audio error"));
+        platform.failSetMode = false;
+        assertNotNull(plane.summon("qs_tile"));
+    }
+
+    @Test
+    public void aRepauseCheckThatHitsADeadMediaSessionDoesNotThrow() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile");
+        plane.ownerPausedMedia(id);
+        plane.end(id, "idle");
+        platform.failMedia = true;
+        platform.runScheduled(); // on the main thread in the app: must not throw
+        assertEquals(AudioPlane.State.IDLE, plane.state());
     }
 
     @Test
