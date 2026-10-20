@@ -331,6 +331,51 @@ public class XaiRealtimeBackendTest {
     }
 
     @Test
+    public void aBargeInBeforeTheFirstDeltaStillDropsThatResponse() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        byte[] r1 = filled(3200, 0x11);
+        byte[] r2 = filled(3200, 0x22);
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean sent;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                if (text.contains("\"session.update\"")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (text.contains("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !sent) {
+                    sent = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    // r1 opens, and the owner talks again before its first audio arrives.
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r1\",\"status\":\"in_progress\"}}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send(delta("r1", r1));
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r1\",\"status\":\"cancelled\"}}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r2\",\"status\":\"in_progress\"}}");
+                    ws.send(delta("r2", r2));
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r2\",\"status\":\"completed\"}}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        assertEquals("idle", backend(500).run("t-18", mic.in, speaker, () -> { }));
+        mic.close();
+        assertArrayEquals("only the answer after the barge-in plays", r2, speaker.toByteArray());
+    }
+
+    @Test
     public void pacingHoldsTheLeadAcrossGapsLongerThanThePoll() throws Exception {
         vault.put(KeyVault.XAI, "xai-test-key");
         byte[] answer = filled(51200, 0x44); // 1.6 s in four 400 ms deltas, 250 ms apart

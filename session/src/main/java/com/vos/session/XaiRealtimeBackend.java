@@ -334,6 +334,13 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         }
 
         @Override
+        public void responseCreated(String responseId) {
+            if (!responseId.isEmpty()) {
+                currentResponse = responseId; // so a barge-in before its first audio still drops it
+            }
+        }
+
+        @Override
         public void speechStopped() {
             synchronized (idleLock) {
                 speaking = false;
