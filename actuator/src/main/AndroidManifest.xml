@@ -16,6 +16,11 @@
         android:name="android.permission.INTERNET"
         tools:node="remove" />
 
+    <!-- Package visibility for the Binder guard and the peer binding (§5.3). -->
+    <queries>
+        <package android:name="com.vos.session" />
+    </queries>
+
     <application
         android:name=".ActuatorApp"
         android:allowBackup="false"
