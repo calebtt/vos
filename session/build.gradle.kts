@@ -46,6 +46,11 @@ android {
         buildConfig = true // BuildConfig.DEBUG gates debug-only code paths
     }
 
+    testOptions {
+        // android.util.Log and friends return defaults in JVM tests instead of throwing.
+        unitTests.isReturnDefaultValues = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
