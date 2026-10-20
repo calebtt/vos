@@ -219,6 +219,28 @@ public class EgressTest {
     }
 
     @Test
+    public void aWebSocketHandshakeAnswered503WithRetryAfterZeroIsNotResent() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(503).setHeader("Retry-After", "0"));
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() { }));
+        CountDownLatch failed = new CountDownLatch(1);
+        AtomicReference<Throwable> why = new AtomicReference<>();
+        egress.openWebSocket(new Request.Builder().url(url(ALLOWED, "/v1/realtime")).build(), "t-5",
+                new WebSocketListener() {
+                    @Override
+                    public void onFailure(WebSocket w, Throwable t, Response r) {
+                        why.set(t);
+                        failed.countDown();
+                    }
+                });
+        assertTrue(failed.await(10, TimeUnit.SECONDS));
+        assertTrue(String.valueOf(why.get()), why.get() instanceof Egress.ResendRefusedException);
+        assertEquals(1, server.getRequestCount());
+        List<JSONObject> l = lines();
+        assertEquals(1, l.size());
+        assertEquals("resend refused", l.get(0).getString("outcome"));
+    }
+
+    @Test
     public void aRefusedWebSocketIsLoggedOnce() throws Exception {
         CountDownLatch failed = new CountDownLatch(1);
         AtomicReference<Throwable> why = new AtomicReference<>();
