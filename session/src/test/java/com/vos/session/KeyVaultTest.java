@@ -119,6 +119,29 @@ public class KeyVaultTest {
     }
 
     @Test
+    public void aKeystoreFailureMidImportStillDestroysEveryFileAndTheDirectory() throws Exception {
+        File files = tmp.newFolder("files2");
+        File importDir = new File(files, KeyImport.DIR);
+        assertTrue(importDir.mkdirs());
+        Files.write(new File(importDir, "aaa").toPath(), (secret + "\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(new File(importDir, "xai").toPath(), (secret + "\n").getBytes(StandardCharsets.UTF_8));
+        // The Keystore reports failures as RuntimeExceptions (ProviderException, IllegalStateException).
+        KeyVault broken = new KeyVault(tmp.newFolder("keys2"), new KeyVault.Sealer() {
+            @Override
+            public byte[] seal(byte[] plain, byte[] aad) {
+                throw new java.security.ProviderException("keystore unavailable");
+            }
+
+            @Override
+            public byte[] open(byte[] sealed, byte[] aad) {
+                throw new java.security.ProviderException("keystore unavailable");
+            }
+        });
+        assertEquals(List.of(), KeyImport.run(files, broken));
+        assertFalse(importDir.exists());
+    }
+
+    @Test
     public void importSealsPushedKeysAndDestroysTheFiles() throws Exception {
         File files = tmp.newFolder("files");
         File importDir = new File(files, KeyImport.DIR);
