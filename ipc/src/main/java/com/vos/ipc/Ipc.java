@@ -5,8 +5,13 @@ import android.content.Intent;
 
 /** Names and the protocol version shared by the session and the actuator (§3.1, §5.3). */
 public final class Ipc {
-    /** Bumped on any incompatible change to IVosActuator or IVosSession. */
-    public static final int PROTOCOL_VERSION = 1;
+    /** Bumped on any incompatible change to IVosActuator or IVosSession. 2: voice turns. */
+    public static final int PROTOCOL_VERSION = 2;
+
+    /** Turn audio on both pipes: mono, signed 16-bit little-endian, at this rate (§3.2). */
+    public static final int TURN_SAMPLE_RATE = 16000;
+    /** One 20 ms frame of turn audio, in bytes. */
+    public static final int TURN_FRAME_BYTES = TURN_SAMPLE_RATE / 50 * 2;
 
     public static final String ACTUATOR_PACKAGE = "com.vos.actuator";
     public static final String SESSION_PACKAGE = "com.vos.session";
