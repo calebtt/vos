@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Binder;
 import android.os.IBinder;
 import android.os.Parcel;
+import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import com.vos.ipc.BinderGuard;
 import com.vos.ipc.Grant;
@@ -32,6 +33,18 @@ public final class SessionService extends Service {
         public int protocolVersion() {
             guard.require(Binder.getCallingUid(), Grant.ACTUATOR_CORE);
             return Ipc.PROTOCOL_VERSION;
+        }
+
+        @Override
+        public void onTurnOpened(String turnId, ParcelFileDescriptor mic, ParcelFileDescriptor speaker) {
+            guard.require(Binder.getCallingUid(), Grant.ACTUATOR_CORE);
+            ((SessionApp) getApplication()).turns().open(turnId, mic, speaker);
+        }
+
+        @Override
+        public void onTurnClosed(String turnId, String reason) {
+            guard.require(Binder.getCallingUid(), Grant.ACTUATOR_CORE);
+            ((SessionApp) getApplication()).turns().closed(turnId);
         }
     };
 
