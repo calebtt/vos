@@ -12,6 +12,7 @@ import com.vos.ipc.JsonlAudit;
 public final class ActuatorApp extends Application {
     private BinderGuard sessionGuard;
     private AudioPlane audioPlane;
+    private AndroidAudioPlatform audioPlatform;
 
     @Override
     public void onCreate() {
@@ -20,7 +21,12 @@ public final class ActuatorApp extends Application {
         sessionGuard = new BinderGuard("ActuatorService", Ipc.SESSION_PACKAGE,
                 AndroidGuardPlatform.ownCertSha256(this), GrantTable.of(Ipc.SESSION_PACKAGE, Grant.SESSION_CORE),
                 new AndroidGuardPlatform(getPackageManager()), audit);
-        audioPlane = new AudioPlane(new AndroidAudioPlatform(this), line -> audit.record(line));
+        audioPlatform = new AndroidAudioPlatform(this);
+        audioPlane = new AudioPlane(audioPlatform, line -> audit.record(line));
+    }
+
+    AndroidAudioPlatform audioPlatform() {
+        return audioPlatform;
     }
 
     /** The one owner of the audio session (§3.3). */
