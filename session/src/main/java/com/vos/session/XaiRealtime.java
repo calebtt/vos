@@ -19,6 +19,9 @@ final class XaiRealtime {
 
         void speechStarted();
 
+        /** The vendor opened a response, before any of its audio. */
+        void responseCreated(String responseId);
+
         void speechStopped();
 
         void ownerTranscript(String text);
@@ -120,6 +123,10 @@ final class XaiRealtime {
                 break;
             case "conversation.item.input_audio_transcription.completed":
                 h.ownerTranscript(m.optString("transcript", ""));
+                break;
+            case "response.created":
+                JSONObject c = m.optJSONObject("response");
+                h.responseCreated(c == null ? "" : c.optString("id", ""));
                 break;
             case "response.output_audio.delta":
                 String delta = m.optString("delta", "");
