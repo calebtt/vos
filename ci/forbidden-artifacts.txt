@@ -1,0 +1,17 @@
+# Play services, Firebase and ML Kit download artifacts (TARGET-PLAN M0-02, §5.3).
+# "group:" lines are Maven group prefixes (dependency graph); "class:" lines are Java package
+# prefixes (APK dex, manifest, resources and zip entries). "actuator-class:" applies to the
+# actuator only: it never holds an HTTP or WebSocket library (§5.2).
+group:com.google.android.gms
+group:com.google.firebase
+group:com.google.mlkit
+group:com.google.android.play
+class:com.google.android.gms
+class:com.google.firebase
+class:com.google.mlkit
+class:com.google.android.play.core
+actuator-class:okhttp3
+actuator-class:com.squareup.okhttp
+actuator-class:org.java_websocket
+actuator-class:io.ktor.client
+actuator-class:org.chromium.net

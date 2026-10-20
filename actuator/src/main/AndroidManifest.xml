@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Actuator: trusted base, sensors and hands, NO INTERNET (§3.1, §5.2). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Only the session (same signer) may bind ActuatorService (§5.3). -->
+    <permission
+        android:name="com.vos.permission.SESSION"
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="com.vos.permission.ACTUATOR" />
+
+    <!-- Defense in depth: strip INTERNET even if a library asks for it. ci/policy_check.py checks the APK. -->
+    <uses-permission
+        android:name="android.permission.INTERNET"
+        tools:node="remove" />
+
+    <!-- Package visibility for the Binder guard and the peer binding (§5.3). -->
+    <queries>
+        <package android:name="com.vos.session" />
+    </queries>
+
+    <application
+        android:name=".ActuatorApp"
+        android:allowBackup="false"
+        android:label="@string/app_name">
+
+        <service
+            android:name=".ActuatorService"
+            android:exported="true"
+            android:permission="com.vos.permission.SESSION" />
+
+        <!-- Hands (§3.1): exported so the system can bind it; only holders of the system-only
+             BIND_* permission (i.e. system_server) can. ci/policy_check.py enforces the guard. -->
+        <service
+            android:name=".HandsService"
+            android:exported="true"
+            android:label="@string/hands_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/hands_service" />
+        </service>
+
+        <service
+            android:name=".NotificationsService"
+            android:exported="true"
+            android:label="@string/notifications_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
