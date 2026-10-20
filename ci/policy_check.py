@@ -78,15 +78,6 @@ def read_forbidden(path):
     return groups, classes, actuator_classes
 
 
-def exported_allowlist(ci, app, build_type):
-    """The app's exported-component allowlist; debug APKs add exported-components-<app>-debug.txt."""
-    allow = read_exported_allowlist(Path(ci) / f"exported-components-{app}.txt")
-    extra = Path(ci) / f"exported-components-{app}-debug.txt"
-    if build_type == "debug" and extra.is_file():
-        allow.update(read_exported_allowlist(extra))
-    return allow
-
-
 def read_exported_allowlist(path):
     """{(kind, name): permission or None}."""
     out = {}
@@ -94,6 +85,15 @@ def read_exported_allowlist(path):
         kind, name, perm = line.split()
         out[(kind, name)] = None if perm == "-" else perm
     return out
+
+
+def exported_allowlist(ci, app, build_type):
+    """The app's exported-component allowlist; debug APKs add exported-components-<app>-debug.txt."""
+    allow = read_exported_allowlist(Path(ci) / f"exported-components-{app}.txt")
+    extra = Path(ci) / f"exported-components-{app}-debug.txt"
+    if build_type == "debug" and extra.is_file():
+        allow.update(read_exported_allowlist(extra))
+    return allow
 
 
 # ---------------------------------------------------------------------------------------------
