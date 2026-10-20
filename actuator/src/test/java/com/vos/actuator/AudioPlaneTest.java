@@ -421,6 +421,37 @@ public class AudioPlaneTest {
     }
 
     @Test
+    public void aPlayThatDidNotStandResumesWhatTheTurnPausedEvenIfTheTurnEndedMeanwhile() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // VOS pauses the music
+        Runnable undo = plane.ownerPlaying(id); // "play"; the oracle is still waiting
+        plane.end(id, "stop"); // the owner taps stop meanwhile: RESTORE has nothing to resume
+        assertNull(platform.playing);
+        undo.run(); // the play did not stand
+        assertEquals(MUSIC, platform.playing);
+        assertEquals("audio.media_resumed", last().get("event"));
+    }
+
+    @Test
+    public void aPlayThatDidNotStandDoesNotResumeIntoACallOrAfterALaterTurn() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile");
+        Runnable undo = plane.ownerPlaying(id);
+        plane.end(id, "stop");
+        platform.mode = 2; // a call now has the audio
+        undo.run();
+        assertNull(platform.playing);
+        platform.mode = MODE_NORMAL;
+        platform.playing = MUSIC;
+        String a = plane.summon("qs_tile");
+        Runnable late = plane.ownerPlaying(a);
+        plane.end(a, "stop");
+        plane.summon("qs_tile"); // a later turn opened before the verdict
+        late.run();
+        assertNull(platform.playing);
+    }
+
+    @Test
     public void aVoipCallThatStartsDuringSummonOpensNoTurn() {
         platform.playing = MUSIC;
         platform.voipOnFocus = true;
