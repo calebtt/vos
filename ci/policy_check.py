@@ -45,7 +45,7 @@ REQUIRED_BIND_PERMISSION = {
 }
 
 # Where retired names must not appear: code, manifests, resources, build scripts, CI config.
-RETIRED_SCAN_DIRS = ("actuator", "session", "vtb-sdk", "ci", ".github", "gradle", "image", "fork", "eval")
+RETIRED_SCAN_DIRS = ("actuator", "session", "vtb-sdk", "ipc", "ci", ".github", "gradle", "image", "fork", "eval")
 RETIRED_SCAN_ROOT_FILES = ("build.gradle.kts", "settings.gradle.kts", "gradle.properties", "gradlew", "gradlew.bat")
 RETIRED_NAMES_FILE = "ci/retired-names.txt"
 
@@ -541,7 +541,7 @@ def main(argv=None):
             print(f"checked {apk.relative_to(root)}: {len(facts['uses_permissions'])} permissions, "
                   f"{sum(c['exported'] for c in facts['components'])} exported components, {len(dex)} dex strings")
 
-    for module in ("actuator", "session", "vtb-sdk"):
+    for module in ("actuator", "session", "vtb-sdk", "ipc"):
         deps_file = root / module / "build" / "policy" / "deps.txt"
         if not deps_file.is_file():
             fails.append(f"{module}: {deps_file.relative_to(root)} missing; run ./gradlew writePolicyDeps")

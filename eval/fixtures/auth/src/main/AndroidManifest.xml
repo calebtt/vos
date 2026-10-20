@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M1-AUTH-01 fixture: asks for both VOS signature permissions and instruments itself with
+     AuthProbe, so the probe runs under this fixture's own UID. No components, no INTERNET. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="com.vos.permission.SESSION" />
+    <uses-permission android:name="com.vos.permission.ACTUATOR" />
+
+    <queries>
+        <package android:name="com.vos.actuator" />
+        <package android:name="com.vos.session" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="VOS auth fixture" />
+
+    <instrumentation
+        android:name="com.vos.eval.auth.AuthProbe"
+        android:targetPackage="${applicationId}" />
+</manifest>
