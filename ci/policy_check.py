@@ -47,6 +47,7 @@ REQUIRED_BIND_PERMISSION = {
     "android.accessibilityservice.AccessibilityService": "android.permission.BIND_ACCESSIBILITY_SERVICE",
     "android.service.notification.NotificationListenerService": "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
     "android.service.voice.VoiceInteractionService": "android.permission.BIND_VOICE_INTERACTION",
+    "android.service.quicksettings.action.QS_TILE": "android.permission.BIND_QUICK_SETTINGS_TILE",
 }
 
 # Where retired names must not appear: code, manifests, resources, build scripts, CI config.
@@ -95,6 +96,15 @@ def read_exported_allowlist(path):
         kind, name, perm = line.split()
         out[(kind, name)] = None if perm == "-" else perm
     return out
+
+
+def exported_allowlist(ci, app, build_type):
+    """The app's exported-component allowlist; debug APKs add exported-components-<app>-debug.txt."""
+    allow = read_exported_allowlist(Path(ci) / f"exported-components-{app}.txt")
+    extra = Path(ci) / f"exported-components-{app}-debug.txt"
+    if build_type == "debug" and extra.is_file():
+        allow.update(read_exported_allowlist(extra))
+    return allow
 
 
 # ---------------------------------------------------------------------------------------------
@@ -614,7 +624,7 @@ def main(argv=None):
             if app == "session":
                 fails += check_no_privileged_permissions(app, facts, platform_levels)
                 fails += check_no_sensitive_components(app, facts)
-            fails += check_exported(app, facts, read_exported_allowlist(ci / f"exported-components-{app}.txt"))
+            fails += check_exported(app, facts, exported_allowlist(ci, app, build_type))
             prefixes = class_prefixes + (actuator_classes if app == "actuator" else [])
             fails += check_forbidden_in_apk(app, dex, res, entries, facts, prefixes, exceptions.get(app, frozenset()))
             if build_type == "release":

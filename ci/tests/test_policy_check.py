@@ -84,6 +84,8 @@ ACTUATOR_OK = dict(
         ("service", "com.vos.actuator.NotificationsService", True,
          "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
          ["android.service.notification.NotificationListenerService"], []),
+        ("service", "com.vos.actuator.SummonTile", True, "android.permission.BIND_QUICK_SETTINGS_TILE",
+         ["android.service.quicksettings.action.QS_TILE"], []),
     ],
 )
 SESSION_OK = dict(
@@ -246,6 +248,24 @@ class ExportedRules(unittest.TestCase):
              ["android.accessibilityservice.AccessibilityService"], [])]))
         self.assertTrue(any("OtherHands is not in the allowlist" in x
                             for x in pc.check_exported("actuator", f, self.actuator_allow)))
+
+    def test_qs_tile_without_its_bind_permission_fails(self):
+        comps = [c for c in ACTUATOR_OK["components"] if c[1] != "com.vos.actuator.SummonTile"]
+        comps.append(("service", "com.vos.actuator.SummonTile", True, None,
+                      ["android.service.quicksettings.action.QS_TILE"], []))
+        fails = pc.check_exported("actuator", facts(**dict(ACTUATOR_OK, components=comps)), self.actuator_allow)
+        self.assertTrue(any("not guarded by android.permission.BIND_QUICK_SETTINGS_TILE" in x for x in fails))
+
+    def test_debug_only_components_pass_in_debug_and_fail_in_release(self):
+        debug_activity = ("activity", "com.vos.actuator.DebugSummonActivity", True, "android.permission.DUMP", [], [])
+        f = facts(**dict(ACTUATOR_OK, components=ACTUATOR_OK["components"] + [debug_activity]))
+        self.assertEqual([], pc.check_exported("actuator", f, pc.exported_allowlist(CI, "actuator", "debug")))
+        release = pc.check_exported("actuator", f, pc.exported_allowlist(CI, "actuator", "release"))
+        self.assertTrue(any("DebugSummonActivity is not in the allowlist" in x for x in release))
+        # The debug list does not loosen the guard: the same activity without DUMP fails in debug.
+        unguarded = ("activity", "com.vos.actuator.DebugSummonActivity", True, None, [], [])
+        f2 = facts(**dict(ACTUATOR_OK, components=ACTUATOR_OK["components"] + [unguarded]))
+        self.assertTrue(pc.check_exported("actuator", f2, pc.exported_allowlist(CI, "actuator", "debug")))
 
     def test_stale_allowlist_fails(self):
         f = facts("com.vos.actuator", components=[("service", "com.vos.actuator.ActuatorService", False,
