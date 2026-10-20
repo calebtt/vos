@@ -66,7 +66,7 @@ val policyCheck = tasks.register<Exec>("policyCheck") {
     dependsOn(
         ":actuator:assembleRelease", ":session:assembleRelease",
         ":actuator:assembleDebug", ":session:assembleDebug",
-        ":actuator:writePolicyDeps", ":session:writePolicyDeps", ":vtb-sdk:writePolicyDeps",
+        ":actuator:writePolicyDeps", ":session:writePolicyDeps", ":vtb-sdk:writePolicyDeps", ":ipc:writePolicyDeps",
     )
     workingDir = rootDir
     commandLine(
