@@ -433,6 +433,22 @@ public class AudioPlaneTest {
     }
 
     @Test
+    public void aPlayThatDidNotStandAfterAnOwnerPauseKeepsThePausedMusicPausedWhenTheTurnEndedMeanwhile() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // VOS pauses the music
+        plane.ownerPausing(id); // "pause" stood
+        Runnable undo = plane.ownerPlaying(id); // "play"; the oracle is still waiting
+        plane.end(id, "stop"); // RESTORE sees no owner pause and no package: it arms nothing
+        assertTrue(platform.scheduled.isEmpty());
+        undo.run(); // the play did not stand: the owner's pause is what stands
+        assertNull("not resumed", platform.playing);
+        assertEquals(List.of(600L, 2000L), platform.delays);
+        platform.playing = MUSIC; // the player resumes itself on the focus regain
+        platform.runScheduled();
+        assertNull("re-paused", platform.playing);
+    }
+
+    @Test
     public void aPlayThatDidNotStandDoesNotResumeIntoACallOrAfterALaterTurn() {
         platform.playing = MUSIC;
         String id = plane.summon("qs_tile");
