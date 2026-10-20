@@ -1,0 +1,8 @@
+# Exact dex strings that start with a forbidden prefix (forbidden-artifacts.txt) but are not Play,
+# Firebase or ML Kit code. Format: "<app> <exact string>". Each line needs its reason above it,
+# and an exception never covers a prefix, a class descriptor, a dependency, a resource or a zip entry.
+
+# OkHttp 4.12 (session egress, §5.8): AndroidSocketAdapter.playProviderFactory compares SSLSocket
+# class names against this package, for apps that install the Play security provider. VOS never
+# installs it; the string is a name to compare against, and no Play code is bundled or loaded.
+session com.google.android.gms.org.conscrypt
