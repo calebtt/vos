@@ -173,19 +173,30 @@ public final class AudioPlane {
 
     /**
      * {@link #ownerPausedMedia}, taken before the media key is sent, so a turn that ends while the
-     * oracle waits leaves the media paused. Returns the undo for a pause that did not stand; it does
-     * nothing once the turn has ended.
+     * oracle waits leaves the media paused. If the turn holds no paused package (nothing was playing
+     * at summon, or the owner's play took it back), the package playing now is the one this pause
+     * stops, so RESTORE arms the re-pause checks for it too. Returns the undo for a pause that did not
+     * stand; it does nothing once the turn has ended.
      */
     public synchronized Runnable ownerPausing(String id) {
         if (!id.equals(turnId)) {
             return () -> { };
         }
         boolean before = ownerPausedMedia;
+        String pkgBefore = pausedPkg;
         ownerPausedMedia = true;
+        if (pausedPkg == null) {
+            try {
+                pausedPkg = platform.playingMediaPackage();
+            } catch (RuntimeException e) {
+                // the media session is gone: nothing to re-pause later
+            }
+        }
         return () -> {
             synchronized (this) {
                 if (id.equals(turnId)) {
                     ownerPausedMedia = before;
+                    pausedPkg = pkgBefore;
                 }
             }
         };
