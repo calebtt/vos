@@ -294,7 +294,16 @@ final class VoiceTurn {
                 if (sink != null) {
                     sink.write(buf, 0, n);
                 } else {
-                    playing.write(buf, 0, n, AudioTrack.WRITE_BLOCKING);
+                    for (int off = 0; off < n && running; ) { // a short write is retried, an error ends the turn
+                        int w = playing.write(buf, off, n - off, AudioTrack.WRITE_BLOCKING);
+                        if (w < 0) {
+                            if (running) {
+                                ender.accept("speaker write error " + w);
+                            }
+                            return;
+                        }
+                        off += w;
+                    }
                 }
             }
         } catch (IOException e) {

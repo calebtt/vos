@@ -203,6 +203,8 @@ public final class TurnService extends Service {
                 if (t != null) {
                     app.audioPlane().end(t.turnId, reason);
                 }
+            } catch (RuntimeException e) { // end() reaches IDLE on its own; this only keeps the main thread alive
+                Log.w(VoiceTurn.TAG, "restore failed: " + e.getClass().getSimpleName());
             } finally {
                 stopTurnService();
                 TileService.requestListeningState(this, new ComponentName(this, SummonTile.class));
