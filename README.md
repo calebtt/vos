@@ -10,10 +10,10 @@ VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 7 (`pa
 
 ## Status
 
-**M0 (Ground).** Gradle skeleton, CI and the static policy check exist.
+**M0 (Ground).** Gradle skeleton, CI and the static policy check exist. The VOS Image builder (`image/build.sh`) builds and verifies a re-signed panther OTA on the desk; flashing it waits for Caleb.
 
 - **Day 0** ([runbook](docs/runbooks/DAY0.md)): done — the archive of old work (§5), GrapheneOS firmware for `panther` and `akita` downloaded and verified (§6), Graphene OTA certificates pinned (§7). Open, for Caleb: rotate the xAI key (§1), revoke ADB on Phone A (§3), pin data-disk in fstab (§4), order Phone C (§8).
-- **Spikes** ([docs/spikes/](docs/spikes/)): partial results on Phone B. S-01/S-02/S-03 read-only checks; S-07 QS-tile leg measured and **missed** the 150 ms bar (p95 176 ms); S-08 pipe latency met over 10,000 frames, soak and AEC not run. Open legs and the pending M0 decisions are in [docs/DECISIONS.md](docs/DECISIONS.md).
+- **Spikes** ([docs/spikes/](docs/spikes/)): S-02 passes on the desk (super headroom measured from the factory image). S-01 desk build passes; the flash, relock and `dumpsys` legs wait for Caleb. S-03 read-only checks; S-07 QS-tile leg measured and **missed** the 150 ms bar (p95 176 ms); S-08 pipe latency met over 10,000 frames, soak and AEC not run. Open legs and the pending M0 decisions are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Layout
 
@@ -23,6 +23,7 @@ VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 7 (`pa
 | [session/](session/README.md) | `com.vos.session` app: voice, planner, egress; no sensors or actuation |
 | [vtb-sdk/](vtb-sdk/README.md) | `com.vos.vtb` library for VTB providers |
 | [ci/](ci/README.md) | static policy check (M0-02), its lists and negative tests |
+| [image/](image/README.md) | VOS Image (Tier P) builder, owner-key script, overlays, Graphene OTA pins |
 
 ## Build
 

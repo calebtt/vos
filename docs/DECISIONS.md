@@ -4,7 +4,7 @@ Records the M0 platform and audio decisions (TARGET-PLAN §6 M0-04, M0-05). Each
 
 ## D-M0-04 — Platform: VOS Image on the Graphene OTA, or the Tier F build path (#129)
 
-- **Status:** PENDING (needs Phone B: S-01, S-02, S-03 not run).
+- **Status:** PENDING. S-02 passed on the desk (2026-10-19: ≥4.1 GiB `super` headroom on panther and akita). S-01's image recipe (`image/build.sh`) builds and verifies on the desk; the unlock, flash and relock wait for Caleb (each wipes Phone B). S-03 needs the flashed image.
 - **Evidence:** [S-01](spikes/S-01.md) (#11), [S-02](spikes/S-02.md) (#10), [S-03](spikes/S-03.md) (#12).
 - **Decision rule:**
   - S-01, S-02 and S-03 all pass on `panther` → record **"VOS Image on Graphene OTA"** (Tier P, §4.4), the Graphene build number used, and the date.
