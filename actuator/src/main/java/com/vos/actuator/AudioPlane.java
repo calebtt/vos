@@ -61,6 +61,8 @@ public final class AudioPlane {
 
     /** {@code AudioManager.MODE_IN_COMMUNICATION}, kept here so the class stays free of android.* */
     static final int MODE_IN_COMMUNICATION = 3;
+    /** {@code AudioManager} modes that mean a call: RINGTONE, IN_CALL, CALL_SCREENING, CALL_REDIRECT, COMMUNICATION_REDIRECT. */
+    private static final int[] CALL_MODES = {1, 2, 4, 5, 6};
     static final long[] RECHECK_MS = {600, 2000};
 
     private final Platform platform;
@@ -74,6 +76,8 @@ public final class AudioPlane {
     private boolean focusHeld;
     private String pausedPkg;
     private boolean ownerPausedMedia;
+    /** Bumped by every summon, so RESTORE's media re-checks never act after a later turn has begun. */
+    private long epoch;
 
     public AudioPlane(Platform platform, Audit audit) {
         this.platform = platform;
@@ -102,6 +106,7 @@ public final class AudioPlane {
             return null;
         }
         String id = UUID.randomUUID().toString();
+        epoch++;
         turnId = id;
         ownerPausedMedia = false;
         pausedPkg = null;
@@ -154,7 +159,10 @@ public final class AudioPlane {
             return false;
         }
         move(State.RESTORE, reason);
-        platform.setMode(savedMode);
+        boolean callNow = isCallMode(platform.mode());
+        if (!callNow) { // a call that started during the turn owns the mode now; leave it
+            platform.setMode(savedMode);
+        }
         if (commDeviceSet) {
             platform.clearCommunicationDevice();
         }
@@ -167,8 +175,9 @@ public final class AudioPlane {
         }
         if (ownerPausedMedia && pausedPkg != null) {
             String pkg = pausedPkg;
+            long armed = epoch;
             for (long ms : RECHECK_MS) {
-                platform.schedule(() -> keepOwnerPause(id, pkg), ms);
+                platform.schedule(() -> keepOwnerPause(id, pkg, armed), ms);
             }
         }
         commDeviceSet = false;
@@ -176,19 +185,32 @@ public final class AudioPlane {
         outDev = null;
         inDev = null;
         pausedPkg = null;
-        move(State.IDLE, "restored" + (resumed != null ? ", resumed " + resumed : ""));
+        move(State.IDLE, "restored" + (resumed != null ? ", resumed " + resumed : "")
+                + (callNow ? ", mode left to the call" : ""));
         turnId = null;
         return true;
     }
 
-    /** After RESTORE: the owner paused {@code pkg} during turn {@code id}; pause it again if it resumed itself. */
-    private synchronized void keepOwnerPause(String id, String pkg) {
-        if (turnId == null && platform.isMediaPlaying(pkg) && platform.pauseMedia(pkg)) {
+    /**
+     * After RESTORE: the owner paused {@code pkg} during turn {@code id}; pause it again if it resumed
+     * itself. Ignored once any later summon has happened ({@code armed} is the epoch at RESTORE).
+     */
+    private synchronized void keepOwnerPause(String id, String pkg, long armed) {
+        if (epoch == armed && turnId == null && platform.isMediaPlaying(pkg) && platform.pauseMedia(pkg)) {
             Map<String, Object> l = line("audio.media_repaused", "player resumed itself after the turn; owner had paused it");
             l.put("turnId", id);
             l.put("pausedPkg", pkg);
             audit.transition(l);
         }
+    }
+
+    static boolean isCallMode(int mode) {
+        for (int m : CALL_MODES) {
+            if (m == mode) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void move(State to, String reason) {

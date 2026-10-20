@@ -31,6 +31,7 @@ final class AndroidAudioPlatform implements AudioPlane.Platform {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private AudioFocusRequest focus;
     private String commType;
+    private AudioManager.OnModeChangedListener callWatch;
 
     AndroidAudioPlatform(Context context) {
         this.context = context.getApplicationContext();
@@ -40,9 +41,30 @@ final class AndroidAudioPlatform implements AudioPlane.Platform {
     @Override
     public boolean callActive() {
         int m = am.getMode();
-        return m == AudioManager.MODE_IN_CALL || m == AudioManager.MODE_IN_COMMUNICATION
-                || m == AudioManager.MODE_CALL_SCREENING || m == AudioManager.MODE_CALL_REDIRECT
-                || m == AudioManager.MODE_COMMUNICATION_REDIRECT;
+        return m == AudioManager.MODE_IN_COMMUNICATION || AudioPlane.isCallMode(m);
+    }
+
+    /**
+     * Calls {@code onCall} when the audio mode changes to a call mode (ringing, a phone call, call
+     * screening or a redirect) while a turn is open. VOS's own MODE_IN_COMMUNICATION does not count;
+     * a VoIP call that takes over that same mode is not seen here (it shows as a focus loss, which a
+     * media app starting also causes, so it is not treated as a call).
+     */
+    void watchCalls(Runnable onCall) {
+        unwatchCalls();
+        callWatch = mode -> {
+            if (AudioPlane.isCallMode(mode)) {
+                onCall.run();
+            }
+        };
+        am.addOnModeChangedListener(context.getMainExecutor(), callWatch);
+    }
+
+    void unwatchCalls() {
+        if (callWatch != null) {
+            am.removeOnModeChangedListener(callWatch);
+            callWatch = null;
+        }
     }
 
     @Override
