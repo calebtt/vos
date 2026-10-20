@@ -16,7 +16,10 @@ Records the M0 platform and audio decisions (TARGET-PLAN §6 M0-04, M0-05). Each
 
 ## D-M0-05 — Audio: actuator-owned mic, or the recorded fallback (#130)
 
-- **Status:** PENDING (needs a phone: S-07, S-08 not run; S-27a blocked on S-01).
+- **Status:** PENDING. Partial results on Phone B (2026-10-18):
+  - S-07: the QS-tile leg (unlocked) **missed** the bar: p50 166 / p95 176 ms against p95 ≤150 ms. Almost all of it is the cold `AudioRecord` start, not the FGS start. Under the rule below this miss points to the session-UI fallback, but the entry is not decided until the other legs are measured: the assist gesture, the locked leg, and the classic BT / USB-C / LE Audio buttons (and the concurrent-capture leg), plus the pre-opened input stream or AAudio/MMAP retest the report names.
+  - S-08: pipe latency met the bar over 10,000 frames (p95 1.17 ms, 0 underruns). Not measured: the 30-minute underrun soak and the whole echo / AEC leg (speaker and BT HFP).
+  - S-27a: blocked on S-01.
 - **Evidence:** [S-07](spikes/S-07.md) (#17), [S-08](spikes/S-08.md) (#18), [S-27a](spikes/S-27a.md) (#44); desk plan in [AUDIO-DUPLEX-RESEARCH.md](AUDIO-DUPLEX-RESEARCH.md).
 - **Decision rule:**
   - S-07 meets p95 ≤150 ms on Graphene (assist gesture, QS tile, classic BT; unlocked and locked) → **actuator-owned mic confirmed**. Otherwise record the fallback: session-UI activity as the foreground anchor.
