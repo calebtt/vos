@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # M1-AUTH-01 (#132): bind the actuator, and the session, from a foreign-signed APK and from a
 # same-cert APK with the wrong package. Pass: both are refused (the system refuses the foreign bind;
-# the VOS guard answers UNAUTHORIZED to the wrong package), every guard refusal is audited with the
-# caller's UID and package, the real session ↔ actuator pair still works both ways, and each side
-# sees the other die (linkToDeath). TARGET-PLAN §5.3.
+# the VOS guard answers UNAUTHORIZED to the wrong package), each app's own UID is refused both by a
+# raw transaction and by a direct in-process AIDL call, every guard refusal is audited with the
+# caller's UID and package, the real session ↔ actuator pair still links both ways (protocol
+# version handshake included), and each side sees the other die (linkToDeath). TARGET-PLAN §5.3.
 #
 # Debug builds only, on the emulator or Phone B (§5.3). Installs com.vos.actuator, com.vos.session,
 # their androidTest APKs and the two fixtures; makes no sound and touches no user data.
 #
 # Usage: eval/m1/auth-01.sh [--no-build] [--keep-fixtures]
-#   ANDROID_SERIAL picks the device; VOS_EVAL_OUT overrides the results directory.
+#   ANDROID_SERIAL picks the device. Results go to $VOS_EVAL_OUT if set, else to
+#   $VOS_EVAL_ROOT/<date>/m1-auth-01-<time>, else under eval/runs/ in this checkout (gitignored).
 
 set -euo pipefail
 
@@ -24,7 +26,7 @@ for a in "$@"; do
 done
 
 stamp="$(date +%Y-%m-%d)/m1-auth-01-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-/media/caleb/data-disk/vos/eval/runs/$stamp}"
+out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
 mkdir -p "$out"
 log="$out/run.log"
 exec > >(tee -a "$log") 2>&1
@@ -90,18 +92,24 @@ record() { # name raw
         "$(field uid "$2")" "$(field detail "$2")" >> "$results"
     if [[ "$pass" == "true" ]]; then echo "PASS $1 ($outcome)"; else echo "FAIL $1 (${outcome:-no result})"; fails=$((fails + 1)); fi
 }
-run_case() { # name component target expect
-    record "$1" "$(adb shell am instrument -w -r -e target "$3" -e expect "$4" "$2")"
+run_case() { # name component target expect [via [repeat]]
+    record "$1" "$(adb shell am instrument -w -r -e target "$3" -e expect "$4" -e via "${5:-link}" \
+        -e repeat "${6:-0}" "$2")"
 }
 
-run_case session-to-actuator "$SESSION_T" actuator ok
-run_case actuator-to-session "$ACTUATOR_T" session ok
-run_case wrongpkg-to-actuator "$WRONG_T" actuator unauthorized
-run_case wrongpkg-to-session "$WRONG_T" session unauthorized
+# via: link = PeerLink with the protocol-version handshake; raw = a raw transact(), so the guard in
+# onTransact runs; aidl = Stub.asInterface(), a direct Java call on the Stub in the same process.
+run_case session-to-actuator "$SESSION_T" actuator ok link 200
+run_case actuator-to-session "$ACTUATOR_T" session ok link 200
+run_case wrongpkg-to-actuator "$WRONG_T" actuator unauthorized raw
+run_case wrongpkg-to-session "$WRONG_T" session unauthorized raw
+run_case wrongpkg-link-to-actuator "$WRONG_T" actuator unauthorized link
 run_case foreign-to-actuator "$FOREIGN_T" actuator bind_refused
 run_case foreign-to-session "$FOREIGN_T" session bind_refused
-run_case actuator-to-own-service "$ACTUATOR_T" actuator unauthorized
-run_case session-to-own-service "$SESSION_T" session unauthorized
+run_case actuator-to-own-service "$ACTUATOR_T" actuator unauthorized raw
+run_case session-to-own-service "$SESSION_T" session unauthorized raw
+run_case actuator-to-own-service-in-process "$ACTUATOR_T" actuator unauthorized aidl
+run_case session-to-own-service-in-process "$SESSION_T" session unauthorized aidl
 
 # linkToDeath, both ways: the probe links, reports "linked", and the peer is force-stopped.
 death_case() { # name component target package-to-stop
