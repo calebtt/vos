@@ -72,6 +72,9 @@ public class XaiRealtimeBackendTest {
         server.shutdown();
     }
 
+    private final List<String> toolCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private volatile long toolDelayMs;
+
     private XaiRealtimeBackend backend(long idleMs) throws Exception {
         String policy = "{\"registry\":[{\"id\":\"xai:test\",\"kind\":\"realtime_voice\",\"vendor\":\"xai\","
                 + "\"model\":\"grok-voice-3.0\",\"voice\":\"ara\",\"url\":\"ws://" + HOST + ":" + server.getPort()
@@ -81,7 +84,18 @@ public class XaiRealtimeBackendTest {
         t.idleMs = idleMs;
         t.firstSpeechMs = 5_000;
         t.maxTurnMs = 20_000;
-        return new XaiRealtimeBackend(egress, vault, e, transcripts, () -> "be brief", t);
+        org.json.JSONArray schemas = new org.json.JSONArray(
+                "[{\"type\":\"function\",\"name\":\"volume_set\",\"parameters\":{\"type\":\"object\"}}]");
+        return new XaiRealtimeBackend(egress, vault, e, transcripts, () -> "be brief", schemas,
+                (turn, name, args) -> {
+                    toolCalls.add(turn + " " + name + " " + args);
+                    try {
+                        Thread.sleep(toolDelayMs);
+                    } catch (InterruptedException ignored) {
+                        // test
+                    }
+                    return "{\"status\":\"VERIFIED\",\"percent\":30}";
+                }, t);
     }
 
     /** A fake vendor: configures, and after a few mic appends hears speech and answers once. */
@@ -125,6 +139,409 @@ public class XaiRealtimeBackendTest {
                 ws.close(1000, null);
             }
         }));
+    }
+
+    /** A fake vendor that calls volume_set, or end_turn, and checks the session's tool messages. */
+    private final List<String> vendorSaw = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    private void enqueueToolVendor(boolean endTurn) {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean asked;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (type.equals("session.update")) {
+                    vendorSaw.add("tools " + (m.optJSONObject("session").has("tools")));
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !asked) {
+                    asked = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    if (endTurn) {
+                        ws.send("{\"type\":\"response.output_audio.delta\",\"delta\":\""
+                                + Base64.getEncoder().encodeToString(REPLY) + "\"}");
+                        ws.send("{\"type\":\"response.function_call_arguments.done\",\"call_id\":\"c-end\","
+                                + "\"name\":\"end_turn\",\"arguments\":\"{}\"}");
+                    } else {
+                        ws.send("{\"type\":\"response.function_call_arguments.done\",\"call_id\":\"c-1\","
+                                + "\"name\":\"volume_set\",\"arguments\":\"{\\\"percent\\\":30}\"}");
+                    }
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                } else if (type.equals("conversation.item.create")) {
+                    JSONObject item = m.optJSONObject("item");
+                    vendorSaw.add("output " + item.optString("call_id") + " " + item.optString("output"));
+                } else if (type.equals("response.create")) {
+                    vendorSaw.add("response.create");
+                    ws.send("{\"type\":\"response.output_audio.delta\",\"delta\":\""
+                            + Base64.getEncoder().encodeToString(REPLY) + "\"}");
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+    }
+
+    @Test
+    public void aToolCallRunsInTheActuatorAndTheModelAnswersAfterItsResult() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueToolVendor(false);
+        toolDelayMs = 600; // longer than the idle time: a pending tool must not end the turn
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        String reason = backend(300).run("t-6", mic.in, speaker, () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertEquals(List.of("t-6 volume_set {\"percent\":30}"), toolCalls);
+        assertEquals(List.of("tools true", "output c-1 {\"status\":\"VERIFIED\",\"percent\":30}", "response.create"),
+                vendorSaw);
+        assertArrayEquals(REPLY, speaker.toByteArray());
+    }
+
+    @Test
+    public void endTurnClosesTheTurnAfterTheGoodbyeHasPlayed() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueToolVendor(true);
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        String reason = backend(10_000).run("t-7", mic.in, speaker, () -> { });
+        mic.close();
+        assertEquals("model end", reason);
+        assertArrayEquals(REPLY, speaker.toByteArray());
+        assertTrue(toolCalls.isEmpty()); // end_turn never reaches the actuator
+        assertEquals(List.of("tools true", "output c-end {\"status\":\"VERIFIED\"}"), vendorSaw);
+    }
+
+    /** A fake vendor whose first answer is the given calls, all in one response; follow-ups get audio. */
+    private void enqueueBatchVendor(String... calls) {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean asked;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (type.equals("session.update")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !asked) {
+                    asked = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    for (String c : calls) {
+                        ws.send(c);
+                    }
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                } else if (type.equals("conversation.item.create")) {
+                    vendorSaw.add("output " + m.optJSONObject("item").optString("call_id"));
+                } else if (type.equals("response.create")) {
+                    vendorSaw.add("response.create");
+                    ws.send(delta("r-follow", REPLY));
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+    }
+
+    private static String call(String id, String name, String args) {
+        return call("", id, name, args);
+    }
+
+    private static String call(String responseId, String id, String name, String args) {
+        return "{\"type\":\"response.function_call_arguments.done\",\"response_id\":\"" + responseId
+                + "\",\"call_id\":\"" + id + "\",\"name\":\"" + name + "\",\"arguments\":" + JSONObject.quote(args) + "}";
+    }
+
+    /** A vendor that plays {@code script} once the third mic chunk arrives; records what the client sends. */
+    private WebSocketListener scripted(String... script) {
+        return new WebSocketListener() {
+            boolean sent;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (type.equals("session.update")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !sent) {
+                    sent = true;
+                    for (String e : script) {
+                        ws.send(e);
+                    }
+                } else if (type.equals("conversation.item.create")) {
+                    vendorSaw.add("output " + m.optJSONObject("item").optString("call_id"));
+                } else if (type.equals("response.create")) {
+                    vendorSaw.add("response.create");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        };
+    }
+
+    private static final String STARTED = "{\"type\":\"input_audio_buffer.speech_started\"}";
+    private static final String STOPPED = "{\"type\":\"input_audio_buffer.speech_stopped\"}";
+
+    private static String done(String responseId, String status) {
+        return "{\"type\":\"response.done\",\"response\":{\"id\":\"" + responseId + "\",\"status\":\"" + status + "\"}}";
+    }
+
+    @Test
+    public void aLateEndTurnFromAResponseTheOwnerTalkedOverDoesNotEndTheTurn() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        // r1 is a goodbye with end_turn; the owner talks over it and its end_turn arrives after
+        // speech_started; r2 answers what the owner said. The turn must end on the quiet time.
+        server.enqueue(new MockResponse().withWebSocketUpgrade(scripted(
+                STARTED, STOPPED, delta("r1", REPLY), STARTED, call("r1", "c-end", "end_turn", "{}"),
+                done("r1", "cancelled"), STOPPED, delta("r2", REPLY), done("r2", "completed"))));
+        Mic mic = new Mic();
+        String reason = backend(600).run("t-14", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertEquals(List.of("output c-end"), vendorSaw); // the call still gets its output
+    }
+
+    @Test
+    public void anEndTurnThatArrivesWhileTheOwnerIsSpeakingIsIgnored() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        // r1 has no audio, so barge-in does not know it; its end_turn arrives while the owner speaks.
+        server.enqueue(new MockResponse().withWebSocketUpgrade(scripted(
+                STARTED, STOPPED, STARTED, call("r1", "c-end", "end_turn", "{}"), done("r1", "completed"),
+                STOPPED, delta("r2", REPLY), done("r2", "completed"))));
+        Mic mic = new Mic();
+        String reason = backend(600).run("t-15", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+    }
+
+    @Test
+    public void anEndTurnFromAResponseThatIsThenCancelledDoesNotEndTheTurn() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        server.enqueue(new MockResponse().withWebSocketUpgrade(scripted(
+                STARTED, STOPPED, call("r1", "c-end", "end_turn", "{}"), done("r1", "cancelled"),
+                delta("r2", REPLY), done("r2", "completed"))));
+        Mic mic = new Mic();
+        String reason = backend(600).run("t-17", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+    }
+
+    @Test
+    public void aToolFollowUpCreatedWhileTheOwnerSpeaksIsDroppedAndCancelled() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        byte[] stale = filled(3200, 0x55);
+        byte[] answer = filled(3200, 0x66);
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean asked;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (type.equals("session.update")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !asked) {
+                    asked = true;
+                    ws.send(STARTED);
+                    ws.send(STOPPED);
+                    ws.send(call("r1", "c-a", "media_control", "{\"action\":\"pause\"}"));
+                    ws.send(done("r1", "completed"));
+                } else if (type.equals("response.create")) {
+                    vendorSaw.add("response.create");
+                    // The owner is already talking again when the follow-up opens.
+                    ws.send(STARTED);
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r2\",\"status\":\"in_progress\"}}");
+                    ws.send(delta("r2", stale));
+                    ws.send(done("r2", "cancelled"));
+                    ws.send(STOPPED);
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r3\",\"status\":\"in_progress\"}}");
+                    ws.send(delta("r3", answer));
+                    ws.send(done("r3", "completed"));
+                } else if (type.equals("response.cancel")) {
+                    vendorSaw.add("response.cancel");
+                } else if (type.equals("conversation.item.create")) {
+                    vendorSaw.add("output " + m.optJSONObject("item").optString("call_id"));
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        assertEquals("idle", backend(500).run("t-19", mic.in, speaker, () -> { }));
+        mic.close();
+        assertArrayEquals("only the answer to the new speech plays", answer, speaker.toByteArray());
+        assertEquals(List.of("output c-a", "response.create", "response.cancel"), vendorSaw);
+    }
+
+    @Test
+    public void aToolCallFromAResponseTheOwnerTalkedOverIsNotRun() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        // r1 starts a reply and the owner talks over it; r1's media_control call arrives after that.
+        server.enqueue(new MockResponse().withWebSocketUpgrade(scripted(
+                STARTED, STOPPED, delta("r1", REPLY), STARTED,
+                call("r1", "c-stale", "media_control", "{\"action\":\"pause\"}"), done("r1", "cancelled"),
+                STOPPED, delta("r2", REPLY), done("r2", "completed"))));
+        Mic mic = new Mic();
+        String reason = backend(600).run("t-20", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertTrue("the stale call must not reach the actuator: " + toolCalls, toolCalls.isEmpty());
+        assertEquals("its output still goes back, and no follow-up is asked for", List.of("output c-stale"), vendorSaw);
+    }
+
+    @Test
+    public void anActiveResponseErrorDoesNotEndTheTurn() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        server.enqueue(new MockResponse().withWebSocketUpgrade(scripted(
+                STARTED, STOPPED,
+                "{\"type\":\"error\",\"error\":{\"code\":\"conversation_already_has_active_response\"}}",
+                delta("r1", REPLY), done("r1", "completed"))));
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        String reason = backend(500).run("t-16", mic.in, speaker, () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertEquals(REPLY.length, speaker.size());
+    }
+
+    @Test
+    public void twoCallsInOneResponseGetOneFollowUpAfterBothResults() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueBatchVendor(call("c-a", "media_control", "{\"action\":\"pause\"}"),
+                call("c-b", "volume_set", "{\"percent\":30}"));
+        toolDelayMs = 400;
+        Mic mic = new Mic();
+        String reason = backend(300).run("t-9", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertEquals(2, toolCalls.size());
+        assertEquals(List.of("output c-a", "output c-b", "response.create"), vendorSaw);
+    }
+
+    @Test
+    public void endTurnWaitsForAToolInTheSameResponseAndItsReport() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueBatchVendor(call("c-a", "media_control", "{\"action\":\"pause\"}"), call("c-end", "end_turn", "{}"));
+        toolDelayMs = 800; // longer than the goodbye's end deadline
+        Mic mic = new Mic();
+        ByteArrayOutputStream speaker = new ByteArrayOutputStream();
+        String reason = backend(10_000).run("t-10", mic.in, speaker, () -> { });
+        mic.close();
+        assertEquals("model end", reason);
+        assertEquals(List.of("t-10 media_control {\"action\":\"pause\"}"), toolCalls);
+        // The tool's result reached the model, which then reported it before the turn ended.
+        assertEquals(List.of("output c-end", "output c-a", "response.create"), vendorSaw);
+        assertArrayEquals(REPLY, speaker.toByteArray());
+    }
+
+    @Test
+    public void aBargeInDuringAToolSendsItsResultButNoFollowUp() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean asked;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (type.equals("session.update")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !asked) {
+                    asked = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    ws.send(call("c-a", "media_control", "{\"action\":\"pause\"}"));
+                    // The owner talks while the tool runs; the vendor cancels r1 and answers in r2 itself.
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r1\",\"status\":\"cancelled\"}}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    ws.send(delta("r2", REPLY));
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r2\",\"status\":\"completed\"}}");
+                } else if (type.equals("conversation.item.create")) {
+                    vendorSaw.add("output " + m.optJSONObject("item").optString("call_id"));
+                } else if (type.equals("response.create")) {
+                    vendorSaw.add("response.create"); // the real vendor errors: a response is already active
+                    ws.send("{\"type\":\"error\",\"error\":{\"code\":\"conversation_already_has_active_response\"}}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        toolDelayMs = 600;
+        Mic mic = new Mic();
+        String reason = backend(1_500).run("t-12", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertEquals(List.of("output c-a"), vendorSaw);
     }
 
     /** An open mic: some audio, then silence until the test closes it. */

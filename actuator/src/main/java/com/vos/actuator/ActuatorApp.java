@@ -12,21 +12,32 @@ import com.vos.ipc.JsonlAudit;
 public final class ActuatorApp extends Application {
     private BinderGuard sessionGuard;
     private AudioPlane audioPlane;
+    private FastTools fastTools;
+    private JsonlAudit audit;
     private AndroidAudioPlatform audioPlatform;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        JsonlAudit audit = new JsonlAudit(this);
+        audit = new JsonlAudit(this);
         sessionGuard = new BinderGuard("ActuatorService", Ipc.SESSION_PACKAGE,
                 AndroidGuardPlatform.ownCertSha256(this), GrantTable.of(Ipc.SESSION_PACKAGE, Grant.SESSION_CORE),
                 new AndroidGuardPlatform(getPackageManager()), audit);
         audioPlatform = new AndroidAudioPlatform(this);
         audioPlane = new AudioPlane(audioPlatform, line -> audit.record(line));
+        fastTools = new FastTools(new AndroidFastToolsPlatform(this));
     }
 
     AndroidAudioPlatform audioPlatform() {
         return audioPlatform;
+    }
+
+    FastTools fastTools() {
+        return fastTools;
+    }
+
+    JsonlAudit audit() {
+        return audit;
     }
 
     /** The one owner of the audio session (§3.3). */

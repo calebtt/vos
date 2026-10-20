@@ -77,6 +77,8 @@ public final class AudioPlane {
     private boolean focusHeld;
     private String pausedPkg;
     private boolean ownerPausedMedia;
+    /** The package a play that stood took back from the turn; a later pause re-pauses it. */
+    private String ownerPlayedPkg;
     /** Bumped by every summon, so RESTORE's media re-checks never act after a later turn has begun. */
     private long epoch;
 
@@ -112,6 +114,7 @@ public final class AudioPlane {
             turnId = id;
             ownerPausedMedia = false;
             pausedPkg = null;
+            ownerPlayedPkg = null;
             String playing = platform.playingMediaPackage();
             if (playing != null && platform.pauseMedia(playing)) {
                 pausedPkg = playing;
@@ -163,16 +166,114 @@ public final class AudioPlane {
 
     /** The owner asked for a media pause or stop during the turn (fast tools); RESTORE must not resume. */
     public synchronized void ownerPausedMedia(String id) {
-        if (id.equals(turnId)) {
-            ownerPausedMedia = true;
-        }
+        ownerPausing(id);
     }
 
     /** The owner asked for playback during the turn; media is theirs again, not ours to resume. */
     public synchronized void ownerResumedMedia(String id) {
-        if (id.equals(turnId)) {
-            ownerPausedMedia = false;
-            pausedPkg = null;
+        ownerPlaying(id);
+    }
+
+    /**
+     * {@link #ownerPausedMedia}, taken before the media key is sent, so a turn that ends while the
+     * oracle waits leaves the media paused. If the turn holds no paused package (nothing was playing
+     * at summon, or the owner's play took it back), the package playing now is the one this pause
+     * stops, so RESTORE arms the re-pause checks for it too. Returns the undo for a pause that did not
+     * stand; it does nothing once the turn has ended.
+     */
+    public synchronized Runnable ownerPausing(String id) {
+        if (!id.equals(turnId)) {
+            return () -> { };
+        }
+        boolean before = ownerPausedMedia;
+        String pkgBefore = pausedPkg;
+        ownerPausedMedia = true;
+        if (pausedPkg == null) {
+            try {
+                pausedPkg = platform.playingMediaPackage();
+            } catch (RuntimeException e) {
+                // the media session is gone: fall back below
+            }
+            if (pausedPkg == null) { // not STATE_PLAYING right now (buffering, or already paused)
+                pausedPkg = ownerPlayedPkg;
+            }
+        }
+        return () -> {
+            synchronized (this) {
+                if (id.equals(turnId)) {
+                    ownerPausedMedia = before;
+                    pausedPkg = pkgBefore;
+                }
+            }
+        };
+    }
+
+    /**
+     * {@link #ownerResumedMedia}, taken before the media key; as {@link #ownerPausing}. If the turn
+     * ended while the oracle waited, RESTORE acted on the cleared fields, so a play that did not stand
+     * puts back what RESTORE would have done: it resumes the package the turn paused, or, if the owner
+     * had paused it, arms the re-pause checks (never into a call, never after a later turn opened).
+     */
+    public synchronized Runnable ownerPlaying(String id) {
+        if (!id.equals(turnId)) {
+            return () -> { };
+        }
+        boolean before = ownerPausedMedia;
+        String pkg = pausedPkg;
+        String playedBefore = ownerPlayedPkg;
+        long armed = epoch;
+        ownerPausedMedia = false;
+        pausedPkg = null;
+        if (pkg != null) {
+            ownerPlayedPkg = pkg;
+        }
+        return () -> {
+            synchronized (this) {
+                if (id.equals(turnId)) {
+                    ownerPausedMedia = before;
+                    pausedPkg = pkg;
+                    ownerPlayedPkg = playedBefore;
+                } else if (turnId == null && epoch == armed && pkg != null) {
+                    if (before) {
+                        repauseAfterTurn(id, pkg, armed);
+                    } else {
+                        resumeAfterTurn(id, pkg);
+                    }
+                }
+            }
+        };
+    }
+
+    /** Arms the re-pause checks RESTORE would have armed for {@code pkg}, unless a call has the audio. */
+    private void repauseAfterTurn(String id, String pkg, long armed) {
+        try {
+            int mode = platform.mode();
+            if (isCallMode(mode) || mode == MODE_IN_COMMUNICATION) {
+                return;
+            }
+        } catch (RuntimeException e) {
+            return; // the mode cannot be read: as at RESTORE, leave media alone
+        }
+        for (long ms : RECHECK_MS) {
+            platform.schedule(() -> keepOwnerPause(id, pkg, armed), ms);
+        }
+    }
+
+    /** Resumes {@code pkg} for turn {@code id} after it ended, unless a call has the audio. Never throws. */
+    private void resumeAfterTurn(String id, String pkg) {
+        try {
+            int mode = platform.mode();
+            if (isCallMode(mode) || mode == MODE_IN_COMMUNICATION) {
+                return;
+            }
+            if (platform.playMedia(pkg)) {
+                Map<String, Object> l = line("audio.media_resumed", "the owner's play did not stand and the turn had ended");
+                l.put("turnId", id);
+                l.put("pausedPkg", pkg);
+                audit.transition(l);
+            }
+        } catch (RuntimeException e) {
+            // the audio server or the player is gone; nothing to resume
         }
     }
 

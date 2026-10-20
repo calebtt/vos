@@ -25,6 +25,7 @@ public class XaiRealtimeTest {
         @Override public void responseDone(String id, String s) { calls.add("done " + s); }
         @Override public void responseCreated(String id) { calls.add("created-response " + id); }
         @Override public void error(String c, String m) { calls.add("error " + c + " " + m); }
+        @Override public void functionCall(String r, String id, String n, String a) { calls.add("call " + r + " " + id + " " + n + " " + a); }
     }
 
     @Test
@@ -40,6 +41,27 @@ public class XaiRealtimeTest {
             assertEquals("audio/pcm", f.getString("type"));
             assertEquals(16000, f.getInt("rate"));
         }
+    }
+
+    @Test
+    public void toolsAreSentOnlyWhenThereAreSome() throws Exception {
+        org.json.JSONArray tools = new org.json.JSONArray(
+                "[{\"type\":\"function\",\"name\":\"time_get\",\"parameters\":{\"type\":\"object\"}}]");
+        JSONObject with = new JSONObject(XaiRealtime.sessionUpdate("x", "ara", 16000, tools)).getJSONObject("session");
+        assertEquals("time_get", with.getJSONArray("tools").getJSONObject(0).getString("name"));
+        JSONObject without = new JSONObject(XaiRealtime.sessionUpdate("x", "ara", 16000)).getJSONObject("session");
+        assertEquals(false, without.has("tools"));
+    }
+
+    @Test
+    public void aToolResultIsAFunctionCallOutputItem() throws Exception {
+        JSONObject m = new JSONObject(XaiRealtime.functionOutput("call-1", "{\"status\":\"VERIFIED\"}"));
+        assertEquals("conversation.item.create", m.getString("type"));
+        JSONObject item = m.getJSONObject("item");
+        assertEquals("function_call_output", item.getString("type"));
+        assertEquals("call-1", item.getString("call_id"));
+        assertEquals("{\"status\":\"VERIFIED\"}", item.getString("output"));
+        assertEquals("response.create", new JSONObject(XaiRealtime.responseCreate()).getString("type"));
     }
 
     @Test
@@ -67,6 +89,8 @@ public class XaiRealtimeTest {
             "{\"type\":\"response.output_audio_transcript.delta\",\"delta\":\"It's\"}",
             "{\"type\":\"response.output_audio_transcript.done\",\"transcript\":\"It's 7:52.\"}",
             "{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}",
+            "{\"type\":\"response.function_call_arguments.done\",\"response_id\":\"r-2\",\"call_id\":\"call-9\",\"name\":\"volume_set\","
+                    + "\"arguments\":\"{\\\"percent\\\":30,\\\"stream\\\":\\\"media\\\"}\"}",
             "{\"type\":\"error\",\"error\":{\"code\":\"invalid_audio\",\"message\":\"bad\"}}",
             "not json",
             "{\"type\":\"response.output_audio.delta\",\"delta\":\"%%%\"}",
@@ -76,7 +100,8 @@ public class XaiRealtimeTest {
             XaiRealtime.dispatch(e, r);
         }
         assertEquals(List.of("created grok-voice-3.0", "updated", "speech started", "speech stopped",
-                "owner What time is it?", "created-response r-1", "audio r-1 4", "reply It's 7:52.", "done completed", "error invalid_audio bad"),
+                "owner What time is it?", "created-response r-1", "audio r-1 4", "reply It's 7:52.", "done completed",
+                "call r-2 call-9 volume_set {\"percent\":30,\"stream\":\"media\"}", "error invalid_audio bad"),
                 r.calls);
         assertArrayEquals(pcm, r.audio);
     }
