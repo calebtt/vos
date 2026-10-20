@@ -6,7 +6,8 @@
 |---|---|---|
 | Actuator: no `INTERNET` (nor `CALL_AUDIO_INTERCEPTION`) | `aapt2 dump xmltree` of the merged manifest | `actuator-denied-permissions.txt` |
 | Session: no `RECORD_AUDIO`, a11y, NLS, voice interaction, camera, location, SMS/call | same | `session-denied-permissions.txt` |
-| Session: no signature\|privileged permissions | same (denylist) | `privileged-permissions.txt` |
+| Session: no signature\|privileged permissions | each requested permission's `protectionLevel` in the framework manifest of the SDK's `android.jar` (fails on the `privileged` flag or legacy `signatureOrSystem`), plus a fixed denylist for names that manifest lacks | `privileged-permissions.txt` |
+| Each app's Binder guard permission (`SESSION` defined by the actuator, `ACTUATOR` by the session) is defined and exactly `signature` (`0x2`, no added flags) | `<permission>` in the merged manifest | — |
 | Session: hosts no accessibility / NLS / voice-interaction service | bind permission, intent action, meta-data | — |
 | Only declared exported components, with the declared guard permission | manifest; fails on extra, mismatched or stale entries | `exported-components-{actuator,session}.txt` |
 | Release APKs not debuggable | manifest | — |

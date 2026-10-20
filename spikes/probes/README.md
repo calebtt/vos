@@ -89,14 +89,17 @@ for i in $(seq 20); do adb shell cmd statusbar click-tile com.vos.spike.s07/.Pro
 adb logcat -d -s VOS_S07 -t "$T0" > /tmp/vos_s07.log
 python3 -I spikes/probes/summarize.py /tmp/vos_s07.log
 
-# RESTORE
+# RESTORE: give the saved holder the ASSISTANT role back before the probe is uninstalled
+# (uninstalling the current holder does not bring the previous one back).
 adb shell cmd statusbar remove-tile com.vos.spike.s07/.ProbeTile
-# If /tmp/vos_s07_assistant_before.txt named a package ORIG:
-#   adb shell cmd role add-role-holder android.app.role.ASSISTANT ORIG
-# If it was empty:
-#   adb shell cmd role remove-role-holder android.app.role.ASSISTANT com.vos.spike.s07
+orig="$(head -n1 /tmp/vos_s07_assistant_before.txt | tr -d '\r' | cut -d';' -f1)"
+if [ -n "$orig" ] && [ "$orig" != com.vos.spike.s07 ]; then
+  adb shell cmd role add-role-holder android.app.role.ASSISTANT "$orig"
+else
+  adb shell cmd role remove-role-holder android.app.role.ASSISTANT com.vos.spike.s07
+fi
 adb uninstall com.vos.spike.s07
-adb shell cmd role get-role-holders android.app.role.ASSISTANT          # compare with the saved file
+adb shell cmd role get-role-holders android.app.role.ASSISTANT          # must match the saved file's first line
 adb shell settings get secure voice_interaction_service
 ```
 

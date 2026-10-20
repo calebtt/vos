@@ -42,13 +42,26 @@ The loop-mounted ext4 build volume (§7) can follow on Mon 10-12; it is not part
 
 ## 5. One-time archive of old work, with SHA-256 (§7 Layout)
 
-**Status 2026-10-18: done by agent**, with secrets and build outputs excluded (SHA-256 and exclusion list in `docs/DEVICES.md`). The command below is the original recipe; the run added `--exclude` rules for `.env*`, keystores/keys, `local.properties`, the old `Config.kt`, `build/`, `.gradle/`, APK/AAB and `.venv`.
+**Status 2026-10-18: done by agent**, with secrets and build outputs excluded (SHA-256 and exclusion list in `docs/DEVICES.md`; the patterns are also in `2026-10-10-pre-vos.EXCLUDED.txt` beside the tarball). The tarball is read-only and is never re-created or overwritten; the block below refuses if it exists.
+
+The command below carries every exclusion the 2026-10-18 run used. Checked 2026-10-20: its file list (`tar -cvf /dev/null` with the same arguments) is identical to the tarball's (`tar -tf`), 675 entries.
 
 ```bash
-mkdir -p /media/caleb/UStor2/vos/archive
-tar --zstd -cf /media/caleb/UStor2/vos/archive/2026-10-10-pre-vos.tar.zst -C ~ voice-agent argoos
-sha256sum /media/caleb/UStor2/vos/archive/2026-10-10-pre-vos.tar.zst | tee /media/caleb/UStor2/vos/archive/2026-10-10-pre-vos.tar.zst.sha256
-chmod a-w /media/caleb/UStor2/vos/archive/2026-10-10-pre-vos.tar.zst
+a=/media/caleb/UStor2/vos/archive/2026-10-10-pre-vos.tar.zst
+if [ -e "$a" ]; then
+  echo "refusing: $a exists (read-only archive, never overwritten)" >&2
+else
+  mkdir -p "$(dirname "$a")"
+  tar --zstd -cf "$a" \
+    --exclude='.env*' --exclude='*.jks' --exclude='*.keystore' --exclude='*.p12' --exclude='*.pk8' \
+    --exclude='*.pem' --exclude='*.key' --exclude='keystore.properties' --exclude='signing*.properties' \
+    --exclude='local.properties' --exclude='id_rsa*' --exclude='id_ed25519*' \
+    --exclude='argoos/android/app/src/main/java/com/argo/ear/Config.kt' \
+    --exclude='build' --exclude='.gradle' --exclude='*.apk' --exclude='*.aab' --exclude='argoos/.venv' \
+    -C ~ voice-agent argoos
+  sha256sum "$a" | tee "$a.sha256"
+  chmod a-w "$a"
+fi
 ```
 
 The 2026-10-18 archive excludes the known secret files and the APKs that had the old key compiled in, but old history may still hold traces, so it stays off the repo and off any cloud. SHA-256 recorded in `docs/DEVICES.md` and #9.
@@ -57,18 +70,20 @@ The 2026-10-18 archive excludes the known secret files and the APKs that had the
 
 **Status 2026-10-18: done by agent** (builds 2026101600 and 2026101601 for both codenames, all verified; records in `docs/DEVICES.md`).
 
-For each codename in `panther akita`, using the current stable build number `<build>` from grapheneos.org/releases:
+For each codename in `panther akita`, set `build` to the current stable build number from grapheneos.org/releases:
 
 ```bash
-c=panther   # then akita
-d=/media/caleb/UStor2/vos/firmware/$c/grapheneos/<build>
+build=2026101601   # the current stable build number
+c=panther          # then akita
+d="/media/caleb/UStor2/vos/firmware/$c/grapheneos/$build"
 mkdir -p "$d" && cd "$d"
 curl -fLO https://releases.grapheneos.org/allowed_signers  # Graphene's factory-image key; compare with grapheneos.org/install/cli
-curl -fLO https://releases.grapheneos.org/$c-install-<build>.zip
-curl -fLO https://releases.grapheneos.org/$c-install-<build>.zip.sig
-ssh-keygen -Y verify -f allowed_signers -I contact@grapheneos.org -n "factory images" -s $c-install-<build>.zip.sig < $c-install-<build>.zip
-curl -fLO https://releases.grapheneos.org/$c-ota_update-<build>.zip   # full OTA, not incremental
-sha256sum $c-install-<build>.zip $c-ota_update-<build>.zip | tee SHA256SUMS
+curl -fLO "https://releases.grapheneos.org/$c-install-$build.zip"
+curl -fLO "https://releases.grapheneos.org/$c-install-$build.zip.sig"
+ssh-keygen -Y verify -f allowed_signers -I contact@grapheneos.org -n "factory images" \
+  -s "$c-install-$build.zip.sig" < "$c-install-$build.zip"
+curl -fLO "https://releases.grapheneos.org/$c-ota_update-$build.zip"   # full OTA, not incremental
+sha256sum "$c-install-$build.zip" "$c-ota_update-$build.zip" | tee SHA256SUMS
 ```
 
 Pass: `Good "factory images" signature for contact@grapheneos.org` for each factory image, with the Ed25519 fingerprint shown on grapheneos.org/install/cli (also recorded in `docs/DEVICES.md`) (Graphene replaced `factory.pub`/signify with `allowed_signers`/ssh-keygen). Keep the last 3 builds per codename. Then update `docs/DEVICES.md` (firmware rows).
@@ -78,8 +93,8 @@ Pass: `Good "factory images" signature for contact@grapheneos.org` for each fact
 **Status 2026-10-18: done by agent** (both pins committed; full OTAs pass `avbroot ota verify` against them; see `image/pins/README.md`).
 
 1. From the **verified** factory image, extract the OTA certificate Graphene's recovery trusts (`otacerts.zip` in the system image's `etc/security/`), one per codename.
-2. Save it as `image/pins/grapheneos-ota-<codename>.crt` and record `openssl x509 -in <crt> -noout -fingerprint -sha256` in `image/pins/README.md`.
-3. Verify the downloaded full OTA against the pinned cert (avbroot: `avbroot ota verify --input <ota>.zip --cert-ota image/pins/grapheneos-ota-<codename>.crt` [verify flags against the avbroot version used]).
+2. Save it as `image/pins/grapheneos-ota-$c.crt` and record `openssl x509 -in "image/pins/grapheneos-ota-$c.crt" -noout -fingerprint -sha256` in `image/pins/README.md`.
+3. Verify the downloaded full OTA against the pinned cert: `avbroot ota verify --input "$c-ota_update-$build.zip" --cert-ota "image/pins/grapheneos-ota-$c.crt"` (run 2026-10-18 with avbroot 3.37.0; `OK!` for all four OTAs, `docs/DEVICES.md`).
 4. Commit the pins (they are public certificates; `.gitignore` allows `image/pins/`). Run `./gradlew policyCheck` first so gitleaks scans them.
 
 ## 8. Devices and orders (M0-06)
