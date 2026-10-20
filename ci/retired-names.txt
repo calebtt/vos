@@ -4,6 +4,8 @@
 # Sources: the plan's "Replaces" row and §7 archive line name the old projects; the old
 # applicationIds come from those projects' build files (2026-10-18). Add any other old
 # product, package, permission, interface or path name here.
+# Caleb: please confirm this list is complete (cross-checked 2026-10-18 against the plan's
+# "Replaces" row and §7 archive line: argoos, voice-agent; no mismatch found). Not yet confirmed.
 argoos
 com.argo
 agentd

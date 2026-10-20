@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- S-08 actuator probe: mic FGS that streams 20 ms PCM frames to the session over a reliable pipe.
+     No launcher activity, no INTERNET, no audio output. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Only apps signed with the same (debug) key can bind ActuatorService. -->
+    <permission
+        android:name="com.vos.spike.s08.permission.BIND_ACTUATOR"
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <application
+        android:allowBackup="false"
+        android:label="VOS S08 actuator probe">
+
+        <service
+            android:name=".ActuatorService"
+            android:exported="true"
+            android:foregroundServiceType="microphone"
+            android:permission="com.vos.spike.s08.permission.BIND_ACTUATOR" />
+    </application>
+</manifest>

@@ -2,7 +2,7 @@
 
 > **Private repository. VOS is not a public product yet.**
 
-VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 8a (`akita`) as the reference device. You talk, and the agent runs the phone: apps, media, settings, messages, and the audio itself, including driving in-app assistants (for example the assistant button in Google Maps) over its own duplex audio channel.
+VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 7 (`panther`) as the main dev and flash device and the Pixel 8a (`akita`) as the second, first-class target. You talk, and the agent runs the phone: apps, media, settings, messages, and the audio itself, including driving in-app assistants (for example the assistant button in Google Maps) over its own duplex audio channel.
 
 - Packages: `com.vos.session` (voice session, model, network) and `com.vos.actuator` (privileged actuator: mic, audio plane, accessibility, tools; no `INTERNET`). `com.vos.sandbox` arrives at M7.
 - Tool bus: VOS Tool Bus (VTB).
@@ -11,6 +11,9 @@ VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 8a (`a
 ## Status
 
 **M0 (Ground).** Gradle skeleton, CI and the static policy check exist.
+
+- **Day 0** ([runbook](docs/runbooks/DAY0.md)): done — the archive of old work (§5), GrapheneOS firmware for `panther` and `akita` downloaded and verified (§6), Graphene OTA certificates pinned (§7). Open, for Caleb: rotate the xAI key (§1), revoke ADB on Phone A (§3), pin UStor2 in fstab (§4), order Phone C (§8).
+- **Spikes** ([docs/spikes/](docs/spikes/)): partial results on Phone B. S-01/S-02/S-03 read-only checks; S-07 QS-tile leg measured and **missed** the 150 ms bar (p95 176 ms); S-08 pipe latency met over 10,000 frames, soak and AEC not run. Open legs and the pending M0 decisions are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Layout
 
@@ -37,3 +40,7 @@ ci/fetch-gitleaks.sh        # optional locally: pinned, checksum-verified gitlea
 - [docs/TARGET-PLAN.md](docs/TARGET-PLAN.md) — the target plan (architecture, platform, security, milestones, spike register).
 - [docs/AUDIO-DUPLEX-RESEARCH.md](docs/AUDIO-DUPLEX-RESEARCH.md) — research behind the AudioPlane and app-assistant duplex.
 - [docs/TRACKING.md](docs/TRACKING.md) — how milestones, spikes, and labels map onto GitHub issues.
+- [docs/DECISIONS.md](docs/DECISIONS.md) — M0 platform and audio decisions (pending spikes).
+- [docs/DEVICES.md](docs/DEVICES.md) — device enrollment (M0-06).
+- [docs/spikes/](docs/spikes/) — spike report templates (S-01, S-02, S-03, S-07, S-08, S-27a).
+- [docs/runbooks/DAY0.md](docs/runbooks/DAY0.md) — Day 0 steps for Caleb (key rotation, ADB revocation, fstab pin, archive, Graphene downloads, OTA cert pin).
