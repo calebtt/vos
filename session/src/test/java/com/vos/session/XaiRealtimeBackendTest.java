@@ -430,6 +430,22 @@ public class XaiRealtimeBackendTest {
     }
 
     @Test
+    public void aToolCallFromAResponseTheOwnerTalkedOverIsNotRun() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        // r1 starts a reply and the owner talks over it; r1's media_control call arrives after that.
+        server.enqueue(new MockResponse().withWebSocketUpgrade(scripted(
+                STARTED, STOPPED, delta("r1", REPLY), STARTED,
+                call("r1", "c-stale", "media_control", "{\"action\":\"pause\"}"), done("r1", "cancelled"),
+                STOPPED, delta("r2", REPLY), done("r2", "completed"))));
+        Mic mic = new Mic();
+        String reason = backend(600).run("t-20", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertTrue("the stale call must not reach the actuator: " + toolCalls, toolCalls.isEmpty());
+        assertEquals("its output still goes back, and no follow-up is asked for", List.of("output c-stale"), vendorSaw);
+    }
+
+    @Test
     public void anActiveResponseErrorDoesNotEndTheTurn() throws Exception {
         vault.put(KeyVault.XAI, "xai-test-key");
         server.enqueue(new MockResponse().withWebSocketUpgrade(scripted(
