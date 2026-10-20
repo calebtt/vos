@@ -330,6 +330,59 @@ public class XaiRealtimeBackendTest {
         }
     }
 
+    @Test
+    public void pacingHoldsTheLeadAcrossGapsLongerThanThePoll() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        byte[] answer = filled(51200, 0x44); // 1.6 s in four 400 ms deltas, 250 ms apart
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean sent;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                if (text.contains("\"session.update\"")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (text.contains("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !sent) {
+                    sent = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    new Thread(() -> {
+                        try {
+                            for (int i = 0; i < 4; i++) {
+                                ws.send(delta("r1", java.util.Arrays.copyOfRange(answer, i * 12800, (i + 1) * 12800)));
+                                Thread.sleep(250);
+                            }
+                            ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r1\",\"status\":\"completed\"}}");
+                        } catch (InterruptedException ignored) {
+                            // test
+                        }
+                    }).start();
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        TimedSpeaker speaker = new TimedSpeaker();
+        assertEquals("idle", backend(500).run("t-13", mic.in, speaker, () -> { }));
+        mic.close();
+        assertEquals(answer.length, speaker.size());
+        // The deltas arrive faster than real time, so the pipe never drains: measured from the first
+        // write, the audio written never runs more than the 300 ms lead (plus slack) ahead.
+        long t0 = speaker.writes.get(0)[0];
+        for (long[] w : speaker.writes) {
+            long aheadMs = w[1] * 1000 / 32000 - (w[0] - t0);
+            assertTrue("ahead " + aheadMs + " ms at byte " + w[1], aheadMs <= 300 + 60);
+        }
+    }
+
     private static byte[] filled(int n, int v) {
         byte[] b = new byte[n];
         java.util.Arrays.fill(b, (byte) v);

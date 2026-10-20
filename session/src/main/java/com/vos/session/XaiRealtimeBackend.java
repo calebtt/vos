@@ -253,36 +253,41 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             }
         }
 
-        /** Reply queue → speaker pipe, in slices of at most the lead, paced to real time plus the lead. */
+        /**
+         * Reply queue → speaker pipe, in slices of a third of the lead, paced so that at most the lead
+         * is unplayed in the pipe. The pacing window ({@code start}, {@code written}) follows the audio
+         * still unplayed: it survives a gap in the deltas while earlier audio is playing, and restarts
+         * only once that audio has drained (the pipe is empty, so playback restarts with the next write).
+         */
         private void playReplies() {
-            long start = -1;
+            long start = 0;
             long written = 0;
             int slice = Math.max(Ipc.TURN_FRAME_BYTES, (int) (timing.leadMs * BYTES_PER_SECOND / 1000 / 3) / 2 * 2);
             try {
                 while (!over()) {
                     Chunk c = replyQueue.poll(100, TimeUnit.MILLISECONDS);
                     if (c == null) {
-                        long left = start < 0 ? 0 : Math.max(0, written * 1000 / BYTES_PER_SECOND - (now() - start));
+                        long left = Math.max(0, written * 1000 / BYTES_PER_SECOND - (now() - start));
                         synchronized (idleLock) { // atomic with speechStarted's reset
                             if (responseDone && !speaking && replyQueue.isEmpty()) {
                                 idleDeadline = now() + left + timing.idleMs;
                                 responseDone = false; // armed once per reply
                             }
                         }
-                        start = -1;
                         continue;
-                    }
-                    if (start < 0) {
-                        start = now();
-                        written = 0;
                     }
                     for (int off = 0; off < c.pcm.length && !cancelled(c.responseId); off += slice) {
                         int len = Math.min(slice, c.pcm.length - off);
-                        // Wait until this slice fits within the lead, then write it: at most leadMs of
-                        // reply audio is ever committed to the pipe ahead of real time.
-                        long aheadAfter = (written + len) * 1000 / BYTES_PER_SECOND - (now() - start);
-                        if (aheadAfter > timing.leadMs) {
-                            Thread.sleep(aheadAfter - timing.leadMs);
+                        long unplayed = written * 1000 / BYTES_PER_SECOND - (now() - start);
+                        if (unplayed <= 0) { // drained: the window restarts here
+                            start = now();
+                            written = 0;
+                            unplayed = 0;
+                        }
+                        // Wait until this slice fits within the lead, then write it.
+                        long after = unplayed + len * 1000L / BYTES_PER_SECOND;
+                        if (after > timing.leadMs) {
+                            Thread.sleep(after - timing.leadMs);
                         }
                         if (cancelled(c.responseId)) {
                             break;
