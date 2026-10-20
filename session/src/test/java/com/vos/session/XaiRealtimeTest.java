@@ -24,7 +24,7 @@ public class XaiRealtimeTest {
         @Override public void replyTranscript(String t) { calls.add("reply " + t); }
         @Override public void responseDone(String id, String s) { calls.add("done " + s); }
         @Override public void error(String c, String m) { calls.add("error " + c + " " + m); }
-        @Override public void functionCall(String id, String n, String a) { calls.add("call " + id + " " + n + " " + a); }
+        @Override public void functionCall(String r, String id, String n, String a) { calls.add("call " + r + " " + id + " " + n + " " + a); }
     }
 
     @Test
@@ -87,7 +87,7 @@ public class XaiRealtimeTest {
             "{\"type\":\"response.output_audio_transcript.delta\",\"delta\":\"It's\"}",
             "{\"type\":\"response.output_audio_transcript.done\",\"transcript\":\"It's 7:52.\"}",
             "{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}",
-            "{\"type\":\"response.function_call_arguments.done\",\"call_id\":\"call-9\",\"name\":\"volume_set\","
+            "{\"type\":\"response.function_call_arguments.done\",\"response_id\":\"r-2\",\"call_id\":\"call-9\",\"name\":\"volume_set\","
                     + "\"arguments\":\"{\\\"percent\\\":30,\\\"stream\\\":\\\"media\\\"}\"}",
             "{\"type\":\"error\",\"error\":{\"code\":\"invalid_audio\",\"message\":\"bad\"}}",
             "not json",
@@ -99,7 +99,7 @@ public class XaiRealtimeTest {
         }
         assertEquals(List.of("created grok-voice-3.0", "updated", "speech started", "speech stopped",
                 "owner What time is it?", "audio r-1 4", "reply It's 7:52.", "done completed",
-                "call call-9 volume_set {\"percent\":30,\"stream\":\"media\"}", "error invalid_audio bad"),
+                "call r-2 call-9 volume_set {\"percent\":30,\"stream\":\"media\"}", "error invalid_audio bad"),
                 r.calls);
         assertArrayEquals(pcm, r.audio);
     }

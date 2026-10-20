@@ -32,7 +32,8 @@ final class XaiRealtime {
         void responseDone(String responseId, String status);
 
         /** The model calls a tool; {@code argsJson} is the model's argument object as text. */
-        void functionCall(String callId, String name, String argsJson);
+        /** A complete tool call; {@code responseId} names the response it belongs to. */
+        void functionCall(String responseId, String callId, String name, String argsJson);
 
         void error(String code, String message);
     }
@@ -134,7 +135,8 @@ final class XaiRealtime {
                 h.replyTranscript(m.optString("transcript", ""));
                 break;
             case "response.function_call_arguments.done":
-                h.functionCall(m.optString("call_id", ""), m.optString("name", ""), m.optString("arguments", "{}"));
+                h.functionCall(m.optString("response_id", ""), m.optString("call_id", ""), m.optString("name", ""),
+                        m.optString("arguments", "{}"));
                 break;
             case "response.done":
                 JSONObject r = m.optJSONObject("response");
