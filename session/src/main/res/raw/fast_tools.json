@@ -1,0 +1,50 @@
+[
+  {
+    "type": "function",
+    "name": "time_get",
+    "description": "Read the phone's clock: the local time, date and time zone.",
+    "parameters": {"type": "object", "properties": {}}
+  },
+  {
+    "type": "function",
+    "name": "volume_set",
+    "description": "Set a volume on the phone to a percentage. Use stream media unless the owner names another (ring, alarm, notification, call).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "stream": {"type": "string", "enum": ["media", "ring", "alarm", "notification", "call"]},
+        "percent": {"type": "integer", "minimum": 0, "maximum": 100}
+      },
+      "required": ["percent"]
+    }
+  },
+  {
+    "type": "function",
+    "name": "volume_step",
+    "description": "Turn a volume on the phone one step up or down (about a tenth of its range). Use stream media unless the owner names another.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "stream": {"type": "string", "enum": ["media", "ring", "alarm", "notification", "call"]},
+        "direction": {"type": "string", "enum": ["up", "down"]}
+      },
+      "required": ["direction"]
+    }
+  },
+  {
+    "type": "function",
+    "name": "media_control",
+    "description": "Control whatever media is playing on the phone (music, podcasts, audiobooks).",
+    "parameters": {
+      "type": "object",
+      "properties": {"action": {"type": "string", "enum": ["play", "pause", "next", "previous", "stop"]}},
+      "required": ["action"]
+    }
+  },
+  {
+    "type": "function",
+    "name": "end_turn",
+    "description": "End the conversation when the owner is done (they say thanks, that's all, bye, or similar). Say goodbye briefly first if it fits.",
+    "parameters": {"type": "object", "properties": {}}
+  }
+]
