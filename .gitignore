@@ -5,6 +5,7 @@ docs/nav-evals/records/
 .gradle/
 build/
 **/build/
+/out/
 .kotlin/
 captures/
 .externalNativeBuild/
