@@ -51,6 +51,8 @@ import org.json.JSONArray;
 final class XaiRealtimeBackend implements SessionTurns.Backend {
     static final String TAG = "VOS_VOICE";
     static final String END_TURN = "end_turn";
+    /** The OpenAI-shaped error for a response.create while a response is active; not fatal here. */
+    static final String ACTIVE_RESPONSE = "conversation_already_has_active_response";
 
     /** Runs a tool in the actuator for this turn; returns the result JSON (never throws). */
     interface ToolCaller {
@@ -128,7 +130,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         volatile long idleDeadline = Long.MAX_VALUE;
         volatile long endDeadline = Long.MAX_VALUE;
         volatile boolean responseHadCall;
-        volatile boolean endRequested;
+        volatile boolean endRequested; // under idleLock, with endResponse and endDeadline
+        String endResponse = "";
         /** One response's tool calls; abandoned (batchGen bumped) by a barge-in or a cancelled response. */
         private final Object batchLock = new Object();
         private int batchGen;
@@ -425,21 +428,23 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 if (hadCall) {
                     abandonBatch();
                 }
+                synchronized (idleLock) {
+                    if (endRequested && responseId.equals(endResponse)) { // the owner talked over the goodbye
+                        endRequested = false;
+                        endDeadline = Long.MAX_VALUE;
+                    }
+                }
                 return; // the owner talked over it; the next reply (or the quiet clock) decides
             }
             if (hadCall) {
                 boolean tools;
-                boolean go = false;
                 synchronized (batchLock) {
                     tools = batchHasTools;
                     batchResponseDone = true;
                     if (tools && batchPending == 0) {
-                        go = true;
                         resetBatch();
+                        continueAfterTools(); // under the lock: a barge-in cannot abandon the batch in between
                     }
-                }
-                if (go) {
-                    continueAfterTools();
                 }
                 if (tools) {
                     return; // the answer comes in the response after the tool results
@@ -450,7 +455,11 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             }
         }
 
-        /** All of one response's tool results are in: let the model answer, once. */
+        /**
+         * All of one response's tool results are in: let the model answer, once. Called under
+         * batchLock. If the vendor's VAD has already opened a response for new speech, it ignores this
+         * one (observed on xAI 2026-10-20: no error, no second response).
+         */
         private void continueAfterTools() {
             WebSocket w = ws;
             if (w != null && !over()) {
@@ -473,16 +482,24 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         }
 
         @Override
-        public void functionCall(String callId, String name, String argsJson) {
+        public void functionCall(String responseId, String callId, String name, String argsJson) {
             responseHadCall = true;
             WebSocket w = ws;
             if (w == null) {
                 return;
             }
             if (END_TURN.equals(name)) {
-                endRequested = true;
+                // A late end_turn from a response the owner already talked over does not end the turn.
+                boolean stands = !cancelled(responseId);
+                synchronized (idleLock) {
+                    if (stands && !speaking) {
+                        endRequested = true;
+                        endResponse = responseId;
+                    }
+                }
                 w.send(XaiRealtime.functionOutput(callId, "{\"status\":\"VERIFIED\"}"));
-                Log.i(TAG, "turn " + turnId + " tool " + name + " (the model ends the turn)");
+                Log.i(TAG, "turn " + turnId + " tool " + name
+                        + (stands ? " (the model ends the turn)" : " (ignored: the owner talked over that response)"));
                 return;
             }
             int gen;
@@ -504,18 +521,14 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                     ws2.send(XaiRealtime.functionOutput(callId, result));
                 }
                 toolsInFlight.decrementAndGet();
-                boolean go = false;
-                synchronized (batchLock) {
+                synchronized (batchLock) { // decide and send under the lock, so a barge-in cannot slip in between
                     if (gen == batchGen) {
                         batchPending--;
-                        go = batchPending == 0 && batchResponseDone;
-                        if (go) {
+                        if (batchPending == 0 && batchResponseDone) {
                             resetBatch();
+                            continueAfterTools();
                         }
                     }
-                }
-                if (go) {
-                    continueAfterTools();
                 }
             });
         }
@@ -523,6 +536,9 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void error(String code, String message) {
             Log.w(TAG, "turn " + turnId + " vendor error code=" + code);
+            if (ACTIVE_RESPONSE.equals(code)) {
+                return; // our follow-up met a response the vendor already opened; that one answers
+            }
             finish("vendor error: " + code);
         }
     }
