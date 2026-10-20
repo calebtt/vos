@@ -15,6 +15,8 @@ import java.util.function.Supplier;
  * closes the mic pipe, or calls onTurnClosed) is not reported back.
  */
 final class SessionTurns {
+    static final String TAG = "VOS_SESSION";
+
     /**
      * Runs one turn. Returns why the session ended it, or null if the actuator ended it. An
      * IOException means a turn pipe broke, which only the actuator (or its death) can cause, so it
@@ -89,7 +91,7 @@ final class SessionTurns {
                 finished(this);
             }
             if (reason != null && !stopped) {
-                Log.i(SessionApp.TAG, "turn " + turnId + " ended by the session: " + reason);
+                Log.i(SessionTurns.TAG, "turn " + turnId + " ended by the session: " + reason);
                 actuator.endTurn(turnId, reason);
             }
         }

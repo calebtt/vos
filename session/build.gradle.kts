@@ -43,7 +43,7 @@ android {
     sourceSets["androidTest"].java.srcDir(rootProject.file("eval/m1/auth-probe/java"))
 
     buildFeatures {
-        buildConfig = true // BuildConfig.DEBUG gates the debug-only turn backend
+        buildConfig = true // BuildConfig.DEBUG gates debug-only code paths
     }
 
     compileOptions {

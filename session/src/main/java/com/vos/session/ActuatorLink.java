@@ -40,7 +40,7 @@ final class ActuatorLink {
             try {
                 a.turnReady(turnId);
             } catch (RemoteException e) {
-                Log.w(SessionApp.TAG, "turnReady not delivered: " + e.getClass().getSimpleName());
+                Log.w(SessionTurns.TAG, "turnReady not delivered: " + e.getClass().getSimpleName());
             }
         });
     }
@@ -50,7 +50,7 @@ final class ActuatorLink {
             try {
                 a.endTurn(turnId, reason);
             } catch (RemoteException e) {
-                Log.w(SessionApp.TAG, "endTurn not delivered: " + e.getClass().getSimpleName());
+                Log.w(SessionTurns.TAG, "endTurn not delivered: " + e.getClass().getSimpleName());
             }
         });
     }
