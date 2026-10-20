@@ -16,4 +16,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "vos"
 
-include(":actuator", ":session", ":vtb-sdk")
+include(":actuator", ":session", ":vtb-sdk", ":ipc")
+
+// Test fixtures (debug only): eval/fixtures/<name>.
+include(":fixture-auth")
+project(":fixture-auth").projectDir = file("eval/fixtures/auth")

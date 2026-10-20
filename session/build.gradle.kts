@@ -15,6 +15,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.0.1"
+        // M1-AUTH-01 probe (eval/m1/auth-probe), in the debug androidTest APK only.
+        testInstrumentationRunner = "com.vos.eval.auth.AuthProbe"
     }
 
     signingConfigs {
@@ -38,6 +40,8 @@ android {
         }
     }
 
+    sourceSets["androidTest"].java.srcDir(rootProject.file("eval/m1/auth-probe/java"))
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -45,5 +49,6 @@ android {
 }
 
 dependencies {
+    implementation(project(":ipc"))
     testImplementation(libs.junit)
 }
