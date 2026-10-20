@@ -32,6 +32,9 @@ release-signing.properties
 # Local tool downloads (gitleaks, etc.)
 .tools/
 
+# Device eval results when VOS_EVAL_OUT / VOS_EVAL_ROOT are unset (eval/README.md)
+eval/runs/
+
 # Data that never goes into the repo
 research/*.json
 *.err
