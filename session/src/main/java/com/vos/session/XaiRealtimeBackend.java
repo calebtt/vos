@@ -26,6 +26,9 @@ import okhttp3.WebSocketListener;
  *       time plus that lead; a barge-in (the vendor's VAD hears the owner) drops the interrupted
  *       response's queued audio and any of its deltas that arrive afterwards, so at most about one
  *       lead of it is still in the pipe;</li>
+ *   <li>the quiet clock: it starts when the owner stops speaking (in case no reply comes), stops while
+ *       reply audio arrives, and restarts once a completed reply has finished playing; a cancelled
+ *       response (the owner talked over it) does not count as a finished reply;</li>
  *   <li>the turn ends when the owner stays quiet for {@link Timing#idleMs} after a reply, never speaks
  *       within {@link Timing#firstSpeechMs}, reaches {@link Timing#maxTurnMs}, or on a vendor error;
  *       the actuator ending it (the mic pipe closes) is not reported back.</li>
@@ -93,7 +96,9 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         volatile boolean configured;
         volatile boolean speaking;
         volatile boolean anySpeech;
-        volatile boolean responseDone;
+        /** Guards the quiet clock: speaking, replyDone and idleDeadline change together. */
+        final Object idleLock = new Object();
+        volatile boolean responseDone; // a completed (not cancelled) reply has all its audio queued
         volatile boolean firstAudioOfReply = true;
         volatile long configuredAt;
         volatile long speechEndedAt;
@@ -252,14 +257,17 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         private void playReplies() {
             long start = -1;
             long written = 0;
-            int slice = Math.max(Ipc.TURN_FRAME_BYTES, (int) (timing.leadMs * BYTES_PER_SECOND / 1000) / 2 * 2);
+            int slice = Math.max(Ipc.TURN_FRAME_BYTES, (int) (timing.leadMs * BYTES_PER_SECOND / 1000 / 3) / 2 * 2);
             try {
                 while (!over()) {
                     Chunk c = replyQueue.poll(100, TimeUnit.MILLISECONDS);
                     if (c == null) {
-                        if (responseDone && idleDeadline == Long.MAX_VALUE && !speaking) {
-                            long left = Math.max(0, written * 1000 / BYTES_PER_SECOND - (now() - start));
-                            idleDeadline = now() + left + timing.idleMs;
+                        long left = start < 0 ? 0 : Math.max(0, written * 1000 / BYTES_PER_SECOND - (now() - start));
+                        synchronized (idleLock) { // atomic with speechStarted's reset
+                            if (responseDone && !speaking && replyQueue.isEmpty()) {
+                                idleDeadline = now() + left + timing.idleMs;
+                                responseDone = false; // armed once per reply
+                            }
                         }
                         start = -1;
                         continue;
@@ -270,12 +278,17 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                     }
                     for (int off = 0; off < c.pcm.length && !cancelled(c.responseId); off += slice) {
                         int len = Math.min(slice, c.pcm.length - off);
+                        // Wait until this slice fits within the lead, then write it: at most leadMs of
+                        // reply audio is ever committed to the pipe ahead of real time.
+                        long aheadAfter = (written + len) * 1000 / BYTES_PER_SECOND - (now() - start);
+                        if (aheadAfter > timing.leadMs) {
+                            Thread.sleep(aheadAfter - timing.leadMs);
+                        }
+                        if (cancelled(c.responseId)) {
+                            break;
+                        }
                         speaker.write(c.pcm, off, len);
                         written += len;
-                        long ahead = written * 1000 / BYTES_PER_SECOND - (now() - start);
-                        if (ahead > timing.leadMs) {
-                            Thread.sleep(ahead - timing.leadMs);
-                        }
                     }
                 }
             } catch (IOException e) {
@@ -303,10 +316,12 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void speechStarted() {
-            speaking = true;
+            synchronized (idleLock) {
+                speaking = true;
+                responseDone = false;
+                idleDeadline = Long.MAX_VALUE;
+            }
             anySpeech = true;
-            responseDone = false;
-            idleDeadline = Long.MAX_VALUE;
             cancelledResponse = currentResponse; // barge-in: the rest of that response is not played
             int dropped = replyQueue.size();
             replyQueue.clear();
@@ -315,7 +330,12 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void speechStopped() {
-            speaking = false;
+            synchronized (idleLock) {
+                speaking = false;
+                // If no reply comes (the vendor heard noise, or a barge-in it does not answer), the
+                // turn still ends after the quiet time; reply audio stops this clock.
+                idleDeadline = now() + timing.idleMs;
+            }
             speechEndedAt = now();
             firstAudioOfReply = true;
         }
@@ -331,6 +351,10 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 return; // a late delta of a response the owner interrupted
             }
             currentResponse = responseId;
+            synchronized (idleLock) { // a reply is playing: no quiet clock until it has finished
+                responseDone = false;
+                idleDeadline = Long.MAX_VALUE;
+            }
             if (firstAudioOfReply) {
                 firstAudioOfReply = false;
                 Log.i(TAG, "turn " + turnId + " first reply audio speech_end_to_audio_ms="
@@ -345,9 +369,14 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         }
 
         @Override
-        public void responseDone(String status) {
-            responseDone = true;
+        public void responseDone(String responseId, String status) {
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
+            if ("cancelled".equals(status) || cancelled(responseId)) {
+                return; // the owner talked over it; the next reply (or the quiet clock) decides
+            }
+            synchronized (idleLock) {
+                responseDone = true;
+            }
         }
 
         @Override
