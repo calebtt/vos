@@ -45,6 +45,12 @@ public final class ActuatorService extends Service {
             guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
             TurnService.sessionEnded(turnId, clip(reason));
         }
+
+        @Override
+        public String callTool(String turnId, String name, String argsJson) {
+            guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
+            return TurnService.callTool(ActuatorService.this, turnId, clip(name), argsJson);
+        }
     };
 
     /** A reason from the session is data for the audit line: printable and short. */

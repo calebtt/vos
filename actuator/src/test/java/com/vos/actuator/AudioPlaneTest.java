@@ -399,6 +399,117 @@ public class AudioPlaneTest {
     }
 
     @Test
+    public void aPauseTakenBeforeTheKeyHoldsWhenTheTurnEndsDuringTheOracle() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // VOS pauses the music
+        Runnable undo = plane.ownerPausing(id); // the owner said pause; the oracle is still waiting
+        plane.end(id, "stop"); // the owner taps stop meanwhile
+        assertNull("RESTORE does not resume what the owner paused", platform.playing);
+        assertEquals(List.of(600L, 2000L), platform.delays); // the re-pause checks are armed
+        undo.run(); // the oracle's verdict comes after the turn: nothing to take back
+        assertEquals(AudioPlane.State.IDLE, plane.state());
+    }
+
+    @Test
+    public void anOwnerIntentThatDidNotStandIsTakenBack() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile");
+        plane.ownerPlaying(id).run(); // "play", but the player stayed paused
+        plane.ownerPausing(id).run(); // "pause", but it did not stand either
+        plane.end(id, "idle");
+        assertEquals("RESTORE still resumes what the turn paused", MUSIC, platform.playing);
+    }
+
+    @Test
+    public void aPlayThatDidNotStandResumesWhatTheTurnPausedEvenIfTheTurnEndedMeanwhile() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // VOS pauses the music
+        Runnable undo = plane.ownerPlaying(id); // "play"; the oracle is still waiting
+        plane.end(id, "stop"); // the owner taps stop meanwhile: RESTORE has nothing to resume
+        assertNull(platform.playing);
+        undo.run(); // the play did not stand
+        assertEquals(MUSIC, platform.playing);
+        assertEquals("audio.media_resumed", last().get("event"));
+    }
+
+    @Test
+    public void aPlayThatDidNotStandAfterAnOwnerPauseKeepsThePausedMusicPausedWhenTheTurnEndedMeanwhile() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // VOS pauses the music
+        plane.ownerPausing(id); // "pause" stood
+        Runnable undo = plane.ownerPlaying(id); // "play"; the oracle is still waiting
+        plane.end(id, "stop"); // RESTORE sees no owner pause and no package: it arms nothing
+        assertTrue(platform.scheduled.isEmpty());
+        undo.run(); // the play did not stand: the owner's pause is what stands
+        assertNull("not resumed", platform.playing);
+        assertEquals(List.of(600L, 2000L), platform.delays);
+        platform.playing = MUSIC; // the player resumes itself on the focus regain
+        platform.runScheduled();
+        assertNull("re-paused", platform.playing);
+    }
+
+    @Test
+    public void aPauseAfterAPlayThatStoodStillGuardsAgainstASelfResume() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // VOS pauses the music
+        plane.ownerPlaying(id); // "play" stood: the music is the owner's again
+        platform.playing = MUSIC;
+        plane.ownerPausing(id); // then "pause" stood too
+        platform.playing = null;
+        plane.end(id, "idle");
+        assertNull(platform.playing);
+        assertEquals(List.of(600L, 2000L), platform.delays);
+        platform.playing = MUSIC; // the player resumes itself on the focus regain
+        platform.runScheduled();
+        assertNull("re-paused", platform.playing);
+    }
+
+    @Test
+    public void aPauseWhileThePlayerIsNotPlayingStillGuardsThePackageThePlayTookBack() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile"); // VOS pauses the music
+        plane.ownerPlaying(id); // "play" stood (verified on buffering)
+        platform.playing = null; // buffering, or already paused: no session in STATE_PLAYING
+        plane.ownerPausing(id); // "pause" stood
+        plane.end(id, "idle");
+        assertEquals(List.of(600L, 2000L), platform.delays);
+        platform.playing = MUSIC; // the player resumes itself
+        platform.runScheduled();
+        assertNull("re-paused", platform.playing);
+    }
+
+    @Test
+    public void aPauseOfMusicVosDidNotPauseIsAlsoGuardedAndItsUndoPutsTheTurnBack() {
+        String id = plane.summon("qs_tile"); // nothing playing at summon
+        platform.playing = MUSIC; // the owner started something during the turn
+        plane.ownerPausing(id).run(); // a pause that did not stand: no package is kept
+        plane.ownerPausing(id); // one that stood
+        platform.playing = null;
+        plane.end(id, "idle");
+        assertEquals(List.of(600L, 2000L), platform.delays);
+        assertFalse("RESTORE never plays what the owner paused", platform.calls.contains("play " + MUSIC));
+    }
+
+    @Test
+    public void aPlayThatDidNotStandDoesNotResumeIntoACallOrAfterALaterTurn() {
+        platform.playing = MUSIC;
+        String id = plane.summon("qs_tile");
+        Runnable undo = plane.ownerPlaying(id);
+        plane.end(id, "stop");
+        platform.mode = 2; // a call now has the audio
+        undo.run();
+        assertNull(platform.playing);
+        platform.mode = MODE_NORMAL;
+        platform.playing = MUSIC;
+        String a = plane.summon("qs_tile");
+        Runnable late = plane.ownerPlaying(a);
+        plane.end(a, "stop");
+        plane.summon("qs_tile"); // a later turn opened before the verdict
+        late.run();
+        assertNull(platform.playing);
+    }
+
+    @Test
     public void aVoipCallThatStartsDuringSummonOpensNoTurn() {
         platform.playing = MUSIC;
         platform.voipOnFocus = true;

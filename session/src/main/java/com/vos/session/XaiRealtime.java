@@ -1,6 +1,7 @@
 package com.vos.session;
 
 import java.util.Base64;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -33,14 +34,23 @@ final class XaiRealtime {
         /** A response finished; {@code status} is e.g. "completed" or "cancelled" (the owner talked over it). */
         void responseDone(String responseId, String status);
 
+        /** The model calls a tool; {@code argsJson} is the model's argument object as text. */
+        /** A complete tool call; {@code responseId} names the response it belongs to. */
+        void functionCall(String responseId, String callId, String name, String argsJson);
+
         void error(String code, String message);
     }
 
     private XaiRealtime() {
     }
 
-    /** Configures the session: instructions, voice, server VAD, PCM at {@code rate} both ways. */
+    /** Configures the session: instructions, voice, server VAD, PCM at {@code rate} both ways, no tools. */
     static String sessionUpdate(String instructions, String voice, int rate) {
+        return sessionUpdate(instructions, voice, rate, new JSONArray());
+    }
+
+    /** As above, with the function tools the model may call (vendor format: type, name, description, parameters). */
+    static String sessionUpdate(String instructions, String voice, int rate, JSONArray tools) {
         try {
             JSONObject format = new JSONObject().put("type", "audio/pcm").put("rate", rate);
             JSONObject session = new JSONObject()
@@ -50,6 +60,9 @@ final class XaiRealtime {
                     .put("audio", new JSONObject()
                             .put("input", new JSONObject().put("format", format))
                             .put("output", new JSONObject().put("format", new JSONObject(format.toString()))));
+            if (tools.length() > 0) {
+                session.put("tools", tools);
+            }
             return new JSONObject().put("type", "session.update").put("session", session).toString();
         } catch (JSONException e) {
             throw new IllegalStateException(e);
@@ -68,6 +81,27 @@ final class XaiRealtime {
         } catch (JSONException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /** A tool's result for the model, as a function_call_output item. */
+    static String functionOutput(String callId, String outputJson) {
+        try {
+            JSONObject item = new JSONObject().put("type", "function_call_output").put("call_id", callId)
+                    .put("output", outputJson);
+            return new JSONObject().put("type", "conversation.item.create").put("item", item).toString();
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Asks the model to respond (after a tool result). */
+    static String responseCreate() {
+        return "{\"type\":\"response.create\"}";
+    }
+
+    /** Cancels the active response (accepted without an error by xAI, 2026-10-20). */
+    static String responseCancel() {
+        return "{\"type\":\"response.cancel\"}";
     }
 
     /** Parses one server event and calls the handler. Unknown events and bad JSON are ignored. */
@@ -111,6 +145,10 @@ final class XaiRealtime {
                 break;
             case "response.output_audio_transcript.done":
                 h.replyTranscript(m.optString("transcript", ""));
+                break;
+            case "response.function_call_arguments.done":
+                h.functionCall(m.optString("response_id", ""), m.optString("call_id", ""), m.optString("name", ""),
+                        m.optString("arguments", "{}"));
                 break;
             case "response.done":
                 JSONObject r = m.optJSONObject("response");

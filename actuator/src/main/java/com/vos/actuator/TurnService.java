@@ -15,6 +15,8 @@ import android.os.Looper;
 import android.service.quicksettings.TileService;
 import android.util.Log;
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Holds the open voice turn as a {@code microphone} foreground service (§3.2). A summon (the QS
@@ -38,7 +40,7 @@ public final class TurnService extends Service {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     private static volatile TurnService live;
-    private VoiceTurn turn;
+    private volatile VoiceTurn turn; // read from Binder threads (callTool)
     private final Runnable cap = () -> finish("max turn length");
 
     /** Is a turn open now (for the tile)? */
@@ -55,6 +57,45 @@ public final class TurnService extends Service {
                 ((ActuatorApp) s.getApplication()).audioPlane().ready(turnId);
             }
         });
+    }
+
+    /**
+     * From ActuatorService (a Binder thread): run a fast tool for the open turn. The actuator decides
+     * the origin (§5.6): only the turn it opened, while it is conversing, may act. One audit line per
+     * call; the earcon is the actuator's verdict (P3).
+     */
+    static String callTool(Context context, String turnId, String name, String argsJson) {
+        ActuatorApp app = (ActuatorApp) context.getApplicationContext();
+        TurnService s = live;
+        VoiceTurn t = s == null ? null : s.turn;
+        long t0 = android.os.SystemClock.elapsedRealtime();
+        FastTools.Result r;
+        if (t == null || !t.turnId.equals(turnId) || app.audioPlane().state() != AudioPlane.State.CONVERSE) {
+            r = FastTools.Result.of(FastTools.Status.FAILED, "detail", "no open turn " + turnId);
+        } else {
+            r = app.fastTools().run(name, argsJson, new FastTools.MediaIntent() {
+                @Override
+                public Runnable ownerPausing() {
+                    return app.audioPlane().ownerPausing(turnId);
+                }
+
+                @Override
+                public Runnable ownerPlaying() {
+                    return app.audioPlane().ownerPlaying(turnId);
+                }
+            });
+            Earcons.play(app, r.status, t.speakerToFile); // never throws: the result and audit line follow
+        }
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("event", "tool.call");
+        line.put("turnId", turnId);
+        line.put("tool", name);
+        line.put("args", argsJson == null || argsJson.length() > 200 ? "(omitted)" : argsJson);
+        line.put("status", r.status.name());
+        line.put("result", r.json.toString());
+        line.put("ms", android.os.SystemClock.elapsedRealtime() - t0);
+        app.audit().record(line);
+        return r.json.toString();
     }
 
     /** From ActuatorService (a Binder thread): the session ends the turn. */

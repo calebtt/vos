@@ -9,13 +9,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
+import org.json.JSONArray;
 
 /**
  * The {@code chat_voice} backend on the xAI realtime API (§3.2). Per turn:
@@ -26,12 +30,19 @@ import okhttp3.WebSocketListener;
  *       time plus that lead; a barge-in (the vendor's VAD hears the owner) drops the interrupted
  *       response's queued audio and any of its deltas that arrive afterwards, so at most about one
  *       lead of it is still in the pipe;</li>
+ *   <li>a tool call goes to the actuator ({@link ToolCaller}) off the WebSocket thread, and its result
+ *       (VERIFIED, UNVERIFIED or FAILED from the actuator's oracle) goes back to the model. The calls
+ *       of one response form a batch: the model is asked to answer once, after all their results. If
+ *       the owner talks over that response (or it is cancelled), the results still go back but no
+ *       response.create is sent: the vendor's VAD opens the next response itself;</li>
  *   <li>the quiet clock: it starts when the owner stops speaking (in case no reply comes), stops while
  *       reply audio arrives, and restarts once a completed reply has finished playing; a cancelled
  *       response (the owner talked over it) does not count as a finished reply;</li>
- *   <li>the turn ends when the owner stays quiet for {@link Timing#idleMs} after a reply, never speaks
- *       within {@link Timing#firstSpeechMs}, reaches {@link Timing#maxTurnMs}, or on a vendor error;
- *       the actuator ending it (the mic pipe closes) is not reported back.</li>
+ *   <li>the turn ends when the owner stays quiet for {@link Timing#idleMs} after a reply (never while a
+ *       tool call runs), never speaks within {@link Timing#firstSpeechMs}, reaches
+ *       {@link Timing#maxTurnMs}, the model ends it ({@code end_turn}, once the goodbye has played and
+ *       no tool call runs), or on a vendor error; the actuator ending it (the mic pipe closes) is not
+ *       reported back.</li>
  * </ul>
  * The key comes from the {@link KeyVault} at the start of each turn and only ever goes into the
  * WebSocket's Authorization header. Transcripts go to the {@link TranscriptLog}; logcat gets event
@@ -39,6 +50,14 @@ import okhttp3.WebSocketListener;
  */
 final class XaiRealtimeBackend implements SessionTurns.Backend {
     static final String TAG = "VOS_VOICE";
+    static final String END_TURN = "end_turn";
+    /** The OpenAI-shaped error for a response.create while a response is active; not fatal here. */
+    static final String ACTIVE_RESPONSE = "conversation_already_has_active_response";
+
+    /** Runs a tool in the actuator for this turn; returns the result JSON (never throws). */
+    interface ToolCaller {
+        String call(String turnId, String name, String argsJson);
+    }
     private static final int BYTES_PER_SECOND = Ipc.TURN_SAMPLE_RATE * 2;
     private static final int FRAMES_PER_SEND = 5; // 100 ms per append message
 
@@ -55,15 +74,19 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
     private final ModelPolicy.Entry model;
     private final TranscriptLog transcripts;
     private final Supplier<String> instructions;
+    private final JSONArray toolSchemas;
+    private final ToolCaller tools;
     private final Timing timing;
 
     XaiRealtimeBackend(Egress egress, KeyVault vault, ModelPolicy.Entry model, TranscriptLog transcripts,
-            Supplier<String> instructions, Timing timing) {
+            Supplier<String> instructions, JSONArray toolSchemas, ToolCaller tools, Timing timing) {
         this.egress = egress;
         this.vault = vault;
         this.model = model;
         this.transcripts = transcripts;
         this.instructions = instructions;
+        this.toolSchemas = toolSchemas;
+        this.tools = tools;
         this.timing = timing;
     }
 
@@ -91,6 +114,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         final CountDownLatch done = new CountDownLatch(1);
         final long openedAt = now();
         final List<Thread> threads = new ArrayList<>();
+        final ExecutorService toolRunner = Executors.newSingleThreadExecutor(r -> new Thread(r, "vos-tool"));
+        final AtomicInteger toolsInFlight = new AtomicInteger();
 
         volatile WebSocket ws;
         volatile boolean configured;
@@ -103,9 +128,20 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         volatile long configuredAt;
         volatile long speechEndedAt;
         volatile long idleDeadline = Long.MAX_VALUE;
+        volatile long endDeadline = Long.MAX_VALUE;
+        volatile boolean responseHadCall;
+        volatile boolean endRequested; // under idleLock, with endResponse and endDeadline
+        String endResponse = "";
+        /** One response's tool calls; abandoned (batchGen bumped) by a barge-in or a cancelled response. */
+        private final Object batchLock = new Object();
+        private int batchGen;
+        private int batchPending;
+        private boolean batchHasTools;
+        private boolean batchResponseDone;
         /** The response audio is arriving for, and the one a barge-in cut off ("" when the vendor sends no ids). */
         volatile String currentResponse = "";
-        volatile String cancelledResponse = "";
+        /** Responses the owner talked over; their late deltas and calls are dropped. */
+        final java.util.Set<String> cancelledResponses = java.util.concurrent.ConcurrentHashMap.newKeySet();
         private String endReason;
         private boolean ended;
         private boolean actuatorEnded;
@@ -128,7 +164,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             ws = egress.openWebSocket(req, turnId, new WebSocketListener() {
                 @Override
                 public void onOpen(WebSocket w, Response response) {
-                    w.send(XaiRealtime.sessionUpdate(instructions.get(), model.get("voice"), Ipc.TURN_SAMPLE_RATE));
+                    w.send(XaiRealtime.sessionUpdate(instructions.get(), model.get("voice"), Ipc.TURN_SAMPLE_RATE,
+                            toolSchemas));
                 }
 
                 @Override
@@ -163,8 +200,10 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                         finish("max turn length");
                     } else if (configured && !anySpeech && now - configuredAt > timing.firstSpeechMs) {
                         finish("no speech");
-                    } else if (!speaking && now > idleDeadline) {
+                    } else if (!speaking && toolsInFlight.get() == 0 && now > idleDeadline) {
                         finish("idle");
+                    } else if (!speaking && toolsInFlight.get() == 0 && now > endDeadline) {
+                        finish("model end");
                     }
                 }
             } catch (InterruptedException e) {
@@ -178,6 +217,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             for (Thread t : threads) {
                 t.interrupt();
             }
+            toolRunner.shutdownNow();
             synchronized (this) {
                 Log.i(TAG, "turn " + turnId + " over after_ms=" + (now() - openedAt) + " reason="
                         + (actuatorEnded ? "actuator" : endReason));
@@ -208,7 +248,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         /** A response the owner talked over. Without vendor ids nothing is "cancelled": barge-in only clears the queue. */
         private boolean cancelled(String responseId) {
-            return !responseId.isEmpty() && responseId.equals(cancelledResponse);
+            return !responseId.isEmpty() && cancelledResponses.contains(responseId);
         }
 
         private boolean over() {
@@ -278,8 +318,12 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                     if (c == null) {
                         long left = Math.max(0, written * 1000 / BYTES_PER_SECOND - (now() - start));
                         synchronized (idleLock) { // atomic with speechStarted's reset
-                            if (responseDone && !speaking && replyQueue.isEmpty()) {
-                                idleDeadline = now() + left + timing.idleMs;
+                            if (responseDone && !speaking && replyQueue.isEmpty() && toolsInFlight.get() == 0) {
+                                if (endRequested) {
+                                    endDeadline = now() + left + timing.leadMs;
+                                } else {
+                                    idleDeadline = now() + left + timing.idleMs;
+                                }
                                 responseDone = false; // armed once per reply
                             }
                         }
@@ -334,9 +378,14 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 speaking = true;
                 responseDone = false;
                 idleDeadline = Long.MAX_VALUE;
+                endRequested = false; // the owner kept talking
+                endDeadline = Long.MAX_VALUE;
             }
+            abandonBatch(); // results of calls in flight still go back, but nothing asks the model to answer
             anySpeech = true;
-            cancelledResponse = currentResponse; // barge-in: the rest of that response is not played
+            if (!currentResponse.isEmpty()) {
+                cancelledResponses.add(currentResponse); // barge-in: the rest of that response is not played
+            }
             int dropped = replyQueue.size();
             replyQueue.clear();
             Log.i(TAG, "turn " + turnId + " speech started" + (dropped > 0 ? ", dropped " + dropped + " reply chunks" : ""));
@@ -344,8 +393,20 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void responseCreated(String responseId) {
-            if (!responseId.isEmpty()) {
-                currentResponse = responseId; // so a barge-in before its first audio still drops it
+            if (responseId.isEmpty()) {
+                return;
+            }
+            currentResponse = responseId; // so a barge-in before its first audio still drops it
+            if (speaking) {
+                // Only our tool follow-up can open a response while the owner talks (the vendor's VAD
+                // opens one when speech stops). It answers what came before the new speech: drop it, and
+                // cancel it so the vendor answers the owner instead.
+                cancelledResponses.add(responseId);
+                WebSocket w = ws;
+                if (w != null && !over()) {
+                    w.send(XaiRealtime.responseCancel());
+                }
+                Log.i(TAG, "turn " + turnId + " dropped a follow-up created while the owner was speaking");
             }
         }
 
@@ -392,18 +453,138 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void responseDone(String responseId, String status) {
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
+            boolean hadCall = responseHadCall;
+            responseHadCall = false;
             if ("cancelled".equals(status) || cancelled(responseId)) {
+                if (hadCall) {
+                    abandonBatch();
+                }
+                synchronized (idleLock) {
+                    if (endRequested && responseId.equals(endResponse)) { // the owner talked over the goodbye
+                        endRequested = false;
+                        endDeadline = Long.MAX_VALUE;
+                    }
+                }
                 return; // the owner talked over it; the next reply (or the quiet clock) decides
+            }
+            if (hadCall) {
+                boolean tools;
+                synchronized (batchLock) {
+                    tools = batchHasTools;
+                    batchResponseDone = true;
+                    if (tools && batchPending == 0) {
+                        resetBatch();
+                        continueAfterTools(); // under the lock: a barge-in cannot abandon the batch in between
+                    }
+                }
+                if (tools) {
+                    return; // the answer comes in the response after the tool results
+                }
             }
             synchronized (idleLock) {
                 responseDone = true;
             }
         }
 
+        /**
+         * All of one response's tool results are in: let the model answer, once. Called under
+         * batchLock. If the vendor's VAD has already opened a response for new speech, it ignores this
+         * one (observed on xAI 2026-10-20: no error, no second response).
+         */
+        private void continueAfterTools() {
+            WebSocket w = ws;
+            if (w != null && !over()) {
+                w.send(XaiRealtime.responseCreate());
+            }
+        }
+
+        /** The owner talked over the batch's response (or it was cancelled): no follow-up for it. */
+        private void abandonBatch() {
+            synchronized (batchLock) {
+                batchGen++;
+                resetBatch();
+            }
+        }
+
+        private void resetBatch() {
+            batchPending = 0;
+            batchHasTools = false;
+            batchResponseDone = false;
+        }
+
+        @Override
+        public void functionCall(String responseId, String callId, String name, String argsJson) {
+            responseHadCall = true;
+            WebSocket w = ws;
+            if (w == null) {
+                return;
+            }
+            if (END_TURN.equals(name)) {
+                // A late end_turn from a response the owner already talked over does not end the turn.
+                boolean stands = !cancelled(responseId);
+                synchronized (idleLock) {
+                    if (stands && !speaking) {
+                        endRequested = true;
+                        endResponse = responseId;
+                    }
+                }
+                w.send(XaiRealtime.functionOutput(callId, "{\"status\":\"VERIFIED\"}"));
+                Log.i(TAG, "turn " + turnId + " tool " + name
+                        + (stands ? " (the model ends the turn)" : " (ignored: the owner talked over that response)"));
+                return;
+            }
+            if (cancelled(responseId)) { // a stale act from a response the owner talked over is not run
+                w.send(XaiRealtime.functionOutput(callId,
+                        "{\"status\":\"FAILED\",\"detail\":\"not run: the owner talked over this response\"}"));
+                Log.i(TAG, "turn " + turnId + " tool " + name + " not run (the owner talked over that response)");
+                return; // not part of any batch, so no response.create follows
+            }
+            int gen;
+            synchronized (batchLock) {
+                gen = batchGen;
+                batchPending++;
+                batchHasTools = true;
+            }
+            toolsInFlight.incrementAndGet();
+            synchronized (idleLock) {
+                idleDeadline = Long.MAX_VALUE;
+            }
+            toolRunner.execute(() -> {
+                long t0 = now();
+                String result = tools.call(turnId, name, argsJson);
+                Log.i(TAG, "turn " + turnId + " tool " + name + " " + statusOf(result) + " ms=" + (now() - t0));
+                WebSocket ws2 = ws;
+                if (ws2 != null && !over()) {
+                    ws2.send(XaiRealtime.functionOutput(callId, result));
+                }
+                toolsInFlight.decrementAndGet();
+                synchronized (batchLock) { // decide and send under the lock, so a barge-in cannot slip in between
+                    if (gen == batchGen) {
+                        batchPending--;
+                        if (batchPending == 0 && batchResponseDone) {
+                            resetBatch();
+                            continueAfterTools();
+                        }
+                    }
+                }
+            });
+        }
+
         @Override
         public void error(String code, String message) {
             Log.w(TAG, "turn " + turnId + " vendor error code=" + code);
+            if (ACTIVE_RESPONSE.equals(code)) {
+                return; // our follow-up met a response the vendor already opened; that one answers
+            }
             finish("vendor error: " + code);
+        }
+    }
+
+    private static String statusOf(String resultJson) {
+        try {
+            return new org.json.JSONObject(resultJson).optString("status", "?");
+        } catch (Exception e) {
+            return "?";
         }
     }
 
