@@ -4,4 +4,10 @@
     <string name="hands_label">VOS</string>
     <string name="hands_description">Lets VOS operate apps for you when you ask it to.</string>
     <string name="notifications_label">VOS notifications</string>
+    <string name="tile_label">VOS</string>
+    <string name="tile_idle">Tap to talk</string>
+    <string name="tile_listening">Listening</string>
+    <string name="turn_channel">VOS listening</string>
+    <string name="turn_listening">VOS is listening</string>
+    <string name="turn_stop">Stop</string>
 </resources>

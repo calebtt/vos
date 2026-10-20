@@ -33,7 +33,28 @@ public final class ActuatorService extends Service {
             guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
             return Ipc.PROTOCOL_VERSION;
         }
+
+        @Override
+        public void turnReady(String turnId) {
+            guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
+            TurnService.sessionReady(turnId);
+        }
+
+        @Override
+        public void endTurn(String turnId, String reason) {
+            guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
+            TurnService.sessionEnded(turnId, clip(reason));
+        }
     };
+
+    /** A reason from the session is data for the audit line: printable and short. */
+    static String clip(String reason) {
+        if (reason == null) {
+            return "";
+        }
+        String r = reason.replaceAll("[^\\x20-\\x7e]", "?");
+        return r.length() > 120 ? r.substring(0, 120) : r;
+    }
 
     @Override
     public void onCreate() {

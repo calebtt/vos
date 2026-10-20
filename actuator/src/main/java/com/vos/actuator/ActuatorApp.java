@@ -11,13 +11,21 @@ import com.vos.ipc.JsonlAudit;
 /** Actuator process: AudioPlane, Hands, Shell, Oracles, Audit live here (§3.1). M0 has no planes yet. */
 public final class ActuatorApp extends Application {
     private BinderGuard sessionGuard;
+    private AudioPlane audioPlane;
 
     @Override
     public void onCreate() {
         super.onCreate();
+        JsonlAudit audit = new JsonlAudit(this);
         sessionGuard = new BinderGuard("ActuatorService", Ipc.SESSION_PACKAGE,
                 AndroidGuardPlatform.ownCertSha256(this), GrantTable.of(Ipc.SESSION_PACKAGE, Grant.SESSION_CORE),
-                new AndroidGuardPlatform(getPackageManager()), new JsonlAudit(this));
+                new AndroidGuardPlatform(getPackageManager()), audit);
+        audioPlane = new AudioPlane(new AndroidAudioPlatform(this), line -> audit.record(line));
+    }
+
+    /** The one owner of the audio session (§3.3). */
+    AudioPlane audioPlane() {
+        return audioPlane;
     }
 
     /** Guards ActuatorService: only the session package, signed with this app's cert (§5.3). */
