@@ -33,6 +33,7 @@ public class AudioPlaneTest {
 
         @Override
         public boolean callActive() {
+            mode(); // as on the device: AudioManager.getMode()
             return call;
         }
 
@@ -349,15 +350,43 @@ public class AudioPlaneTest {
 
     @Test
     public void aSummonThatHitsADeadAudioServerOpensNoTurnAndGivesBackWhatItTook() {
+        platform.playing = MUSIC;
         platform.failSetMode = true;
         assertNull(plane.summon("qs_tile"));
         assertEquals(AudioPlane.State.IDLE, plane.state());
         assertNull(plane.turnId());
         assertFalse(platform.focus);
+        assertEquals("the music this attempt paused plays again", MUSIC, platform.playing);
         assertEquals("audio.refused", last().get("event"));
         assertTrue((String) last().get("reason"), ((String) last().get("reason")).startsWith("audio error"));
         platform.failSetMode = false;
         assertNotNull(plane.summon("qs_tile"));
+    }
+
+    @Test
+    public void aSummonWhenTheModeCannotBeReadIsRefusedWithoutThrowing() {
+        platform.playing = MUSIC;
+        platform.failMode = true; // callActive() reads the mode first
+        assertNull(plane.summon("qs_tile"));
+        assertEquals(AudioPlane.State.IDLE, plane.state());
+        assertNull(plane.turnId());
+        assertEquals(MUSIC, platform.playing);
+        assertTrue(platform.calls.isEmpty()); // nothing was taken
+        assertEquals("audio.refused", last().get("event"));
+    }
+
+    @Test
+    public void aFailedSummonKeepsTheLastTurnsRepauseChecks() {
+        platform.playing = MUSIC;
+        String a = plane.summon("qs_tile");
+        plane.ownerPausedMedia(a);
+        plane.end(a, "idle"); // arms the re-pause checks
+        platform.failSetMode = true;
+        assertNull(plane.summon("qs_tile")); // fails, no turn
+        platform.failSetMode = false;
+        platform.playing = MUSIC; // the player resumes itself after focus is given back
+        platform.runScheduled();
+        assertNull("turn A's re-pause still applies", platform.playing);
     }
 
     @Test
