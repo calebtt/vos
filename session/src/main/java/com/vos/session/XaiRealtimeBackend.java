@@ -26,8 +26,10 @@ import org.json.JSONArray;
  * <ul>
  *   <li>the owner's audio is read from the mic pipe from the first moment and buffered, so words
  *       spoken while the WebSocket connects are kept, then streamed once the session is configured;</li>
- *   <li>reply audio is written to the speaker pipe paced to real time plus {@link Timing#leadMs}, so a
- *       barge-in (the vendor's VAD hears the owner) can drop what has not been sent yet;</li>
+ *   <li>reply audio goes into the speaker pipe in slices of at most {@link Timing#leadMs}, paced to real
+ *       time plus that lead; a barge-in (the vendor's VAD hears the owner) drops the interrupted
+ *       response's queued audio and any of its deltas that arrive afterwards, so at most about one
+ *       lead of it is still in the pipe;</li>
  *   <li>a tool call goes to the actuator ({@link ToolCaller}) off the WebSocket thread, and its result
  *       (VERIFIED, UNVERIFIED or FAILED from the actuator's oracle) goes back to the model, which then
  *       answers; {@code end_turn} closes the turn once the reply has played;</li>
@@ -100,7 +102,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         final OutputStream speaker;
         final Runnable ready;
         final BlockingQueue<byte[]> micQueue = new LinkedBlockingQueue<>();
-        final BlockingQueue<byte[]> replyQueue = new LinkedBlockingQueue<>();
+        final BlockingQueue<Chunk> replyQueue = new LinkedBlockingQueue<>();
         final CountDownLatch done = new CountDownLatch(1);
         final long openedAt = now();
         final List<Thread> threads = new ArrayList<>();
@@ -119,6 +121,9 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         volatile long endDeadline = Long.MAX_VALUE;
         volatile boolean responseHadCall;
         volatile boolean endRequested;
+        /** The response audio is arriving for, and the one a barge-in cut off ("" when the vendor sends no ids). */
+        volatile String currentResponse = "";
+        volatile String cancelledResponse = "";
         private String endReason;
         private boolean ended;
         private boolean actuatorEnded;
@@ -214,6 +219,11 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             finish("actuator");
         }
 
+        /** A response the owner talked over. Without vendor ids nothing is "cancelled": barge-in only clears the queue. */
+        private boolean cancelled(String responseId) {
+            return !responseId.isEmpty() && responseId.equals(cancelledResponse);
+        }
+
         private boolean over() {
             return done.getCount() == 0;
         }
@@ -265,14 +275,15 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             }
         }
 
-        /** Reply queue → speaker pipe, paced to real time plus the lead. */
+        /** Reply queue → speaker pipe, in slices of at most the lead, paced to real time plus the lead. */
         private void playReplies() {
             long start = -1;
             long written = 0;
+            int slice = Math.max(Ipc.TURN_FRAME_BYTES, (int) (timing.leadMs * BYTES_PER_SECOND / 1000) / 2 * 2);
             try {
                 while (!over()) {
-                    byte[] b = replyQueue.poll(100, TimeUnit.MILLISECONDS);
-                    if (b == null) {
+                    Chunk c = replyQueue.poll(100, TimeUnit.MILLISECONDS);
+                    if (c == null) {
                         if (responseDone && !speaking) {
                             long left = Math.max(0, written * 1000 / BYTES_PER_SECOND - (now() - start));
                             if (endRequested && endDeadline == Long.MAX_VALUE) {
@@ -288,11 +299,14 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                         start = now();
                         written = 0;
                     }
-                    speaker.write(b);
-                    written += b.length;
-                    long ahead = written * 1000 / BYTES_PER_SECOND - (now() - start);
-                    if (ahead > timing.leadMs) {
-                        Thread.sleep(ahead - timing.leadMs);
+                    for (int off = 0; off < c.pcm.length && !cancelled(c.responseId); off += slice) {
+                        int len = Math.min(slice, c.pcm.length - off);
+                        speaker.write(c.pcm, off, len);
+                        written += len;
+                        long ahead = written * 1000 / BYTES_PER_SECOND - (now() - start);
+                        if (ahead > timing.leadMs) {
+                            Thread.sleep(ahead - timing.leadMs);
+                        }
                     }
                 }
             } catch (IOException e) {
@@ -326,8 +340,9 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             idleDeadline = Long.MAX_VALUE;
             endRequested = false; // the owner kept talking
             endDeadline = Long.MAX_VALUE;
+            cancelledResponse = currentResponse; // barge-in: the rest of that response is not played
             int dropped = replyQueue.size();
-            replyQueue.clear(); // barge-in: what is not yet in the pipe is not played
+            replyQueue.clear();
             Log.i(TAG, "turn " + turnId + " speech started" + (dropped > 0 ? ", dropped " + dropped + " reply chunks" : ""));
         }
 
@@ -344,13 +359,17 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         }
 
         @Override
-        public void audio(byte[] pcm) {
+        public void audio(String responseId, byte[] pcm) {
+            if (cancelled(responseId)) {
+                return; // a late delta of a response the owner interrupted
+            }
+            currentResponse = responseId;
             if (firstAudioOfReply) {
                 firstAudioOfReply = false;
                 Log.i(TAG, "turn " + turnId + " first reply audio speech_end_to_audio_ms="
                         + (speechEndedAt > 0 ? now() - speechEndedAt : -1));
             }
-            replyQueue.add(pcm);
+            replyQueue.add(new Chunk(responseId, pcm));
         }
 
         @Override
@@ -410,6 +429,17 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             return new org.json.JSONObject(resultJson).optString("status", "?");
         } catch (Exception e) {
             return "?";
+        }
+    }
+
+    /** One reply delta and the response it belongs to. */
+    private static final class Chunk {
+        final String responseId;
+        final byte[] pcm;
+
+        Chunk(String responseId, byte[] pcm) {
+            this.responseId = responseId;
+            this.pcm = pcm;
         }
     }
 

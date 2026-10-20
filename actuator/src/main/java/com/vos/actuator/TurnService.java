@@ -167,6 +167,8 @@ public final class TurnService extends Service {
             return;
         }
         turn = new VoiceTurn(this, id, micFromFile, speakerToFile, reason -> MAIN.post(() -> finishIf(id, reason)));
+        // A call that starts during the turn ends it (§3.3: "call starts" goes to RESTORE).
+        ((ActuatorApp) getApplication()).audioPlatform().watchCalls(() -> MAIN.post(() -> finishIf(id, "call started")));
         try {
             turn.start();
         } catch (IOException e) {
@@ -183,16 +185,29 @@ public final class TurnService extends Service {
         }
     }
 
+    /** Ends the turn. RESTORE and the service stop run even if closing the turn's I/O throws. */
     private void finish(String reason) {
         VoiceTurn t = turn;
         turn = null;
         MAIN.removeCallbacks(cap);
-        if (t != null) {
-            t.close(reason);
-            ((ActuatorApp) getApplication()).audioPlane().end(t.turnId, reason);
+        ActuatorApp app = (ActuatorApp) getApplication();
+        app.audioPlatform().unwatchCalls();
+        try {
+            if (t != null) {
+                t.close(reason);
+            }
+        } catch (RuntimeException e) {
+            Log.w(VoiceTurn.TAG, "closing the turn failed: " + e.getClass().getSimpleName());
+        } finally {
+            try {
+                if (t != null) {
+                    app.audioPlane().end(t.turnId, reason);
+                }
+            } finally {
+                stopTurnService();
+                TileService.requestListeningState(this, new ComponentName(this, SummonTile.class));
+            }
         }
-        stopTurnService();
-        TileService.requestListeningState(this, new ComponentName(this, SummonTile.class));
     }
 
     private void stopTurnService() {

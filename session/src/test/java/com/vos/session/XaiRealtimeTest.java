@@ -20,7 +20,7 @@ public class XaiRealtimeTest {
         @Override public void speechStarted() { calls.add("speech started"); }
         @Override public void speechStopped() { calls.add("speech stopped"); }
         @Override public void ownerTranscript(String t) { calls.add("owner " + t); }
-        @Override public void audio(byte[] pcm) { calls.add("audio " + pcm.length); audio = pcm; }
+        @Override public void audio(String rid, byte[] pcm) { calls.add("audio " + rid + " " + pcm.length); audio = pcm; }
         @Override public void replyTranscript(String t) { calls.add("reply " + t); }
         @Override public void responseDone(String s) { calls.add("done " + s); }
         @Override public void error(String c, String m) { calls.add("error " + c + " " + m); }
@@ -82,7 +82,8 @@ public class XaiRealtimeTest {
             "{\"type\":\"input_audio_buffer.speech_started\"}",
             "{\"type\":\"input_audio_buffer.speech_stopped\"}",
             "{\"type\":\"conversation.item.input_audio_transcription.completed\",\"transcript\":\"What time is it?\"}",
-            "{\"type\":\"response.output_audio.delta\",\"delta\":\"" + Base64.getEncoder().encodeToString(pcm) + "\"}",
+            "{\"type\":\"response.output_audio.delta\",\"response_id\":\"r-1\",\"delta\":\""
+                    + Base64.getEncoder().encodeToString(pcm) + "\"}",
             "{\"type\":\"response.output_audio_transcript.delta\",\"delta\":\"It's\"}",
             "{\"type\":\"response.output_audio_transcript.done\",\"transcript\":\"It's 7:52.\"}",
             "{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}",
@@ -97,7 +98,7 @@ public class XaiRealtimeTest {
             XaiRealtime.dispatch(e, r);
         }
         assertEquals(List.of("created grok-voice-3.0", "updated", "speech started", "speech stopped",
-                "owner What time is it?", "audio 4", "reply It's 7:52.", "done completed",
+                "owner What time is it?", "audio r-1 4", "reply It's 7:52.", "done completed",
                 "call call-9 volume_set {\"percent\":30,\"stream\":\"media\"}", "error invalid_audio bad"),
                 r.calls);
         assertArrayEquals(pcm, r.audio);

@@ -63,7 +63,9 @@ final class VoiceTurn {
     private Thread playback;
     private PeerLink link;
     private volatile IVosSession session;
-    private volatile AudioTrack track;
+    /** The playing track; set and released by play() under {@link #trackLock}, only paused by close(). */
+    private AudioTrack track;
+    private final Object trackLock = new Object();
 
     VoiceTurn(Context context, String turnId, boolean micFromFile, boolean speakerToFile, Consumer<String> ender) {
         this.context = context;
@@ -134,10 +136,15 @@ final class VoiceTurn {
             join(capture);
         }
         closeQuietly(micWrite);
-        AudioTrack t = track;
-        if (t != null) { // silence now; the playback thread stops at its next write
-            t.pause();
-            t.flush();
+        synchronized (trackLock) { // silence now; the playback thread stops at its next write
+            if (track != null) {
+                try {
+                    track.pause();
+                    track.flush();
+                } catch (IllegalStateException ignored) {
+                    // not playing yet
+                }
+            }
         }
         IVosSession s = session;
         if (s != null) {
@@ -218,8 +225,11 @@ final class VoiceTurn {
                 int n = record.read(buf, 0, FRAME, AudioRecord.READ_BLOCKING);
                 if (n > 0) {
                     out.write(buf, 0, n);
-                } else if (n < 0) {
-                    break;
+                } else if (n < 0) { // the record was invalidated (audio server restart, preemption)
+                    if (running) {
+                        ender.accept("mic read error " + n);
+                    }
+                    return;
                 }
             }
         } catch (IOException e) {
@@ -257,7 +267,7 @@ final class VoiceTurn {
 
     private void play() {
         byte[] buf = new byte[FRAME * 5];
-        AudioTrack track = null;
+        AudioTrack playing = null;
         OutputStream sink = null;
         long bytes = 0;
         try (InputStream in = new ParcelFileDescriptor.AutoCloseInputStream(speakerRead)) {
@@ -270,24 +280,40 @@ final class VoiceTurn {
                         dir.mkdirs();
                         sink = new FileOutputStream(new File(dir, "speaker-" + turnId + ".pcm"));
                     } else {
-                        track = openTrack();
-                        this.track = track;
-                        track.play();
+                        synchronized (trackLock) {
+                            if (!running) {
+                                break;
+                            }
+                            playing = openTrack();
+                            track = playing;
+                            playing.play();
+                        }
                     }
                 }
                 bytes += n;
                 if (sink != null) {
                     sink.write(buf, 0, n);
                 } else {
-                    track.write(buf, 0, n, AudioTrack.WRITE_BLOCKING);
+                    playing.write(buf, 0, n, AudioTrack.WRITE_BLOCKING);
                 }
             }
         } catch (IOException e) {
             // speaker pipe closed by close() or by the session
+        } catch (RuntimeException e) { // AudioTrack could not be built or written
+            if (running) {
+                ender.accept("speaker error: " + e.getClass().getSimpleName());
+            }
         } finally {
-            if (track != null) {
-                track.stop();
-                track.release();
+            synchronized (trackLock) {
+                if (playing != null) {
+                    try {
+                        playing.stop();
+                    } catch (IllegalStateException ignored) {
+                        // already stopped
+                    }
+                    playing.release();
+                    track = null;
+                }
             }
             closeQuietly(sink);
             Log.i(TAG, "speaker done turnId=" + turnId + " bytes=" + bytes);
