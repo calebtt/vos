@@ -255,6 +255,37 @@ public class AudioPlaneTest {
     }
 
     @Test
+    public void aRepauseCheckDoesNothingOnceALaterTurnHasRunEvenIfItEnded() {
+        // Grok Build's sequence: A pauses, the owner pauses during A, A ends and arms the re-checks;
+        // turn B runs and ends while the music is paused; the owner starts the music again.
+        platform.playing = MUSIC;
+        String a = plane.summon("qs_tile");
+        plane.ownerPausedMedia(a);
+        plane.end(a, "idle");
+        String b = plane.summon("qs_tile");
+        plane.end(b, "idle");
+        platform.playing = MUSIC; // the owner's own play, after B
+        platform.runScheduled();  // A's re-checks fire now
+        assertEquals(MUSIC, platform.playing);
+        assertFalse("A's re-check must not pause music after turn B",
+                audit.stream().anyMatch(l -> "audio.media_repaused".equals(l.get("event"))));
+    }
+
+    @Test
+    public void aCallThatStartsDuringTheTurnKeepsItsModeAtRestore() {
+        platform.mode = 0;
+        String id = plane.summon("qs_tile");
+        platform.mode = 2; // MODE_IN_CALL: the call took the mode
+        platform.calls.clear();
+        assertTrue(plane.end(id, "call started"));
+        assertEquals(2, platform.mode);
+        assertEquals(List.of("clearCommunicationDevice", "abandonFocus"), platform.calls);
+        assertEquals("restored, mode left to the call", last().get("reason"));
+        assertTrue(AudioPlane.isCallMode(1) && AudioPlane.isCallMode(2) && AudioPlane.isCallMode(4));
+        assertFalse(AudioPlane.isCallMode(0) || AudioPlane.isCallMode(3));
+    }
+
+    @Test
     public void aRepauseCheckDoesNotTouchALaterTurn() {
         platform.playing = MUSIC;
         String id = plane.summon("qs_tile");

@@ -60,6 +60,8 @@ open(sys.argv[1], "wb").write(struct.pack("<%dh" % len(s), *s))
 PY
 
 adb shell "run-as com.vos.actuator sh -c 'rm -rf files/debug'"
+# The session's echo backend is debug-only and opt-in (files/debug/chat_voice puts it first, #241).
+adb shell "run-as com.vos.session sh -c 'mkdir -p files/debug && echo debug:echo > files/debug/chat_voice'"
 if (( ! live )); then
     adb shell "run-as com.vos.actuator sh -c 'umask 077 && mkdir -p files/debug && cat > files/debug/mic-inject.pcm'" < "$fixture"
 fi
@@ -82,7 +84,14 @@ states="$(sed -n 's/.*"state":"\([A-Z_]*\)".*/\1/p' "$out/audit.jsonl" | tr '\n'
 echo "audit states: $states"
 check "audit CAPTURE CONVERSE RESTORE IDLE" "[[ '$states' == 'CAPTURE CONVERSE RESTORE IDLE ' ]]"
 idle_mode="$(grep '"state":"IDLE"' "$out/audit.jsonl" | sed -n 's/.*"mode":\([0-9]*\).*/\1/p' | tail -1)"
-check "mode restored ($idle_mode)" "[[ -n '$idle_mode' && '$idle_mode' == '0' ]]"
+mode_number() { # AudioManager mode name -> its value
+    case "$1" in
+        MODE_NORMAL) echo 0 ;; MODE_RINGTONE) echo 1 ;; MODE_IN_CALL) echo 2 ;; MODE_IN_COMMUNICATION) echo 3 ;;
+        MODE_CALL_SCREENING) echo 4 ;; MODE_CALL_REDIRECT) echo 5 ;; MODE_COMMUNICATION_REDIRECT) echo 6 ;; *) echo "?" ;;
+    esac
+}
+want_mode="$(mode_number "$mode_before")"
+check "audit: mode restored to the one before the turn ($idle_mode, want $want_mode)" "[[ -n '$idle_mode' && '$idle_mode' == '$want_mode' ]]"
 
 speaker_bytes="$(adb shell "run-as com.vos.actuator sh -c 'wc -c < files/debug/speaker-$turn_id.pcm'" | tr -d '\r ')"
 echo "speaker bytes: $speaker_bytes"
@@ -99,5 +108,6 @@ mode_after="$(actual_mode)"
 check "platform audio mode back to $mode_before (now $mode_after)" "[[ -n '$mode_after' && '$mode_after' == '$mode_before' ]]"
 check "the session did not report an error for the actuator's stop" "! grep -q 'ended by the session: backend error' '$out/logcat.txt'"
 adb shell "run-as com.vos.actuator sh -c 'rm -rf files/debug'"
+adb shell "run-as com.vos.session rm -f files/debug/chat_voice"
 
 if (( fails == 0 )); then echo "turn-pipes: PASS"; else echo "turn-pipes: FAIL ($fails)"; exit 1; fi

@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -24,8 +23,9 @@ final class KeyImport {
     }
 
     /**
-     * Returns the vendor ids imported. A file that cannot be imported is still destroyed, and the
-     * directory is removed afterwards (the shell creates it with its own, looser mode).
+     * Returns the vendor ids imported. A file that cannot be imported, for any reason (a Keystore
+     * failure included), is still destroyed and the loop goes on to the next, and the directory is
+     * removed afterwards (the shell creates it with its own, looser mode).
      */
     static List<String> run(File filesDir, KeyVault vault) {
         List<String> imported = new ArrayList<>();
@@ -35,25 +35,29 @@ final class KeyImport {
             return imported;
         }
         Arrays.sort(files);
-        for (File f : files) {
-            String vendor = f.getName();
-            try {
-                if (KeyVault.isVendorId(vendor) && f.isFile() && f.length() <= MAX_BYTES) {
-                    byte[] raw = Files.readAllBytes(f.toPath());
-                    try {
-                        vault.put(vendor, new String(raw, StandardCharsets.UTF_8));
-                        imported.add(vendor);
-                    } finally {
-                        Arrays.fill(raw, (byte) 0);
+        try {
+            for (File f : files) {
+                String vendor = f.getName();
+                try {
+                    if (KeyVault.isVendorId(vendor) && f.isFile() && f.length() <= MAX_BYTES) {
+                        byte[] raw = Files.readAllBytes(f.toPath());
+                        try {
+                            vault.put(vendor, new String(raw, StandardCharsets.UTF_8));
+                            imported.add(vendor);
+                        } finally {
+                            Arrays.fill(raw, (byte) 0);
+                        }
                     }
+                } catch (Exception e) {
+                    // Not imported (bad name or value, I/O, or a Keystore failure, which surfaces as a
+                    // RuntimeException); the file is destroyed either way and the next one is tried.
+                } finally {
+                    destroy(f);
                 }
-            } catch (IOException | GeneralSecurityException | IllegalArgumentException e) {
-                // Reported by the caller as "not imported"; the file is destroyed either way.
-            } finally {
-                destroy(f);
             }
+        } finally {
+            dir.delete();
         }
-        dir.delete();
         return imported;
     }
 

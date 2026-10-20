@@ -332,9 +332,13 @@ class GoogleArtifactRules(unittest.TestCase):
         # Not for the other app.
         self.assertTrue(pc.check_forbidden_in_apk("actuator", [probe], [], [], facts(**ACTUATOR_OK),
                                                   self.classes, exceptions.get("actuator", frozenset())))
-        # Not for resources or zip entries.
+        # Not for resources, zip entries or manifest names, each on its own.
         self.assertTrue(pc.check_forbidden_in_apk("session", [], [probe], [], facts(**SESSION_OK),
                                                   self.classes, allowed))
+        self.assertTrue(pc.check_forbidden_in_apk("session", [], [], [probe], facts(**SESSION_OK),
+                                                  self.classes, allowed))
+        manifest = facts("com.vos.session", components=[("service", probe + ".Svc", False, None, [], [])])
+        self.assertTrue(pc.check_forbidden_in_apk("session", [], [], [], manifest, self.classes, allowed))
 
     def test_exceptions_file_rejects_malformed_lines(self):
         with tempfile.TemporaryDirectory() as tmp:

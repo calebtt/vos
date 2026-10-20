@@ -23,7 +23,8 @@ final class XaiRealtime {
 
         void ownerTranscript(String text);
 
-        void audio(byte[] pcm);
+        /** Reply audio; {@code responseId} names the response it belongs to (barge-in drops by it). */
+        void audio(String responseId, byte[] pcm);
 
         void replyTranscript(String text);
 
@@ -122,7 +123,7 @@ final class XaiRealtime {
                 String delta = m.optString("delta", "");
                 if (!delta.isEmpty()) {
                     try {
-                        h.audio(Base64.getDecoder().decode(delta));
+                        h.audio(m.optString("response_id", ""), Base64.getDecoder().decode(delta));
                     } catch (IllegalArgumentException ignored) {
                         // not base64: dropped, never played as noise
                     }

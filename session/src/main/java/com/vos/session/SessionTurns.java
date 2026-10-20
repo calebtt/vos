@@ -45,11 +45,8 @@ final class SessionTurns {
             current.stop();
         }
         Backend b = backends.get();
-        if (b == null) {
-            closeQuietly(mic);
-            closeQuietly(speaker);
-            actuator.endTurn(turnId, "no voice backend");
-            return;
+        if (b == null) { // ends through the same path as any session end: endTurn first, then the pipes
+            b = (id, m, s, ready) -> "no voice backend";
         }
         current = new Active(turnId, mic, speaker, b);
         current.thread.start();

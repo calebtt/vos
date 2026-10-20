@@ -26,7 +26,7 @@ import okio.ByteString;
  *   <li>an application interceptor refuses any other host before a connection is made;</li>
  *   <li>the DNS resolver refuses to resolve any other host, so nothing below the interceptor can
  *       reach one either;</li>
- *   <li>redirects are not followed, and no proxy is used.</li>
+ *   <li>redirects are not followed, no proxy is used, and a failed connection is not retried.</li>
  * </ul>
  * Every HTTP request and WebSocket connection is written to the {@link RequestLog} with its host,
  * bytes and turn.
@@ -69,6 +69,9 @@ public final class Egress {
                 .proxy(Proxy.NO_PROXY)
                 .followRedirects(false)
                 .followSslRedirects(false)
+                // No silent replays: a call the server may already have read is not sent twice
+                // under one log line. A caller that wants another attempt makes a new call.
+                .retryOnConnectionFailure(false)
                 .dns(new Dns() {
                     @Override
                     public List<InetAddress> lookup(String hostname) throws UnknownHostException {
@@ -103,101 +106,123 @@ public final class Egress {
     }
 
     /**
-     * Opens a WebSocket through the allowlist. Bytes sent through the returned socket and received
-     * by {@code listener} are counted, and one log line is written when the connection ends.
+     * Opens a WebSocket through the allowlist. Every byte sent (through the returned socket or the one
+     * handed to {@code listener}'s callbacks, which are the same counting socket) and received is
+     * counted, and one log line is written when the connection ends.
      */
     public WebSocket openWebSocket(Request request, String turnId, WebSocketListener listener) {
         Request tagged = request.newBuilder().tag(WebSocketTag.class, new WebSocketTag())
                 .tag(TurnTag.class, new TurnTag(turnId)).build();
-        AtomicLong out = new AtomicLong();
+        CountingWebSocket counted = new CountingWebSocket();
         AtomicLong in = new AtomicLong();
         AtomicBoolean logged = new AtomicBoolean();
         int[] status = {-1};
         WebSocketListener counting = new WebSocketListener() {
             private void finish(String outcome) {
                 if (logged.compareAndSet(false, true)) {
-                    log.write(entry(tagged, out.get(), in.get(), status[0], outcome));
+                    log.write(entry(tagged, counted.out.get(), in.get(), status[0], outcome));
                 }
             }
 
             @Override
             public void onOpen(WebSocket ws, Response response) {
+                counted.attach(ws);
                 status[0] = response.code();
-                listener.onOpen(ws, response);
+                listener.onOpen(counted, response);
             }
 
             @Override
             public void onMessage(WebSocket ws, String text) {
+                counted.attach(ws);
                 in.addAndGet(ByteString.encodeUtf8(text).size());
-                listener.onMessage(ws, text);
+                listener.onMessage(counted, text);
             }
 
             @Override
             public void onMessage(WebSocket ws, ByteString bytes) {
+                counted.attach(ws);
                 in.addAndGet(bytes.size());
-                listener.onMessage(ws, bytes);
+                listener.onMessage(counted, bytes);
             }
 
             @Override
             public void onClosing(WebSocket ws, int code, String reason) {
-                listener.onClosing(ws, code, reason);
+                counted.attach(ws);
+                listener.onClosing(counted, code, reason);
             }
 
             @Override
             public void onClosed(WebSocket ws, int code, String reason) {
+                counted.attach(ws);
                 finish("closed:" + code);
-                listener.onClosed(ws, code, reason);
+                listener.onClosed(counted, code, reason);
             }
 
             @Override
             public void onFailure(WebSocket ws, Throwable t, Response response) {
+                counted.attach(ws);
                 if (response != null) {
                     status[0] = response.code();
                 }
                 finish(t instanceof RefusedException ? "refused" : "failed:" + t.getClass().getSimpleName());
-                listener.onFailure(ws, t, response);
+                listener.onFailure(counted, t, response);
             }
         };
-        WebSocket ws = client.newWebSocket(tagged, counting);
-        return new WebSocket() {
-            @Override
-            public Request request() {
-                return ws.request();
-            }
+        counted.attach(client.newWebSocket(tagged, counting));
+        return counted;
+    }
 
-            @Override
-            public long queueSize() {
-                return ws.queueSize();
-            }
+    /**
+     * The one socket the caller sees, from {@link #openWebSocket}'s return and in every callback, so
+     * every send is counted. The OkHttp socket is attached by whichever comes first: newWebSocket's
+     * return or a callback on the dispatcher thread.
+     */
+    private static final class CountingWebSocket implements WebSocket {
+        final AtomicLong out = new AtomicLong();
+        private final java.util.concurrent.atomic.AtomicReference<WebSocket> delegate =
+                new java.util.concurrent.atomic.AtomicReference<>();
 
-            @Override
-            public boolean send(String text) {
-                boolean ok = ws.send(text);
-                if (ok) {
-                    out.addAndGet(ByteString.encodeUtf8(text).size());
-                }
-                return ok;
-            }
+        void attach(WebSocket ws) {
+            delegate.compareAndSet(null, ws);
+        }
 
-            @Override
-            public boolean send(ByteString bytes) {
-                boolean ok = ws.send(bytes);
-                if (ok) {
-                    out.addAndGet(bytes.size());
-                }
-                return ok;
-            }
+        @Override
+        public Request request() {
+            return delegate.get().request();
+        }
 
-            @Override
-            public boolean close(int code, String reason) {
-                return ws.close(code, reason);
-            }
+        @Override
+        public long queueSize() {
+            return delegate.get().queueSize();
+        }
 
-            @Override
-            public void cancel() {
-                ws.cancel();
+        @Override
+        public boolean send(String text) {
+            boolean ok = delegate.get().send(text);
+            if (ok) {
+                out.addAndGet(ByteString.encodeUtf8(text).size());
             }
-        };
+            return ok;
+        }
+
+        @Override
+        public boolean send(ByteString bytes) {
+            boolean ok = delegate.get().send(bytes);
+            if (ok) {
+                out.addAndGet(bytes.size());
+            }
+            return ok;
+        }
+
+        @Override
+        public boolean close(int code, String reason) {
+            return delegate.get().close(code, reason);
+        }
+
+        @Override
+        public void cancel() {
+            delegate.get().cancel();
+        }
     }
 
     private static RequestLog.Entry entry(Request r, long out, long in, int status, String outcome) {
