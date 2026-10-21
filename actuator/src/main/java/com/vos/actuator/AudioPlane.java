@@ -96,6 +96,27 @@ public final class AudioPlane {
     }
 
     /**
+     * Whether a summon would be admitted now: IDLE and no call. No side effects; the caller opens the
+     * turn's mic before {@link #summon} takes the mode (#262: {@link MicFirst}), and summon() checks
+     * again. An audio server error counts as no.
+     */
+    public synchronized boolean admits() {
+        if (state != State.IDLE) {
+            return false;
+        }
+        try {
+            return !platform.callActive();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** A summon refused before the plane acted (the turn's mic did not open): one audit line, nothing to undo. */
+    public synchronized void refuseSummon(String source, String why) {
+        refuse("summon", why, source);
+    }
+
+    /**
      * A summon: mints a turn and moves IDLE → CAPTURE (pause media, take focus, communication mode
      * and device). Returns the new {@code turnId}, or null if refused (a turn is open, or a call).
      */

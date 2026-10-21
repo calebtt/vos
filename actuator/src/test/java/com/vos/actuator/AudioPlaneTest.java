@@ -172,6 +172,36 @@ public class AudioPlaneTest {
     }
 
     @Test
+    public void admitsOnlyWhenIdleWithNoCallAndHasNoSideEffects() {
+        assertTrue(plane.admits());
+        platform.call = true;
+        assertFalse(plane.admits());
+        platform.call = false;
+        platform.failMode = true; // the audio server is down: no
+        assertFalse(plane.admits());
+        platform.failMode = false;
+        assertTrue(platform.calls.isEmpty());
+        assertTrue(audit.isEmpty());
+        String id = plane.summon("qs_tile");
+        assertFalse(plane.admits()); // a turn is open
+        plane.end(id, "stop");
+        assertTrue(plane.admits());
+    }
+
+    @Test
+    public void aSummonRefusedBeforeThePlaneActedIsOneAuditLineAndChangesNothing() {
+        plane.refuseSummon("assist", "mic unavailable: IOException");
+        assertEquals(1, audit.size());
+        assertEquals("audio.refused", last().get("event"));
+        assertEquals("summon", last().get("op"));
+        assertEquals("assist", last().get("detail"));
+        assertEquals("mic unavailable: IOException", last().get("reason"));
+        assertEquals(AudioPlane.State.IDLE, plane.state());
+        assertTrue(platform.calls.isEmpty());
+        assertTrue(plane.admits());
+    }
+
+    @Test
     public void theAssistGestureSummonsLikeTheTile() {
         for (String source : List.of("assist", "assist_keyguard")) {
             audit.clear();
