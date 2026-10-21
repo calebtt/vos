@@ -35,7 +35,8 @@ def steps_table(trials):
     keyed = {k: rows for k, rows in trials.items() if any(n.endswith("_ms") and n != "latency_ms" for t in rows for n in t)}
     if not keyed:
         return
-    print("steps (p50/p95 ms from the summon; max_gap = longest wait between reads, zero_run = longest silence after the first sound)")
+    print("steps (p50/p95 ms from the summon; durations instead: max_gap = longest wait between reads, "
+          "zero_run = longest silence after the first sound, short = time passed minus audio delivered between the first and last read)")
     for key in sorted(keyed):
         rows = [t for t in keyed[key] if t.get("ok") == "true"]
         names = []

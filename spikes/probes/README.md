@@ -124,7 +124,9 @@ Each trial line adds the time of every step, in ms from the summon: `focus_ms`, 
 `aec_ms`, `ns_ms`, `start_ms` and `first_ms`. It also logs:
 - `max_gap_ms`, the longest wait between two 10 ms reads;
 - `zero_run_ms`, the longest all-zero stretch after the first sound;
-- `short_ms`, how much less audio arrived than the time that passed between the first and last read. One uncounted 10 ms read is the floor; a reroute that drops audio raises it;
+- `short_ms`, the time that passed between the first and last read minus the audio delivered in that span. Read timing
+  leaves a small constant (about 10 ms on Phone B, with or without a mode switch); a reroute that drops audio raises it by
+  about the length of the dropout;
 - `routed`, the `AudioDeviceInfo` type the capture ended on.
 
 The two gap fields show a dropout when the mode changes under a running capture. `TrialActivity` (guarded by `DUMP`, which
