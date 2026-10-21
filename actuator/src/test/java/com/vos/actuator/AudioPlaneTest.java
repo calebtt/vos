@@ -172,6 +172,22 @@ public class AudioPlaneTest {
     }
 
     @Test
+    public void theAssistGestureSummonsLikeTheTile() {
+        for (String source : List.of("assist", "assist_keyguard")) {
+            audit.clear();
+            platform.calls.clear();
+            String id = plane.summon(source);
+            assertNotNull(source, id);
+            assertEquals(AudioPlane.State.CAPTURE, plane.state());
+            assertEquals(source, audit.get(0).get("reason"));
+            assertEquals(List.of("requestFocus", "setMode 3", "setCommunicationDevice BUILTIN_SPEAKER"), platform.calls);
+            assertTrue(plane.ready(id));
+            assertTrue(plane.end(id, "owner stop: " + source));
+            assertEquals(AudioPlane.State.IDLE, plane.state());
+        }
+    }
+
+    @Test
     public void restoreUndoesEverythingTheTurnChanged() {
         platform.mode = 7; // whatever the phone was in
         platform.headset = true;
