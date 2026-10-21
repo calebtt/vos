@@ -57,6 +57,7 @@ holder() { adb shell cmd role get-role-holders android.app.role.ASSISTANT | tr -
 notice() { adb shell dumpsys notification --noredact 2>/dev/null | tr -d '\r' | grep -c "VOS is not your assistant" || true; }
 last_role_audit() { adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r' | grep '"role.assistant"' | tail -1; }
 turn_open() { adb shell dumpsys activity services com.vos.actuator | grep -c "TurnService" || true; }
+session_audit() { adb shell "run-as com.vos.session cat files/audit/audit.jsonl" 2>/dev/null | tr -d '\r' || true; }  # append-only
 # Waits up to 5 s for the notice to reach the wanted count (1 shown, 0 gone).
 wait_notice() { for _ in $(seq 25); do [ "$(notice)" -eq "$1" ] && return 0; sleep 0.2; done; return 1; }
 
@@ -73,6 +74,7 @@ if wait_notice 0; then pass "no lost-role notice while VOS holds the role"; else
 locked="$(adb shell dumpsys window | tr -d '\r' | grep -oE 'isKeyguardShowing=[a-z]+' | tail -1 | cut -d= -f2)"  # grep reads it all: -m1 would trip pipefail
 echo "== $trials assist summons, keyguard showing: $locked"
 adb logcat -c
+audit_before="$(session_audit | wc -l)"  # the pick check reads only the lines this run appends
 for _ in $(seq "$trials"); do
     adb shell input keyevent KEYCODE_WAKEUP
     adb shell input keyevent KEYCODE_ASSIST
@@ -84,8 +86,14 @@ adb logcat -d -s VOS_TURN | tr -d '\r' | grep "summon source=assist" > "$out/sum
 n="$(wc -l < "$out/summons.log")"
 if [ "$n" -eq "$trials" ]; then pass "$n/$trials assist summons opened a turn and heard the mic"; else fail "$n/$trials assist summons heard the mic"; fi
 if [ "$(turn_open)" -eq 0 ]; then pass "no turn left open (each second press stopped it)"; else fail "a turn is still open"; fi
-picks="$(adb shell "run-as com.vos.session cat files/audit/audit.jsonl" | tr -d '\r' | grep '"event":"model.pick"' | tail -n "$trials" || true)"
-if [ "$(grep -c '"model":"xai:' <<<"$picks")" -eq "$trials" ]; then pass "every summon's turn ran on the xAI backend"; else fail "not every turn ran on xAI: $(grep -o '"model":"[^"]*"' <<<"$picks" | sort | uniq -c | tr '\n' ' ')"; fi
+picks="$(session_audit | tail -n +"$((audit_before + 1))" | grep '"event":"model.pick"' || true)"
+npicks="$(grep -c . <<<"$picks" || true)"
+nxai="$(grep -c '"model":"xai:' <<<"$picks" || true)"
+if [ "$npicks" -eq "$trials" ] && [ "$nxai" -eq "$trials" ]; then
+    pass "each of the $trials turns picked the xAI backend"
+else
+    fail "$npicks new backend picks for $trials turns, $nxai on xAI: $(grep -o '"model":"[^"]*"' <<<"$picks" | sort | uniq -c | tr '\n' ' ')"
+fi
 python3 -I - "$out/summons.log" "$locked" <<'EOF'
 import re, sys
 rows = [dict(re.findall(r"(\w+)=(-?\d+)", l)) for l in open(sys.argv[1])]
