@@ -33,6 +33,10 @@ public final class TurnService extends Service {
     static final String EXTRA_T_EVENT = "t_event";
     /** Debug builds only (ignored otherwise): mic from files/debug/mic-inject.pcm, speaker to a file. */
     static final String EXTRA_DEBUG_MIC_FILE = "debug_mic_file";
+    /** Debug builds only: the live mic, with mic-inject.pcm sent in place of its first frames (#249). */
+    static final String EXTRA_DEBUG_MIC_FILE_THEN_LIVE = "debug_mic_file_then_live";
+    /** Debug builds only: record from MIC with no AEC or NS (the control for #249's echo test). */
+    static final String EXTRA_DEBUG_RAW_MIC = "debug_raw_mic";
     static final String EXTRA_DEBUG_SPEAKER_FILE = "debug_speaker_file";
 
     /** No turn keeps the mic longer than this, whatever the session does. */
@@ -149,7 +153,7 @@ public final class TurnService extends Service {
         String source = intent == null ? null : intent.getStringExtra(EXTRA_SOURCE);
         if (ACTION_SUMMON.equals(action)) {
             summon(source == null ? "unknown" : source, intent.getLongExtra(EXTRA_T_EVENT, -1),
-                    BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEBUG_MIC_FILE, false),
+                    micOf(intent), BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEBUG_RAW_MIC, false),
                     BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEBUG_SPEAKER_FILE, false));
         } else if (ACTION_STOP.equals(action)) {
             if (turn != null) {
@@ -161,7 +165,18 @@ public final class TurnService extends Service {
         return START_NOT_STICKY;
     }
 
-    private void summon(String source, long tEvent, boolean micFromFile, boolean speakerToFile) {
+    /** The turn's mic: always LIVE in a release build. */
+    private static VoiceTurn.Mic micOf(Intent intent) {
+        if (!BuildConfig.DEBUG) {
+            return VoiceTurn.Mic.LIVE;
+        }
+        if (intent.getBooleanExtra(EXTRA_DEBUG_MIC_FILE, false)) {
+            return VoiceTurn.Mic.FILE;
+        }
+        return intent.getBooleanExtra(EXTRA_DEBUG_MIC_FILE_THEN_LIVE, false) ? VoiceTurn.Mic.FILE_THEN_LIVE : VoiceTurn.Mic.LIVE;
+    }
+
+    private void summon(String source, long tEvent, VoiceTurn.Mic mic, boolean rawMic, boolean speakerToFile) {
         tStartCommand = android.os.SystemClock.uptimeMillis();
         try {
             startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
@@ -182,7 +197,7 @@ public final class TurnService extends Service {
             stopTurnService();
             return;
         }
-        turn = new VoiceTurn(this, id, source, tEvent, micFromFile, speakerToFile, reason -> MAIN.post(() -> finishIf(id, reason)));
+        turn = new VoiceTurn(this, id, source, tEvent, mic, rawMic, speakerToFile, reason -> MAIN.post(() -> finishIf(id, reason)));
         // A call that starts during the turn ends it (§3.3: "call starts" goes to RESTORE).
         ((ActuatorApp) getApplication()).audioPlatform().watchCalls(() -> MAIN.post(() -> finishIf(id, "call started")));
         try {
