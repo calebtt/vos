@@ -261,11 +261,34 @@ public final class TurnService extends Service {
         stopSelf();
     }
 
-    /** The indicator changed (main thread): the turn notification's title carries it, for when no overlay can be drawn. */
+    /** Android drops a package's notification updates beyond about 5 a second; the title updates at most this often. */
+    private static final long TITLE_MIN_GAP_MS = 250;
+    // Main thread only (IndicatorView posts here).
+    private static Indicator.State pendingTitle = Indicator.State.IDLE;
+    private static boolean titleScheduled;
+    private static long lastTitleAt = -TITLE_MIN_GAP_MS;
+
+    /**
+     * The indicator changed (main thread): the turn notification's title carries it, for when no
+     * overlay can be drawn. Changes are coalesced so none is dropped by the rate limit: the latest
+     * state is always the one posted.
+     */
     static void indicatorChanged(Indicator.State state) {
+        pendingTitle = state;
+        if (titleScheduled) {
+            return;
+        }
+        titleScheduled = true;
+        long wait = Math.max(0, lastTitleAt + TITLE_MIN_GAP_MS - android.os.SystemClock.uptimeMillis());
+        MAIN.postDelayed(TurnService::postTitle, wait);
+    }
+
+    private static void postTitle() {
+        titleScheduled = false;
+        lastTitleAt = android.os.SystemClock.uptimeMillis();
         TurnService s = live;
         if (s != null && s.turn != null && inForeground) {
-            s.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, s.notification(state));
+            s.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, s.notification(pendingTitle));
         }
     }
 

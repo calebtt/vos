@@ -439,6 +439,8 @@ public class XaiRealtimeBackendTest {
         mic.close();
         assertArrayEquals("only the answer to the new speech plays", answer, speaker.toByteArray());
         assertEquals(List.of("output c-a", "response.create", "response.cancel"), vendorSaw);
+        // The dropped follow-up (r2) never shows as generating: nothing was produced for the owner.
+        assertEquals(List.of("started t-19 r3", "ended t-19 r3"), modelCalls);
     }
 
     @Test
@@ -804,6 +806,44 @@ public class XaiRealtimeBackendTest {
         assertArrayEquals("only the answer after the barge-in plays", r2, speaker.toByteArray());
         // Each response is one model call for the indicator, the cancelled one included.
         assertEquals(List.of("started t-18 r1", "ended t-18 r1", "started t-18 r2", "ended t-18 r2"), modelCalls);
+    }
+
+    @Test
+    public void modelCallsPairUpWhenTheVendorSendsNoIds() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean sent;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                if (text.contains("\"session.update\"")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (text.contains("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !sent) {
+                    sent = true;
+                    ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
+                    ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
+                    // No ids at all, then an id on created but none on done.
+                    ws.send("{\"type\":\"response.created\"}");
+                    ws.send("{\"type\":\"response.done\"}");
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r2\",\"status\":\"in_progress\"}}");
+                    ws.send("{\"type\":\"response.done\"}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        assertEquals("idle", backend(500).run("t-30", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(List.of("started t-30 anon-1", "ended t-30 anon-1", "started t-30 r2", "ended t-30 r2"), modelCalls);
     }
 
     @Test

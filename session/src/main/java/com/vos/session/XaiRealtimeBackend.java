@@ -31,7 +31,10 @@ import org.json.JSONArray;
  *       response's queued audio and any of its deltas that arrive afterwards, so at most about one
  *       lead of it is still in the pipe;</li>
  *   <li>each vendor response is a model call for the actuator's generating indicator ({@link ModelCalls}):
- *       started at {@code response.created}, ended at {@code response.done}, whatever its status;</li>
+ *       started at {@code response.created}, ended at {@code response.done}, whatever its status. A
+ *       response without an id gets one here, and a done without an id ends the oldest open call, so
+ *       every reported start gets its end. A follow-up dropped because the owner is speaking is not
+ *       reported: nothing is being generated for the owner;</li>
  *   <li>a tool call goes to the actuator ({@link ToolCaller}) off the WebSocket thread, and its result
  *       (VERIFIED, UNVERIFIED or FAILED from the actuator's oracle) goes back to the model. The calls
  *       of one response form a batch: the model is asked to answer once, after all their results. If
@@ -146,6 +149,9 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         volatile String currentResponse = "";
         /** Responses the owner talked over; their late deltas and calls are dropped. */
         final java.util.Set<String> cancelledResponses = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        /** Model calls reported to the indicator and not yet ended, oldest first (guarded by itself). */
+        private final java.util.LinkedHashSet<String> openCalls = new java.util.LinkedHashSet<>();
+        private int anonymousCalls;
         private String endReason;
         private boolean ended;
         private boolean actuatorEnded;
@@ -397,7 +403,13 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void responseCreated(String responseId) {
-            calls.started(turnId, responseId); // the model is producing output (the indicator spins)
+            if (!speaking) { // the model is producing output for the owner: the indicator spins
+                String callId = responseId.isEmpty() ? "anon-" + (++anonymousCalls) : responseId;
+                synchronized (openCalls) {
+                    openCalls.add(callId);
+                }
+                calls.started(turnId, callId);
+            }
             if (responseId.isEmpty()) {
                 return;
             }
@@ -450,6 +462,22 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             replyQueue.add(new Chunk(responseId, pcm));
         }
 
+        /** Ends the reported call for this done: its id, or the oldest open call when the done has no id. */
+        private void endCall(String responseId) {
+            String callId = null;
+            synchronized (openCalls) {
+                if (!responseId.isEmpty() && openCalls.remove(responseId)) {
+                    callId = responseId;
+                } else if (responseId.isEmpty() && !openCalls.isEmpty()) {
+                    callId = openCalls.iterator().next();
+                    openCalls.remove(callId);
+                }
+            }
+            if (callId != null) {
+                calls.ended(turnId, callId);
+            }
+        }
+
         @Override
         public void replyTranscript(String text) {
             transcripts.write(turnId, "vos", text);
@@ -458,7 +486,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void responseDone(String responseId, String status) {
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
-            calls.ended(turnId, responseId); // completed, cancelled or failed: it no longer produces output
+            endCall(responseId); // completed, cancelled or failed: it no longer produces output
             boolean hadCall = responseHadCall;
             responseHadCall = false;
             if ("cancelled".equals(status) || cancelled(responseId)) {
