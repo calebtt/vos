@@ -6,7 +6,9 @@ in the root `settings.gradle.kts`, so root CI and `ci/policy_check.py` never bui
 
 Ground rules: the probes make no sound (no playback, TTS or tones). They have no INTERNET, no telephony and no alarms. Mic audio
 is read and then thrown away; it is never stored. The only permissions are `RECORD_AUDIO`, `FOREGROUND_SERVICE` and
-`FOREGROUND_SERVICE_MICROPHONE`, plus the S-08 signature permission between the two S-08 apps.
+`FOREGROUND_SERVICE_MICROPHONE`, plus the S-08 signature permission between the two S-08 apps and, for the S-07 audio-path
+variants, `MODIFY_AUDIO_SETTINGS`. Those variants take audio focus, `MODE_IN_COMMUNICATION` and a communication device for
+about 1.5 s, as VOS does, and give all three back after each trial.
 
 Run every command from the repo root. Each block restores the phone at the end. `ANDROID_HOME` must be set, or copy the root
 `local.properties` into `spikes/probes/`.
@@ -102,6 +104,38 @@ adb uninstall com.vos.spike.s07
 adb shell cmd role get-role-holders android.app.role.ASSISTANT          # must match the saved file's first line
 adb shell settings get secure voice_interaction_service
 ```
+
+### S-07 follow-up: audio-path variants (#261)
+
+VOS's own summon takes about 0.7 s from the summon to the first non-zero mic buffer (#17). Its AudioPlane takes focus,
+`MODE_IN_COMMUNICATION` and the speaker as communication device, and then VoiceTurn opens `VOICE_COMMUNICATION` with AEC
+and NS. The probe's `MicFgs` takes a `variant` extra that changes one thing at a time:
+
+| Variant | Audio path |
+|---|---|
+| `rec` | `VOICE_RECOGNITION`, normal mode, no effects (the original S-07 capture) |
+| `vc` | `VOICE_COMMUNICATION`, normal mode, no effects |
+| `vc_fx` | `VOICE_COMMUNICATION` with AEC and NS, normal mode |
+| `mode_vc_fx` | focus, mode and device first, then `VOICE_COMMUNICATION` with AEC and NS (VOS today) |
+| `vc_fx_then_mode` | the same capture started first, then focus, mode and device on another thread while it reads |
+| `parallel` | focus, mode and device on another thread while the capture opens |
+
+Each trial line adds the time of every step, in ms from the summon: `focus_ms`, `mode_ms`, `device_ms`, `build_ms`,
+`aec_ms`, `ns_ms`, `start_ms` and `first_ms`. It also logs:
+- `max_gap_ms`, the longest wait between two 10 ms reads;
+- `zero_run_ms`, the longest all-zero stretch after the first sound;
+- `routed`, the `AudioDeviceInfo` type the capture ended on.
+
+The two gap fields show a dropout when the mode changes under a running capture. `TrialActivity` (guarded by `DUMP`, which
+only the shell holds) is the foreground moment, so no Quick Settings tile is added and the assistant role is not touched.
+
+```sh
+spikes/probes/s07-variants.sh --trials 20                    # all six variants, round-robin, 3 s apart; 08:00-22:00
+spikes/probes/s07-variants.sh --no-build --trials 5 vc_fx parallel
+```
+
+The script installs the probe, runs the trials, writes `trials.log` and `summary.txt` (`summarize.py` adds a per-variant
+step table), uninstalls the probe and checks that the audio mode is `MODE_NORMAL` and the assistant holder is unchanged.
 
 ## S-08: PCM pipe, actuator to session
 
