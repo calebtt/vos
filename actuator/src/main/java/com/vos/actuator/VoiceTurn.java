@@ -62,7 +62,6 @@ final class VoiceTurn {
     private final boolean rawMic;
     private final Consumer<String> ender;
     private final long openedAt = SystemClock.elapsedRealtime();
-    private final List<AudioEffect> effects = new ArrayList<>();
 
     private ParcelFileDescriptor micRead;
     private ParcelFileDescriptor micWrite;
@@ -70,9 +69,9 @@ final class VoiceTurn {
     private ParcelFileDescriptor speakerWrite;
     private final String source;
     private final long tEvent; // uptimeMillis when VOS got the summon (tile click, assist onShow), or -1
-    private volatile long tRecording = -1; // uptimeMillis when startRecording returned
     private volatile boolean running = true;
-    private AudioRecord record;
+    /** The live capture: opened before the AudioPlane took the mode (#262), or by start(); released by close(). */
+    private Capture live;
     private Thread capture;
     private Thread playback;
     private PeerLink link;
@@ -83,14 +82,16 @@ final class VoiceTurn {
     /** Reply bytes handed to the speaker so far (debug: the mic level line's played_bytes, #249). */
     private final AtomicLong played = new AtomicLong();
 
+    /** {@code opened}: the live capture MicFirst opened for this turn, or null (the turn opens its own). */
     VoiceTurn(Context context, String turnId, String source, long tEvent, Mic mic, boolean rawMic, boolean speakerToFile,
-            Consumer<String> ender) {
+            Capture opened, Consumer<String> ender) {
         this.context = context;
         this.turnId = turnId;
         this.source = source;
         this.tEvent = tEvent;
         this.mic = mic;
         this.rawMic = rawMic;
+        this.live = opened; // held from here, so close() releases it even if start() fails
         this.speakerToFile = speakerToFile;
         this.ender = ender;
     }
@@ -109,7 +110,10 @@ final class VoiceTurn {
             capture = new Thread(() -> fileMic(pcm, micOut), "vos-mic-file");
         } else {
             byte[] prefix = this.mic == Mic.FILE_THEN_LIVE ? injected() : null;
-            record = openRecord();
+            if (live == null) { // not opened before the mode (MicFirst fell back to the old order)
+                live = Capture.open(rawMic);
+            }
+            Log.i(TAG, "capture turnId=" + turnId + " " + live.describe());
             capture = new Thread(() -> liveMic(micOut, prefix), "vos-mic");
         }
         capture.start();
@@ -141,17 +145,10 @@ final class VoiceTurn {
         }
         running = false;
         long t0 = SystemClock.elapsedRealtime();
-        if (record != null) {
-            try {
-                record.stop();
-            } catch (IllegalStateException ignored) {
-                // never started
-            }
+        if (live != null) {
+            live.stop(); // unblocks the capture thread's read
             join(capture);
-            for (AudioEffect e : effects) {
-                e.release();
-            }
-            record.release();
+            live.release();
             Log.i(TAG, "AudioRecord.release turnId=" + turnId + " ms=" + (SystemClock.elapsedRealtime() - t0));
         } else {
             join(capture);
@@ -203,47 +200,104 @@ final class VoiceTurn {
         speakerWrite = null;
     }
 
-    private AudioRecord openRecord() throws IOException {
-        int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        AudioRecord r;
-        try {
-            r = new AudioRecord.Builder()
-                    .setAudioSource(rawMic ? MediaRecorder.AudioSource.MIC : MediaRecorder.AudioSource.VOICE_COMMUNICATION)
-                    .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE)
-                            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-                    .setBufferSizeInBytes(Math.max(min, FRAME * 10))
-                    .build();
-        } catch (SecurityException | UnsupportedOperationException e) {
-            throw new IOException("mic unavailable: " + e.getClass().getSimpleName(), e);
-        }
-        if (r.getState() != AudioRecord.STATE_INITIALIZED) {
-            r.release();
-            throw new IOException("mic did not initialize");
-        }
-        int session = r.getAudioSessionId();
-        if (AcousticEchoCanceler.isAvailable() && !rawMic) {
-            enable(AcousticEchoCanceler.create(session));
-        }
-        if (NoiseSuppressor.isAvailable() && !rawMic) {
-            enable(NoiseSuppressor.create(session));
-        }
-        r.startRecording();
-        tRecording = SystemClock.uptimeMillis();
-        AudioDeviceInfo in = r.getRoutedDevice();
-        Log.i(TAG, "capture turnId=" + turnId + " source=" + (rawMic ? "MIC" : "VOICE_COMMUNICATION") + " aec=" + enabled(AcousticEchoCanceler.class)
-                + " ns=" + enabled(NoiseSuppressor.class) + " inDev=" + (in == null ? "none" : in.getType()));
-        return r;
-    }
+    /**
+     * A turn's live capture: {@code VOICE_COMMUNICATION} with AEC and NS (debug {@code raw}: {@code MIC}
+     * without them), built and started. MicFirst opens it before the AudioPlane takes the call-style
+     * mode and device (#262): opened after them it starts about 400 ms later on Phone B, opened first
+     * it loses no audio when the mode changes under it (S-07).
+     */
+    static final class Capture {
+        final AudioRecord record;
+        final long tRecording; // uptimeMillis when startRecording returned
+        private final boolean raw;
+        private final List<AudioEffect> effects;
 
-    /** Whether an effect of this class was created and enabled for the capture. */
-    private boolean enabled(Class<? extends AudioEffect> type) {
-        for (AudioEffect e : effects) {
-            if (type.isInstance(e) && e.getEnabled()) {
-                return true;
+        private Capture(AudioRecord record, boolean raw, List<AudioEffect> effects, long tRecording) {
+            this.record = record;
+            this.raw = raw;
+            this.effects = effects;
+            this.tRecording = tRecording;
+        }
+
+        /** Builds and starts the capture; throws (with nothing left open) if the mic cannot. */
+        static Capture open(boolean raw) throws IOException {
+            int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+            AudioRecord r;
+            try {
+                r = new AudioRecord.Builder()
+                        .setAudioSource(raw ? MediaRecorder.AudioSource.MIC : MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+                        .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE)
+                                .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+                        .setBufferSizeInBytes(Math.max(min, FRAME * 10))
+                        .build();
+            } catch (SecurityException | UnsupportedOperationException e) {
+                throw new IOException("mic unavailable: " + e.getClass().getSimpleName(), e);
+            }
+            if (r.getState() != AudioRecord.STATE_INITIALIZED) {
+                r.release();
+                throw new IOException("mic did not initialize");
+            }
+            List<AudioEffect> effects = new ArrayList<>();
+            try {
+                int session = r.getAudioSessionId();
+                if (AcousticEchoCanceler.isAvailable() && !raw) {
+                    enable(AcousticEchoCanceler.create(session), effects);
+                }
+                if (NoiseSuppressor.isAvailable() && !raw) {
+                    enable(NoiseSuppressor.create(session), effects);
+                }
+                r.startRecording();
+            } catch (RuntimeException e) { // e.g. startRecording's IllegalStateException
+                for (AudioEffect fx : effects) {
+                    fx.release();
+                }
+                r.release();
+                throw new IOException("mic did not start: " + e.getClass().getSimpleName(), e);
+            }
+            return new Capture(r, raw, effects, SystemClock.uptimeMillis());
+        }
+
+        private static void enable(AudioEffect e, List<AudioEffect> effects) {
+            if (e != null) {
+                e.setEnabled(true);
+                effects.add(e);
             }
         }
-        return false;
+
+        /** Whether an effect of this class was created and enabled for the capture. */
+        private boolean enabled(Class<? extends AudioEffect> type) {
+            for (AudioEffect e : effects) {
+                if (type.isInstance(e) && e.getEnabled()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /** For the capture log line: the source, AEC and NS, and the input device. */
+        String describe() {
+            AudioDeviceInfo in = record.getRoutedDevice();
+            return "source=" + (raw ? "MIC" : "VOICE_COMMUNICATION") + " aec=" + enabled(AcousticEchoCanceler.class)
+                    + " ns=" + enabled(NoiseSuppressor.class) + " inDev=" + (in == null ? "none" : in.getType());
+        }
+
+        /** Stops recording, so a blocked read returns. */
+        void stop() {
+            try {
+                record.stop();
+            } catch (IllegalStateException ignored) {
+                // already stopped
+            }
+        }
+
+        /** Releases the record and its effects (after stop()). */
+        void release() {
+            for (AudioEffect e : effects) {
+                e.release();
+            }
+            record.release();
+        }
     }
 
     /** Debug: the pushed PCM ({@code files/debug/mic-inject.pcm}). */
@@ -251,12 +305,6 @@ final class VoiceTurn {
         return Files.readAllBytes(new File(context.getFilesDir(), "debug/mic-inject.pcm").toPath());
     }
 
-    private void enable(AudioEffect e) {
-        if (e != null) {
-            e.setEnabled(true);
-            effects.add(e);
-        }
-    }
 
     /** Milliseconds from VOS getting the summon to {@code t}, or -1 if either is unknown. */
     private long since(long t) {
@@ -283,7 +331,7 @@ final class VoiceTurn {
         long lastPlayed = 0;
         try {
             while (running) {
-                int n = record.read(buf, 0, FRAME, AudioRecord.READ_BLOCKING);
+                int n = live.record.read(buf, 0, FRAME, AudioRecord.READ_BLOCKING);
                 if (n > 0) {
                     if (!heard && nonZero(buf, n)) { // S-07: VOS getting the summon to the first non-zero mic buffer
                         heard = true;
@@ -291,7 +339,7 @@ final class VoiceTurn {
                         Log.i(TAG, "summon source=" + source + " turnId=" + turnId + " first_nonzero_ms="
                                 + (tEvent < 0 ? -1 : now - tEvent) + " to_start_command_ms=" + since(TurnService.tStartCommand)
                                 + " to_foreground_ms=" + since(TurnService.tForeground) + " to_plane_ms=" + since(TurnService.tPlane)
-                                + " to_recording_ms=" + since(tRecording));
+                                + " to_recording_ms=" + since(live.tRecording));
                     }
                     if (BuildConfig.DEBUG) { // #249: the live mic's level each second, and the reply audio played meanwhile
                         for (int k = 0; k + 1 < n; k += 2) {

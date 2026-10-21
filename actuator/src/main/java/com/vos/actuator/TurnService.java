@@ -191,13 +191,28 @@ public final class TurnService extends Service {
             Log.i(VoiceTurn.TAG, "summon ignored: a turn is open");
             return;
         }
-        String id = ((ActuatorApp) getApplication()).audioPlane().summon(source);
+        // #262: the turn's mic opens before the AudioPlane takes the call-style mode (MicFirst).
+        MicFirst.Opened<VoiceTurn.Capture> opened = MicFirst.summon(((ActuatorApp) getApplication()).audioPlane(),
+                new MicFirst.Mic<VoiceTurn.Capture>() {
+                    @Override
+                    public VoiceTurn.Capture open() throws IOException {
+                        return mic == VoiceTurn.Mic.FILE ? null : VoiceTurn.Capture.open(rawMic);
+                    }
+
+                    @Override
+                    public void close(VoiceTurn.Capture c) {
+                        c.stop();
+                        c.release();
+                    }
+                }, source);
         tPlane = android.os.SystemClock.uptimeMillis();
-        if (id == null) {
+        if (opened == null) {
             stopTurnService();
             return;
         }
-        turn = new VoiceTurn(this, id, source, tEvent, mic, rawMic, speakerToFile, reason -> MAIN.post(() -> finishIf(id, reason)));
+        String id = opened.turnId;
+        turn = new VoiceTurn(this, id, source, tEvent, mic, rawMic, speakerToFile, opened.capture,
+                reason -> MAIN.post(() -> finishIf(id, reason)));
         // A call that starts during the turn ends it (§3.3: "call starts" goes to RESTORE).
         ((ActuatorApp) getApplication()).audioPlatform().watchCalls(() -> MAIN.post(() -> finishIf(id, "call started")));
         try {

@@ -19,7 +19,7 @@ import java.util.UUID;
  * abandons focus (its transient-loss resume, ~100 ms later) is paused again: RESTORE re-checks at
  * {@link #RECHECK_MS} (the July bug, where an owner's "pause" was undone at turn end).
  */
-public final class AudioPlane {
+public final class AudioPlane implements MicFirst.Plane {
     public enum State { IDLE, CAPTURE, CONVERSE, NOTICE, ANNOUNCE, APP_ASSIST, HOLD, RESTORE }
 
     /** AudioManager / MediaSession operations, behind a seam for the JVM tests. */
