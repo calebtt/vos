@@ -51,6 +51,18 @@ public final class ActuatorService extends Service {
             guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
             return TurnService.callTool(ActuatorService.this, turnId, clip(name), argsJson);
         }
+
+        @Override
+        public void modelCallStarted(String turnId, String callId) {
+            guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
+            ((ActuatorApp) getApplication()).indicator().callStarted(clip(turnId), clip(callId));
+        }
+
+        @Override
+        public void modelCallEnded(String turnId, String callId) {
+            guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
+            ((ActuatorApp) getApplication()).indicator().callEnded(clip(turnId), clip(callId));
+        }
     };
 
     /** A reason from the session is data for the audit line: printable and short. */

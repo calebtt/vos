@@ -16,6 +16,7 @@ public final class ActuatorApp extends Application {
     private JsonlAudit audit;
     private AndroidAudioPlatform audioPlatform;
     private RoleWatch roleWatch;
+    private final Indicator indicator = new Indicator(new IndicatorView());
 
     @Override
     public void onCreate() {
@@ -29,6 +30,11 @@ public final class ActuatorApp extends Application {
         fastTools = new FastTools(new AndroidFastToolsPlatform(this));
         roleWatch = new RoleWatch(new AndroidRolePlatform(this), line -> audit.record(line));
         roleWatch.check("actuator start");
+    }
+
+    /** The generating / acting indicator (Shell Contract row 13). */
+    Indicator indicator() {
+        return indicator;
     }
 
     /** Whether VOS holds the assistant role, and the notice when it does not (decision 45). */

@@ -17,7 +17,7 @@ import java.util.function.Consumer;
  * The session's link to ActuatorService, bound while turns need it (§5.3: protocol handshake and
  * death watch through PeerLink). Calls made before the link is up are queued and sent in order.
  */
-final class ActuatorLink {
+final class ActuatorLink implements ModelCalls {
     private final PeerLink link;
     private final Queue<Consumer<IVosActuator>> pending = new ArrayDeque<>();
     private IVosActuator actuator;
@@ -53,6 +53,31 @@ final class ActuatorLink {
                 a.endTurn(turnId, reason);
             } catch (RemoteException e) {
                 Log.w(SessionTurns.TAG, "endTurn not delivered: " + e.getClass().getSimpleName());
+            }
+        });
+    }
+
+    /** A model call for this turn started: the actuator's generating indicator (Shell Contract row 13). */
+    @Override
+    public void started(String turnId, String callId) {
+        Log.i(SessionTurns.TAG, "model call started turnId=" + turnId + " t_up=" + android.os.SystemClock.uptimeMillis());
+        send(a -> {
+            try {
+                a.modelCallStarted(turnId, callId);
+            } catch (RemoteException e) {
+                Log.w(SessionTurns.TAG, "modelCallStarted not delivered: " + e.getClass().getSimpleName());
+            }
+        });
+    }
+
+    @Override
+    public void ended(String turnId, String callId) {
+        Log.i(SessionTurns.TAG, "model call ended turnId=" + turnId + " t_up=" + android.os.SystemClock.uptimeMillis());
+        send(a -> {
+            try {
+                a.modelCallEnded(turnId, callId);
+            } catch (RemoteException e) {
+                Log.w(SessionTurns.TAG, "modelCallEnded not delivered: " + e.getClass().getSimpleName());
             }
         });
     }

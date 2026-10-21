@@ -73,6 +73,8 @@ public class XaiRealtimeBackendTest {
     }
 
     private final List<String> toolCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** The model-call events the backend reported for the generating indicator. */
+    private final List<String> modelCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile long toolDelayMs;
 
     private XaiRealtimeBackend backend(long idleMs) throws Exception {
@@ -95,6 +97,16 @@ public class XaiRealtimeBackendTest {
                         // test
                     }
                     return "{\"status\":\"VERIFIED\",\"percent\":30}";
+                }, new ModelCalls() {
+                    @Override
+                    public void started(String turnId, String callId) {
+                        modelCalls.add("started " + turnId + " " + callId);
+                    }
+
+                    @Override
+                    public void ended(String turnId, String callId) {
+                        modelCalls.add("ended " + turnId + " " + callId);
+                    }
                 }, t);
     }
 
@@ -790,6 +802,8 @@ public class XaiRealtimeBackendTest {
         assertEquals("idle", backend(500).run("t-18", mic.in, speaker, () -> { }));
         mic.close();
         assertArrayEquals("only the answer after the barge-in plays", r2, speaker.toByteArray());
+        // Each response is one model call for the indicator, the cancelled one included.
+        assertEquals(List.of("started t-18 r1", "ended t-18 r1", "started t-18 r2", "ended t-18 r2"), modelCalls);
     }
 
     @Test
