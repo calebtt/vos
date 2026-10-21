@@ -9,8 +9,10 @@
 #   3. with --stand-in PKG: moves the role to that app, expects the lost-role notice and a
 #      held=false audit line within 5 s, clears the role (no holder) and expects the same, then
 #      gives the role back to VOS and expects the notice gone.
-# Each summon opens a real turn with the live mic and the session (nobody speaks, so VOS stays
-# silent); it runs 08:00-22:00 only, like the other live-mic steps.
+# Each summon opens a real turn with the live mic and the session on the xAI backend (nobody speaks,
+# so VOS stays silent; the debug echo backend would play the room back, so the run checks the pick).
+# It runs 08:00-22:00 only, like the other live-mic steps. Needs GROK_API_KEY only if the session
+# holds no key yet (sealed through run-as stdin, never printed), like voice-roundtrip.sh.
 #
 # Usage: eval/m1/assistant.sh [--no-build] [--trials N] [--stand-in PKG]
 
@@ -37,9 +39,16 @@ exec > >(tee -a "$out/run.log") 2>&1
 echo "assistant on $(adb get-serialno) ($(adb shell getprop ro.build.fingerprint)); results in $out"
 
 if (( build )); then
-    "$ROOT/gradlew" -p "$ROOT" -q --console=plain :actuator:assembleDebug
+    "$ROOT/gradlew" -p "$ROOT" -q --console=plain :actuator:assembleDebug :session:assembleDebug
 fi
 adb install -r -t "$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk" >/dev/null
+adb install -r -t "$ROOT/session/build/outputs/apk/debug/session-debug.apk" >/dev/null
+adb shell pm grant com.vos.actuator android.permission.RECORD_AUDIO
+adb shell "run-as com.vos.session rm -f files/debug/chat_voice"
+if ! adb shell "run-as com.vos.session test -f files/keys/xai.bin"; then
+    : "${GROK_API_KEY:?the session holds no key: set GROK_API_KEY to seal it (never printed)}"
+    printf '%s' "$GROK_API_KEY" | adb shell "run-as com.vos.session sh -c 'umask 077 && mkdir -p files/key-import && cat > files/key-import/xai'"
+fi
 
 fails=0
 pass() { echo "PASS $*"; }
@@ -75,6 +84,8 @@ adb logcat -d -s VOS_TURN | tr -d '\r' | grep "summon source=assist" > "$out/sum
 n="$(wc -l < "$out/summons.log")"
 if [ "$n" -eq "$trials" ]; then pass "$n/$trials assist summons opened a turn and heard the mic"; else fail "$n/$trials assist summons heard the mic"; fi
 if [ "$(turn_open)" -eq 0 ]; then pass "no turn left open (each second press stopped it)"; else fail "a turn is still open"; fi
+picks="$(adb shell "run-as com.vos.session cat files/audit/audit.jsonl" | tr -d '\r' | grep '"event":"model.pick"' | tail -n "$trials" || true)"
+if [ "$(grep -c '"model":"xai:' <<<"$picks")" -eq "$trials" ]; then pass "every summon's turn ran on the xAI backend"; else fail "not every turn ran on xAI: $(grep -o '"model":"[^"]*"' <<<"$picks" | sort | uniq -c | tr '\n' ' ')"; fi
 python3 -I - "$out/summons.log" "$locked" <<'EOF'
 import re, sys
 rows = [dict(re.findall(r"(\w+)=(-?\d+)", l)) for l in open(sys.argv[1])]

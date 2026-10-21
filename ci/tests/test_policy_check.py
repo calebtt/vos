@@ -261,12 +261,17 @@ class ExportedRules(unittest.TestCase):
         fails = pc.check_exported("actuator", facts(**dict(ACTUATOR_OK, components=comps)), self.actuator_allow)
         self.assertTrue(any("not guarded by android.permission.BIND_QUICK_SETTINGS_TILE" in x for x in fails))
 
-    def test_exported_assistant_service_without_bind_permission_fails(self):
-        comps = [c for c in ACTUATOR_OK["components"] if c[1] != "com.vos.actuator.VosAssistService"]
-        comps.append(("service", "com.vos.actuator.VosAssistService", True, None,
-                      ["android.service.voice.VoiceInteractionService"], ["android.voice_interaction"]))
-        fails = pc.check_exported("actuator", facts(**dict(ACTUATOR_OK, components=comps)), self.actuator_allow)
-        self.assertTrue(any("VosAssistService" in x and "BIND_VOICE_INTERACTION" in x for x in fails), fails)
+    def test_assistant_services_without_bind_permission_fail_even_if_allowlisted(self):
+        # Each of the three, unguarded in the manifest and "-" in the allowlist: the hard guard still fails it.
+        for c in ACTUATOR_OK["components"]:
+            if not c[1].startswith("com.vos.actuator.Vos"):
+                continue
+            comps = [x for x in ACTUATOR_OK["components"] if x is not c] + [c[:3] + (None,) + c[4:]]
+            allow = dict(self.actuator_allow)
+            allow[(c[0], c[1])] = None
+            fails = pc.check_exported("actuator", facts(**dict(ACTUATOR_OK, components=comps)), allow)
+            self.assertTrue(any(c[1] in x and "not guarded by android.permission.BIND_VOICE_INTERACTION" in x
+                                for x in fails), (c[1], fails))
 
     def test_debug_only_components_pass_in_debug_and_fail_in_release(self):
         debug_activity = ("activity", "com.vos.actuator.DebugSummonActivity", True, "android.permission.DUMP", [], [])

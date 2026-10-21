@@ -1,6 +1,6 @@
 package com.vos.actuator;
 
-import android.os.SystemClock;
+import android.os.Bundle;
 import android.service.voice.VoiceInteractionService;
 import android.service.voice.VoiceInteractionSession;
 
@@ -25,8 +25,15 @@ public final class VosAssistService extends VoiceInteractionService {
         super.onShutdown();
     }
 
+    /**
+     * The keyguard's voice-assist affordance shows no session of its own: show ours, so it has the
+     * gesture's foreground moment and its one summon-or-stop path (not exercised on Phone B, where the
+     * assist key on the lock screen arrives through {@link VosAssistSession#onShow}).
+     */
     @Override
     public void onLaunchVoiceAssistFromKeyguard() {
-        TurnService.toggle(this, "assist_keyguard", SystemClock.uptimeMillis());
+        Bundle args = new Bundle();
+        args.putBoolean(VosAssistSession.ARG_FROM_KEYGUARD, true);
+        showSession(args, 0);
     }
 }

@@ -13,6 +13,8 @@ import android.service.voice.VoiceInteractionSession;
  * and hides as soon as the service is in the foreground, or after a short cap.
  */
 final class VosAssistSession extends VoiceInteractionSession {
+    /** Set by {@link VosAssistService#onLaunchVoiceAssistFromKeyguard}: the summon's source is assist_keyguard. */
+    static final String ARG_FROM_KEYGUARD = "com.vos.actuator.FROM_KEYGUARD";
     private static final long HIDE_CAP_MS = 2_000;
     private static final long POLL_MS = 50;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -26,7 +28,8 @@ final class VosAssistSession extends VoiceInteractionSession {
         long tEvent = SystemClock.uptimeMillis();
         super.onShow(args, showFlags);
         boolean stopping = TurnService.turnOpen();
-        TurnService.toggle(getContext(), "assist", tEvent);
+        boolean keyguard = args != null && args.getBoolean(ARG_FROM_KEYGUARD, false);
+        TurnService.toggle(getContext(), keyguard ? "assist_keyguard" : "assist", tEvent);
         if (stopping) {
             hide();
         } else {
