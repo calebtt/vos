@@ -58,7 +58,7 @@ final class VoiceTurn {
     private ParcelFileDescriptor speakerRead;
     private ParcelFileDescriptor speakerWrite;
     private final String source;
-    private final long tEvent; // uptimeMillis of the summon's input event, or -1
+    private final long tEvent; // uptimeMillis when VOS got the summon (tile click, assist onShow), or -1
     private volatile long tRecording = -1; // uptimeMillis when startRecording returned
     private volatile boolean running = true;
     private AudioRecord record;
@@ -225,7 +225,7 @@ final class VoiceTurn {
         }
     }
 
-    /** Milliseconds from the summon's input event to {@code t}, or -1 if either is unknown. */
+    /** Milliseconds from VOS getting the summon to {@code t}, or -1 if either is unknown. */
     private long since(long t) {
         return tEvent < 0 || t < 0 ? -1 : t - tEvent;
     }
@@ -246,7 +246,7 @@ final class VoiceTurn {
             while (running) {
                 int n = record.read(buf, 0, FRAME, AudioRecord.READ_BLOCKING);
                 if (n > 0) {
-                    if (!heard && nonZero(buf, n)) { // S-07: summon input event to the first non-zero mic buffer
+                    if (!heard && nonZero(buf, n)) { // S-07: VOS getting the summon to the first non-zero mic buffer
                         heard = true;
                         long now = SystemClock.uptimeMillis();
                         Log.i(TAG, "summon source=" + source + " turnId=" + turnId + " first_nonzero_ms="
