@@ -33,8 +33,10 @@ import org.json.JSONArray;
  *   <li>each vendor response is a model call for the actuator's generating indicator ({@link ModelCalls}).
  *       The realtime API runs one response at a time, so the turn tracks one open call under ids of its
  *       own ("c1", "c2", …), whatever ids the vendor sends: {@code response.created} ends any open call
- *       and starts a new one; any {@code response.done}, a barge-in (the owner cut the reply off) and
- *       the turn ending end the open call, and once the turn is ending no new call starts. A follow-up
+ *       and starts a new one; its {@code response.done} (any done when the vendor sends no ids), a
+ *       barge-in (the owner cut the reply off: VOS discards the rest of it) and the turn ending end the
+ *       open call, and once the turn is ending no new call starts. A late done for another response
+ *       (a dropped follow-up's) does not end it. A follow-up
  *       dropped because the owner is speaking is not reported: nothing is being generated for the owner;</li>
  *   <li>a tool call goes to the actuator ({@link ToolCaller}) off the WebSocket thread, and its result
  *       (VERIFIED, UNVERIFIED or FAILED from the actuator's oracle) goes back to the model. The calls
@@ -153,6 +155,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         /** Guards openCall, callSeq and callsClosed: vendor events and the turn's teardown run on different threads. */
         private final Object callLock = new Object();
         private String openCall; // the model call reported to the indicator and not yet ended, or null
+        private String openCallResponse = ""; // the vendor's id for openCall's response ("" if none was sent)
         private int callSeq;
         private boolean callsClosed; // the turn is ending: no new call starts
         private String endReason;
@@ -415,6 +418,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 endCallLocked(); // one response at a time: a new one means the last has finished
                 if (!speaking && !callsClosed) { // the model is producing output for the owner: the indicator spins
                     openCall = "c" + (++callSeq);
+                    openCallResponse = responseId;
                     calls.started(turnId, openCall);
                 }
             }
@@ -492,7 +496,11 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void responseDone(String responseId, String status) {
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
-            endCall(); // completed, cancelled or failed: it no longer produces output
+            synchronized (callLock) { // completed, cancelled or failed: that response no longer produces output
+                if (responseId.isEmpty() || openCallResponse.isEmpty() || responseId.equals(openCallResponse)) {
+                    endCallLocked();
+                }
+            }
             boolean hadCall = responseHadCall;
             responseHadCall = false;
             if ("cancelled".equals(status) || cancelled(responseId)) {

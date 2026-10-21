@@ -73,8 +73,9 @@ public class XaiRealtimeBackendTest {
     }
 
     private final List<String> toolCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
-    /** The model-call events the backend reported for the generating indicator. */
+    /** The model-call events the backend reported for the generating indicator, and when (nanoTime). */
     private final List<String> modelCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<Long> modelCallNanos = new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile long toolDelayMs;
 
     private XaiRealtimeBackend backend(long idleMs) throws Exception {
@@ -101,11 +102,13 @@ public class XaiRealtimeBackendTest {
                     @Override
                     public void started(String turnId, String callId) {
                         modelCalls.add("started " + turnId + " " + callId);
+                        modelCallNanos.add(System.nanoTime());
                     }
 
                     @Override
                     public void ended(String turnId, String callId) {
                         modelCalls.add("ended " + turnId + " " + callId);
+                        modelCallNanos.add(System.nanoTime());
                     }
                 }, t);
     }
@@ -806,6 +809,53 @@ public class XaiRealtimeBackendTest {
         assertArrayEquals("only the answer after the barge-in plays", r2, speaker.toByteArray());
         // Each response is one model call for the indicator, the cancelled one included.
         assertEquals(List.of("started t-18 c1", "ended t-18 c1", "started t-18 c2", "ended t-18 c2"), modelCalls);
+    }
+
+    @Test
+    public void aLateDoneForADroppedFollowUpDoesNotEndTheNextCall() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean sent;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                if (text.contains("\"session.update\"")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (text.contains("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !sent) {
+                    sent = true;
+                    ws.send(STARTED); // the owner is talking
+                    // A follow-up opens while the owner talks: dropped, cancelled, never reported.
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r2\",\"status\":\"in_progress\"}}");
+                    ws.send(STOPPED);
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r3\",\"status\":\"in_progress\"}}");
+                    ws.send(done("r2", "cancelled")); // late: r3 is the open call, and it keeps going
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(400);
+                        } catch (InterruptedException ignored) {
+                            // test
+                        }
+                        ws.send(done("r3", "completed"));
+                    }).start();
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        assertEquals("idle", backend(500).run("t-31", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(List.of("started t-31 c1", "ended t-31 c1"), modelCalls);
+        long ms = (modelCallNanos.get(1) - modelCallNanos.get(0)) / 1_000_000;
+        assertTrue("c1 ended with r3's done, not r2's late one (" + ms + " ms)", ms >= 300);
     }
 
     @Test
