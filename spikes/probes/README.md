@@ -124,6 +124,7 @@ Each trial line adds the time of every step, in ms from the summon: `focus_ms`, 
 `aec_ms`, `ns_ms`, `start_ms` and `first_ms`. It also logs:
 - `max_gap_ms`, the longest wait between two 10 ms reads;
 - `zero_run_ms`, the longest all-zero stretch after the first sound;
+- `short_ms`, how much less audio arrived than the time that passed between the first and last read. One uncounted 10 ms read is the floor; a reroute that drops audio raises it;
 - `routed`, the `AudioDeviceInfo` type the capture ended on.
 
 The two gap fields show a dropout when the mode changes under a running capture. `TrialActivity` (guarded by `DUMP`, which
@@ -134,8 +135,8 @@ spikes/probes/s07-variants.sh --trials 20                    # all six variants,
 spikes/probes/s07-variants.sh --no-build --trials 5 vc_fx parallel
 ```
 
-The script installs the probe, runs the trials, writes `trials.log` and `summary.txt` (`summarize.py` adds a per-variant
-step table), uninstalls the probe and checks that the audio mode is `MODE_NORMAL` and the assistant holder is unchanged.
+The script installs the probe and runs the trials. It saves each trial's line as soon as it appears, because the phone's log
+buffer wraps over a long run. It writes `trials.log` and `summary.txt` (`summarize.py` adds a per-variant step table), uninstalls the probe and checks that the audio mode is `MODE_NORMAL` and the assistant holder is unchanged.
 
 ## S-08: PCM pipe, actuator to session
 
