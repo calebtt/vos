@@ -26,7 +26,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicLong;
@@ -278,6 +277,7 @@ final class VoiceTurn {
         byte[] buf = new byte[FRAME];
         boolean heard = false;
         int prefixOff = prefix == null ? -1 : 0;
+        int prefixLen = prefix == null ? 0 : prefix.length & ~1; // whole 16-bit samples only
         double sumSq = 0;
         int samples = 0;
         long lastPlayed = 0;
@@ -310,12 +310,11 @@ final class VoiceTurn {
                             samples = 0;
                         }
                     }
-                    if (prefixOff >= 0) {
-                        int k = Math.min(n, prefix.length - prefixOff);
+                    if (prefixOff >= 0) { // the rest of a frame the prefix ends in stays live
+                        int k = Math.min(n, prefixLen - prefixOff);
                         System.arraycopy(prefix, prefixOff, buf, 0, k);
-                        Arrays.fill(buf, k, n, (byte) 0);
                         prefixOff += k;
-                        if (prefixOff >= prefix.length) {
+                        if (prefixOff >= prefixLen) {
                             prefixOff = -1;
                             Log.i(TAG, "turn " + turnId + " mic prefix done, live from here");
                         }
