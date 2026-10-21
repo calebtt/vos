@@ -89,7 +89,7 @@ public final class TurnService extends Service {
         if (t == null || !t.turnId.equals(turnId) || app.audioPlane().state() != AudioPlane.State.CONVERSE) {
             r = FastTools.Result.of(FastTools.Status.FAILED, "detail", "no open turn " + turnId);
         } else {
-            boolean acts = FastTools.knows(name); // an unknown tool fails without acting: no acting state for it
+            boolean acts = FastTools.changesState(name); // acting only while the device's state may change
             if (acts) {
                 app.indicator().actingStarted(turnId); // the actuator acts: the indicator's acting state
             }
