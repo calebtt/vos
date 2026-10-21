@@ -30,6 +30,27 @@ def fmt(v):
     return "-" if v is None else f"{v:g}"
 
 
+def steps_table(trials):
+    """#261: p50/p95 of each step a variant logged (ms from the summon; max_gap and zero_run are durations)."""
+    keyed = {k: rows for k, rows in trials.items() if any(n.endswith("_ms") and n != "latency_ms" for t in rows for n in t)}
+    if not keyed:
+        return
+    print("steps (p50/p95 ms from the summon; max_gap = longest wait between reads, zero_run = longest silence after the first sound)")
+    for key in sorted(keyed):
+        rows = [t for t in keyed[key] if t.get("ok") == "true"]
+        names = []
+        for t in rows:
+            for n in t:
+                if n.endswith("_ms") and n != "latency_ms" and n not in names:
+                    names.append(n)
+        cells = []
+        for n in names:
+            vals = sorted(float(t[n]) for t in rows if n in t)
+            cells.append(f"{n[:-3]} {fmt(pct(vals, 50))}/{fmt(pct(vals, 95))}")
+        routed = sorted({t.get("routed", "?") for t in rows})
+        print(f"  {key[1]:15} {key[2]:6} n={len(rows)}: " + ", ".join(cells) + f"; routed device type {'/'.join(routed)}")
+
+
 def main(paths):
     lines = []
     if paths:
@@ -45,7 +66,7 @@ def main(paths):
     for line in lines:
         t = fields(line, "VOS_S07 trial")
         if t is not None:
-            key = (t.get("source", "?"), t.get("locked", "?"))
+            key = (t.get("source", "?"), t.get("variant", "rec"), t.get("locked", "?"))
             trials[key].append(t)
             if t.get("ok") != "true":
                 errors[key][t.get("err", "?")] += 1
@@ -60,16 +81,17 @@ def main(paths):
 
     if trials:
         print(f"S-07 (latency = handler -> first non-zero mic buffer; pass = all ok and p95 <= {S07_P95_MS:g} ms)")
-        print(f"{'source':8} {'locked':6} {'n':>3} {'ok':>3} {'p50_ms':>7} {'p95_ms':>7} {'max_ms':>7}  pass")
+        print(f"{'source':8} {'variant':15} {'locked':6} {'n':>3} {'ok':>3} {'p50_ms':>7} {'p95_ms':>7} {'max_ms':>7}  pass")
         for key in sorted(trials):
             rows = trials[key]
             lat = sorted(float(t["latency_ms"]) for t in rows if t.get("ok") == "true")
             p95 = pct(lat, 95)
             ok = len(lat) == len(rows) and p95 is not None and p95 <= S07_P95_MS
-            print(f"{key[0]:8} {key[1]:6} {len(rows):>3} {len(lat):>3} {fmt(pct(lat, 50)):>7} {fmt(p95):>7} "
+            print(f"{key[0]:8} {key[1]:15} {key[2]:6} {len(rows):>3} {len(lat):>3} {fmt(pct(lat, 50)):>7} {fmt(p95):>7} "
                   f"{fmt(lat[-1] if lat else None):>7}  {'PASS' if ok else 'FAIL'}")
             for err, count in sorted(errors[key].items()):
                 print(f"    {count} x {err}")
+        steps_table(trials)
 
     for r in s08_results:
         try:
