@@ -29,7 +29,7 @@ public final class TurnService extends Service {
     static final String ACTION_SUMMON = "com.vos.actuator.action.SUMMON";
     static final String ACTION_STOP = "com.vos.actuator.action.STOP";
     static final String EXTRA_SOURCE = "source";
-    /** {@code SystemClock.uptimeMillis()} of the summon's input event, for S-07's latency line. */
+    /** {@code SystemClock.uptimeMillis()} when VOS got the summon (the tile click, the assist session showing), for S-07. */
     static final String EXTRA_T_EVENT = "t_event";
     /** Debug builds only (ignored otherwise): mic from files/debug/mic-inject.pcm, speaker to a file. */
     static final String EXTRA_DEBUG_MIC_FILE = "debug_mic_file";
@@ -254,7 +254,7 @@ public final class TurnService extends Service {
         toggle(context, source, android.os.SystemClock.uptimeMillis());
     }
 
-    /** As {@link #toggle(Context, String)}, with the input event's {@code uptimeMillis} for S-07. */
+    /** As {@link #toggle(Context, String)}, with the {@code uptimeMillis} at which VOS got the summon, for S-07. */
     static void toggle(Context context, String source, long tEvent) {
         Intent i = new Intent(context, TurnService.class).putExtra(EXTRA_SOURCE, source).putExtra(EXTRA_T_EVENT, tEvent);
         if (turnOpen()) {

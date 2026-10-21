@@ -3,8 +3,9 @@
 # assistant on Phone B (no restore of the previous holder: Caleb, 2026-10-20), then:
 #   1. checks the holder, the voice interaction service and the role audit line;
 #   2. runs N assist summons (KEYCODE_ASSIST, then KEYCODE_ASSIST again to stop), in whatever lock
-#      state the phone is in, and summarizes VOS's own S-07 line: input event to the first non-zero
-#      mic buffer, with the mic service, the AudioPlane and the recording steps along the way;
+#      state the phone is in, and summarizes VOS's own S-07 line: the assist session showing to the
+#      first non-zero mic buffer, with the mic service, the AudioPlane and the recording steps along
+#      the way (the system's gesture handling before onShow is not counted);
 #   3. with --stand-in PKG: moves the role to that app, expects the lost-role notice and a
 #      held=false audit line within 5 s, clears the role (no holder) and expects the same, then
 #      gives the role back to VOS and expects the notice gone.
@@ -82,7 +83,7 @@ if not rows:
 def pct(vals, p):
     v = sorted(vals)
     return v[max(0, min(len(v) - 1, int(round(p / 100 * len(v) + 0.5)) - 1))]
-print(f"S-07 assist, VOS, keyguard showing={sys.argv[2]}, n={len(rows)} (ms from the input event)")
+print(f"S-07 assist, VOS, keyguard showing={sys.argv[2]}, n={len(rows)} (ms from the assist session showing)")
 for k in ("to_start_command_ms", "to_foreground_ms", "to_plane_ms", "to_recording_ms", "first_nonzero_ms"):
     v = [int(r[k]) for r in rows if k in r]
     print(f"  {k:22s} p50 {pct(v, 50):5d}  p95 {pct(v, 95):5d}  max {max(v):5d}")
