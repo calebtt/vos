@@ -15,6 +15,7 @@ public final class ActuatorApp extends Application {
     private FastTools fastTools;
     private JsonlAudit audit;
     private AndroidAudioPlatform audioPlatform;
+    private RoleWatch roleWatch;
 
     @Override
     public void onCreate() {
@@ -26,6 +27,13 @@ public final class ActuatorApp extends Application {
         audioPlatform = new AndroidAudioPlatform(this);
         audioPlane = new AudioPlane(audioPlatform, line -> audit.record(line));
         fastTools = new FastTools(new AndroidFastToolsPlatform(this));
+        roleWatch = new RoleWatch(new AndroidRolePlatform(this), line -> audit.record(line));
+        roleWatch.check("actuator start");
+    }
+
+    /** Whether VOS holds the assistant role, and the notice when it does not (decision 45). */
+    RoleWatch roleWatch() {
+        return roleWatch;
     }
 
     AndroidAudioPlatform audioPlatform() {

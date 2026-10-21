@@ -86,6 +86,11 @@ ACTUATOR_OK = dict(
          ["android.service.notification.NotificationListenerService"], []),
         ("service", "com.vos.actuator.SummonTile", True, "android.permission.BIND_QUICK_SETTINGS_TILE",
          ["android.service.quicksettings.action.QS_TILE"], []),
+        ("service", "com.vos.actuator.VosAssistService", True, "android.permission.BIND_VOICE_INTERACTION",
+         ["android.service.voice.VoiceInteractionService"], ["android.voice_interaction"]),
+        ("service", "com.vos.actuator.VosAssistSessionService", True, "android.permission.BIND_VOICE_INTERACTION", [], []),
+        ("service", "com.vos.actuator.VosRecognitionService", True, "android.permission.BIND_VOICE_INTERACTION",
+         ["android.speech.RecognitionService"], []),
     ],
 )
 SESSION_OK = dict(
@@ -255,6 +260,13 @@ class ExportedRules(unittest.TestCase):
                       ["android.service.quicksettings.action.QS_TILE"], []))
         fails = pc.check_exported("actuator", facts(**dict(ACTUATOR_OK, components=comps)), self.actuator_allow)
         self.assertTrue(any("not guarded by android.permission.BIND_QUICK_SETTINGS_TILE" in x for x in fails))
+
+    def test_exported_assistant_service_without_bind_permission_fails(self):
+        comps = [c for c in ACTUATOR_OK["components"] if c[1] != "com.vos.actuator.VosAssistService"]
+        comps.append(("service", "com.vos.actuator.VosAssistService", True, None,
+                      ["android.service.voice.VoiceInteractionService"], ["android.voice_interaction"]))
+        fails = pc.check_exported("actuator", facts(**dict(ACTUATOR_OK, components=comps)), self.actuator_allow)
+        self.assertTrue(any("VosAssistService" in x and "BIND_VOICE_INTERACTION" in x for x in fails), fails)
 
     def test_debug_only_components_pass_in_debug_and_fail_in_release(self):
         debug_activity = ("activity", "com.vos.actuator.DebugSummonActivity", True, "android.permission.DUMP", [], [])
