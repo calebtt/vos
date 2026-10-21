@@ -440,7 +440,7 @@ public class XaiRealtimeBackendTest {
         assertArrayEquals("only the answer to the new speech plays", answer, speaker.toByteArray());
         assertEquals(List.of("output c-a", "response.create", "response.cancel"), vendorSaw);
         // The dropped follow-up (r2) never shows as generating: nothing was produced for the owner.
-        assertEquals(List.of("started t-19 r3", "ended t-19 r3"), modelCalls);
+        assertEquals(List.of("started t-19 c1", "ended t-19 c1"), modelCalls);
     }
 
     @Test
@@ -805,7 +805,7 @@ public class XaiRealtimeBackendTest {
         mic.close();
         assertArrayEquals("only the answer after the barge-in plays", r2, speaker.toByteArray());
         // Each response is one model call for the indicator, the cancelled one included.
-        assertEquals(List.of("started t-18 r1", "ended t-18 r1", "started t-18 r2", "ended t-18 r2"), modelCalls);
+        assertEquals(List.of("started t-18 c1", "ended t-18 c1", "started t-18 c2", "ended t-18 c2"), modelCalls);
     }
 
     @Test
@@ -827,11 +827,13 @@ public class XaiRealtimeBackendTest {
                     sent = true;
                     ws.send("{\"type\":\"input_audio_buffer.speech_started\"}");
                     ws.send("{\"type\":\"input_audio_buffer.speech_stopped\"}");
-                    // No ids at all, then an id on created but none on done.
+                    // No ids at all; an id on created but none on done; none on created but one on done.
                     ws.send("{\"type\":\"response.created\"}");
                     ws.send("{\"type\":\"response.done\"}");
                     ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r2\",\"status\":\"in_progress\"}}");
                     ws.send("{\"type\":\"response.done\"}");
+                    ws.send("{\"type\":\"response.created\"}");
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"id\":\"r3\",\"status\":\"completed\"}}");
                 }
             }
 
@@ -843,7 +845,8 @@ public class XaiRealtimeBackendTest {
         Mic mic = new Mic();
         assertEquals("idle", backend(500).run("t-30", mic.in, new ByteArrayOutputStream(), () -> { }));
         mic.close();
-        assertEquals(List.of("started t-30 anon-1", "ended t-30 anon-1", "started t-30 r2", "ended t-30 r2"), modelCalls);
+        assertEquals(List.of("started t-30 c1", "ended t-30 c1", "started t-30 c2", "ended t-30 c2",
+                "started t-30 c3", "ended t-30 c3"), modelCalls);
     }
 
     @Test

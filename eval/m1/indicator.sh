@@ -30,8 +30,9 @@ while (( $# )); do
     esac
     shift
 done
-if ! [[ "$stall" =~ ^[0-9]+$ ]] || (( stall < 4 )); then
-    echo "--stall-s: a whole number of seconds, at least 4" >&2
+# At least 4 s; and under the actuator's 10-minute turn cap (TurnService.MAX_TURN_MS), which would end the turn.
+if ! [[ "$stall" =~ ^[0-9]+$ ]] || (( stall < 4 || stall > 590 )); then
+    echo "--stall-s: a whole number of seconds, 4 to 590" >&2
     exit 2
 fi
 : "${GROK_API_KEY:?set GROK_API_KEY (used for the fixture; never printed)}"
