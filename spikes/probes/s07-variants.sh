@@ -73,6 +73,7 @@ python3 -I "$ROOT/spikes/probes/summarize.py" "$out/trials.log" | tee "$out/summ
 
 fails=0
 for v in "${variants[@]}"; do
+    # The space after the name bounds it: " variant=vc " does not match variant=vc_fx or vc_fx_then_mode.
     ok="$(grep -c " variant=$v .* ok=true " "$out/trials.log" || true)"
     (( ok == trials )) || { echo "FAIL $v: $ok of $trials trials ok"; fails=1; }
 done
