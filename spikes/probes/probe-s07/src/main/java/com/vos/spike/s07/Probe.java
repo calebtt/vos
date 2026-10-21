@@ -12,8 +12,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class Probe {
     static final String TAG = "VOS_S07";
     static final String EXTRA_SOURCE = "source";
+    static final String EXTRA_VARIANT = "variant";
     static final String EXTRA_LOCKED = "locked";
     static final String EXTRA_T_EVENT = "t_event";
+    /** The original S-07 capture: VOICE_RECOGNITION in normal mode, no effects. */
+    static final String DEFAULT_VARIANT = "rec";
 
     /** One trial at a time; a summon during a running trial is logged as ok=false err=busy. */
     static final AtomicBoolean busy = new AtomicBoolean();
@@ -21,14 +24,19 @@ final class Probe {
     private Probe() {}
 
     static void summon(Context ctx, String source) {
+        summon(ctx, source, DEFAULT_VARIANT);
+    }
+
+    static void summon(Context ctx, String source, String variant) {
         long tEvent = SystemClock.uptimeMillis();
         boolean locked = ctx.getSystemService(KeyguardManager.class).isKeyguardLocked();
         if (!busy.compareAndSet(false, true)) {
-            log(source, locked, tEvent, -1, -1, false, "busy");
+            log(source, variant, locked, tEvent, -1, -1, false, "busy", "");
             return;
         }
         Intent i = new Intent(ctx, MicFgs.class)
                 .putExtra(EXTRA_SOURCE, source)
+                .putExtra(EXTRA_VARIANT, variant)
                 .putExtra(EXTRA_LOCKED, locked)
                 .putExtra(EXTRA_T_EVENT, tEvent);
         try {
@@ -36,15 +44,17 @@ final class Probe {
         } catch (RuntimeException e) {
             // ForegroundServiceStartNotAllowedException, SecurityException, ...
             busy.set(false);
-            log(source, locked, tEvent, -1, -1, false, describe(e));
+            log(source, variant, locked, tEvent, -1, -1, false, describe(e), "");
         }
     }
 
-    static void log(String source, boolean locked, long tEvent, long tFgs, long tFirstNonzero, boolean ok, String err) {
+    /** {@code steps} is " name_ms=N ..." (each relative to t_event), or empty. */
+    static void log(String source, String variant, boolean locked, long tEvent, long tFgs, long tFirstNonzero,
+            boolean ok, String err, String steps) {
         long latency = tFirstNonzero >= 0 ? tFirstNonzero - tEvent : -1;
-        Log.i(TAG, "VOS_S07 trial source=" + source + " locked=" + locked + " t_event=" + tEvent
+        Log.i(TAG, "VOS_S07 trial source=" + source + " variant=" + variant + " locked=" + locked + " t_event=" + tEvent
                 + " t_fgs=" + tFgs + " t_first_nonzero=" + tFirstNonzero + " latency_ms=" + latency
-                + " ok=" + ok + " err=" + (err == null ? "none" : err.replaceAll("\\s+", "_")));
+                + " ok=" + ok + " err=" + (err == null ? "none" : err.replaceAll("\\s+", "_")) + steps);
     }
 
     static String describe(Throwable e) {
