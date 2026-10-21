@@ -90,12 +90,15 @@ public class FastToolsTest {
     public void knowsExactlyTheToolsItRuns() throws Exception {
         for (String n : FastTools.NAMES) {
             assertTrue(n, FastTools.knows(n));
-            assertFalse(n + " is dispatched, not unknown",
-                    run(n, "{}").optString("detail").equals("unknown tool"));
+            String detail = run(n, "{}").optString("detail");
+            assertFalse(n + " is dispatched (" + detail + ")", detail.equals("unknown tool") || detail.startsWith("no handler"));
         }
         assertFalse(FastTools.knows("rm_rf"));
         assertFalse(FastTools.knows(null));
         assertEquals("unknown tool", run("rm_rf", "{}").getString("detail"));
+        assertTrue(FastTools.NAMES.containsAll(FastTools.CHANGES_STATE));
+        assertFalse("reading the clock is not acting", FastTools.changesState("time_get"));
+        assertTrue(FastTools.changesState("volume_set"));
     }
 
     @Test

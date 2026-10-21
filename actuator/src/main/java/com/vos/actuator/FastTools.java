@@ -109,12 +109,17 @@ public final class FastTools {
         this.platform = platform;
     }
 
-    /** The tools {@link #run} knows; anything else is FAILED without acting. */
+    /** The tools {@link #run} runs, and the only names it dispatches; anything else is FAILED without acting. */
     static final java.util.Set<String> NAMES = java.util.Set.of("time_get", "volume_set", "volume_step", "media_control");
+    /** The tools that change the device's state, for which the indicator shows acting (time_get only reads the clock). */
+    static final java.util.Set<String> CHANGES_STATE = java.util.Set.of("volume_set", "volume_step", "media_control");
 
-    /** Whether {@code name} is a tool {@link #run} can run (the indicator shows acting only for these). */
     static boolean knows(String name) {
         return name != null && NAMES.contains(name);
+    }
+
+    static boolean changesState(String name) {
+        return name != null && CHANGES_STATE.contains(name);
     }
 
     /** Runs {@code name} with the session's JSON arguments. Never throws for bad input. */
@@ -125,8 +130,11 @@ public final class FastTools {
         } catch (JSONException e) {
             return Result.of(Status.FAILED, "detail", "arguments are not a JSON object");
         }
+        if (!knows(name)) {
+            return Result.of(Status.FAILED, "detail", "unknown tool");
+        }
         try {
-            switch (name == null ? "" : name) {
+            switch (name) {
                 case "time_get":
                     return timeGet(args);
                 case "volume_set":
@@ -135,8 +143,8 @@ public final class FastTools {
                     return volumeSet(args, true);
                 case "media_control":
                     return mediaControl(args, media);
-                default:
-                    return Result.of(Status.FAILED, "detail", "unknown tool");
+                default: // a name in NAMES with no case here: a programming error the tests catch
+                    return Result.of(Status.FAILED, "detail", "no handler for " + name);
             }
         } catch (BadArgs e) {
             return Result.of(Status.FAILED, "detail", e.getMessage());

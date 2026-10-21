@@ -7,8 +7,11 @@
 #   2. a stalled model call: the debug echo backend holds one call open for --stall-s (30) s. The chip
 #      must keep spinning the whole time (the overlay window present, the notification title "VOS is
 #      thinking", no idle in between), and the owner's stop must clear it <= 300 ms.
-# Times come from the session's "model call started/ended" lines and the actuator's "indicator drawn"
-# lines, all SystemClock.uptimeMillis (one clock for the whole device).
+# Times come from the session's "model call started/ended" lines and the actuator's "indicator state"
+# (decided) and "indicator drawn" lines, all SystemClock.uptimeMillis (one clock for the whole
+# device). A chip shown or changed is "drawn" just before its next frame; a chip cleared is "drawn"
+# when its window is removed (the app cannot see the compositor finish). Every state change, ACTING
+# included, must be drawn <= 200 ms after the actuator decided it.
 #
 # The chip is an accessibility overlay, so VOS's accessibility service (HandsService) must be on. On
 # an emulator the script turns it on and restores the setting afterwards. On a real phone it does not:
@@ -158,6 +161,21 @@ for t, k in ev:
 starts = sum(1 for _, k in ev if k == "call_started")
 print(f"calls={starts} show_ms={','.join(map(str, show)) or '-'} clear_ms={','.join(map(str, clear)) or '-'} acting={acting} final={prev}")
 PY
+python3 -I - "$out/leg1.txt" > "$out/leg1-draws.txt" <<'PY'
+import re, sys
+decided, lags = [], []
+for line in open(sys.argv[1]):
+    m = re.search(r"indicator state=(\w+) t_up=(\d+)", line)
+    if m:
+        decided.append((m.group(1), int(m.group(2))))
+    m = re.search(r"indicator drawn state=(\w+) t_up=(\d+)", line)
+    if m:
+        state, t = m.group(1), int(m.group(2))
+        before = [d for s, d in decided if s == state and d <= t]
+        if before:
+            lags.append(t - before[-1])
+print(f"changes={len(lags)} max_ms={max(lags) if lags else -1}")
+PY
 cat "$out/leg1-times.txt"
 read -r calls show_ms clear_ms acting final < <(sed 's/[a-z_]*=//g' "$out/leg1-times.txt")
 check "the session reported model calls ($calls)" "(( calls >= 1 ))"
@@ -165,6 +183,8 @@ check "the chip spun <= 200 ms after a call started (ms: $show_ms)" "[ '$show_ms
 check "the chip cleared <= 200 ms after the last call ended (ms: $clear_ms)" "[ '$clear_ms' != - ] && python3 -c 'import sys; sys.exit(0 if max(map(int, \"$clear_ms\".split(\",\"))) <= 200 else 1)'"
 check "the tool showed the acting state ($acting times)" "(( acting >= 1 ))"
 check "nothing showing after the turn (last drawn: $final)" "[ '$final' = IDLE ]"
+read -r changes draw_max < <(sed 's/[a-z_]*=//g' "$out/leg1-draws.txt")
+check "every state change was drawn <= 200 ms after the actuator decided it ($changes changes, max ${draw_max} ms)" "(( changes >= 3 && draw_max >= 0 && draw_max <= 200 ))"
 turn="$(sed -n 's/.*turn opened in session turnId=\([0-9a-f-]*\).*/\1/p' "$out/leg1.txt" | head -1)"
 check "this turn's tool ran and was VERIFIED (turn ${turn:-?})" "[ -n '$turn' ] && adb shell 'run-as com.vos.actuator cat files/audit/audit.jsonl' | grep -F '\"turnId\":\"$turn\"' | grep '\"tool\":\"volume_set\"' | grep -q VERIFIED"
 pairs="$(python3 -I - "$out/leg1.txt" <<'PY'

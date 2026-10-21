@@ -1,9 +1,8 @@
 package com.vos.actuator;
 
 import android.accessibilityservice.AccessibilityService;
-import android.animation.ObjectAnimator;
-import android.animation.ValueAnimator;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.PixelFormat;
 import android.os.SystemClock;
 import android.util.Log;
@@ -12,7 +11,6 @@ import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
-import android.view.animation.LinearInterpolator;
 import android.widget.ImageView;
 
 /**
@@ -27,7 +25,22 @@ public final class HandsService extends AccessibilityService {
     private static volatile HandsService connected;
 
     private ImageView chip;
-    private ObjectAnimator spin;
+    private WindowManager.LayoutParams chipLayout;
+    private boolean spinning;
+    /**
+     * The spin, one turn a second, stepped on each display frame. Not an Animator: those follow the
+     * system animation scale, and with "Remove animations" on they would never turn, while the
+     * indicator must keep moving to tell a slow model from a hung one.
+     */
+    private final Runnable spinStep = new Runnable() {
+        @Override
+        public void run() {
+            if (chip != null && spinning) {
+                chip.setRotation((SystemClock.uptimeMillis() % 1000) * 0.36f);
+                chip.postOnAnimation(this);
+            }
+        }
+    };
 
     static HandsService connected() {
         return connected;
@@ -84,11 +97,11 @@ public final class HandsService extends AccessibilityService {
             boolean generating = state == Indicator.State.GENERATING;
             chip.setImageResource(generating ? R.drawable.ic_vos_generating : R.drawable.ic_vos_acting);
             chip.setContentDescription(getString(generating ? R.string.indicator_generating : R.string.indicator_acting));
-            if (generating) {
-                spin.start();
-            } else {
-                spin.cancel();
-                chip.setRotation(0);
+            if (generating && !spinning) {
+                spinning = true;
+                chip.postOnAnimation(spinStep);
+            } else if (!generating) {
+                stopSpin();
             }
             logNextFrame(chip, state);
         }
@@ -123,9 +136,7 @@ public final class HandsService extends AccessibilityService {
         lp.gravity = Gravity.TOP | Gravity.END;
         lp.x = size / 2;
         WindowManager wm = getSystemService(WindowManager.class);
-        int top = wm.getCurrentWindowMetrics().getWindowInsets()
-                .getInsets(WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout()).top;
-        lp.y = top + size / 4; // just below the status bar and any cutout
+        lp.y = topOffset(wm, size);
         lp.setTitle("VOS indicator"); // what eval/m1/indicator.sh looks for in dumpsys window
         try {
             wm.addView(chip, lp);
@@ -134,11 +145,37 @@ public final class HandsService extends AccessibilityService {
             chip = null;
             return false;
         }
-        spin = ObjectAnimator.ofFloat(chip, "rotation", 0f, 360f);
-        spin.setDuration(1000);
-        spin.setRepeatCount(ValueAnimator.INFINITE);
-        spin.setInterpolator(new LinearInterpolator());
+        chipLayout = lp;
         return true;
+    }
+
+    /** Just below the status bar and any cutout, as they are now. */
+    private static int topOffset(WindowManager wm, int size) {
+        int top = wm.getCurrentWindowMetrics().getWindowInsets()
+                .getInsets(WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout()).top;
+        return top + size / 4;
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (chip != null) { // rotation moves the status bar and the cutout
+            WindowManager wm = getSystemService(WindowManager.class);
+            chipLayout.y = topOffset(wm, chipLayout.height);
+            try {
+                wm.updateViewLayout(chip, chipLayout);
+            } catch (IllegalArgumentException ignored) {
+                // the window went with the service
+            }
+        }
+    }
+
+    private void stopSpin() {
+        spinning = false;
+        if (chip != null) {
+            chip.removeCallbacks(spinStep);
+            chip.setRotation(0);
+        }
     }
 
     /** Removes the chip's window; false if there was none. */
@@ -146,14 +183,14 @@ public final class HandsService extends AccessibilityService {
         if (chip == null) {
             return false;
         }
-        spin.cancel();
+        stopSpin();
         try {
             getSystemService(WindowManager.class).removeView(chip);
         } catch (IllegalArgumentException ignored) {
             // already gone with the service's windows
         }
         chip = null;
-        spin = null;
+        chipLayout = null;
         return true;
     }
 }
