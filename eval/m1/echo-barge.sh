@@ -57,12 +57,20 @@ echo "volumes: media $(volume 3), voice call $(volume 0), assistant playback use
 
 python3 -I "$ROOT/eval/m1/make_fixture.py" "Please tell me a calm story about a lighthouse keeper. Make it about twenty seconds long." "$out/ask.pcm"
 adb shell "run-as com.vos.actuator sh -c 'rm -rf files/debug; umask 077 && mkdir -p files/debug && cat > files/debug/mic-inject.pcm'" < "$out/ask.pcm"
-trap 'adb shell "run-as com.vos.actuator sh -c \"rm -rf files/debug\"" >/dev/null 2>&1 || true' EXIT
+# On any exit (Ctrl-C, a failed command): stop a turn that may still be playing, then remove the fixture.
+trap 'adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op stop >/dev/null 2>&1 || true
+      adb shell "run-as com.vos.actuator sh -c \"rm -rf files/debug\"" >/dev/null 2>&1 || true' EXIT
 
-printf '%-4s %-36s %-5s %-5s %-6s %-16s %-8s %-6s %-9s %-9s %-9s %-6s %s\n' n turnId aec ns inDev outDev reply_s starts cancelled echo_dbfs room_dbfs above reason
+printf '%-4s %-36s %-5s %-5s %-6s %-16s %-8s %-6s %-9s %-9s %-9s %-6s %s\n' n turnId aec ns inDev outDev reply_s starts barge_ins echo_dbfs room_dbfs above reason
 total_starts=0 total_cancelled=0 replied=0
 : > "$out/levels.tsv"
 for i in $(seq "$replies"); do
+    h=$((10#$(date +%H)))
+    if (( h < 8 || h >= 22 )); then
+        echo "22:00 reached: stopping after $((i - 1)) replies"
+        replies=$((i - 1))
+        break
+    fi
     adb logcat -c
     adb shell input keyevent KEYCODE_WAKEUP
     adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op start --ez mic_file_then_live true --ez raw_mic "$raw" >/dev/null
@@ -87,9 +95,31 @@ for i in $(seq "$replies"); do
         | grep '"state":"CAPTURE"' | sed -n 's/.*"outDev":"\([A-Z_]*\)".*/\1/p' | head -1 || true)"
     bytes="$(sed -n 's/.*speaker done turnId=[^ ]* bytes=\([0-9]*\).*/\1/p' "$log" | head -1)"
     reply_s="$(awk -v b="${bytes:-0}" 'BEGIN { printf "%.1f", b / 32000 }')"
-    # Speech starts after the first reply audio: nobody is talking, so each is VOS heard back (or the room).
-    starts="$(awk '/first reply audio/ { r = 1 } r && / speech started/ { n++ } END { print n + 0 }' "$log")"
-    cancelled="$(grep -c "response done status=cancelled" "$log" || true)"
+    # After the first reply audio nobody is talking, so every speech start is VOS heard back (or the
+    # room). It is a false barge-in when it cut the reply: it dropped queued reply audio, or the
+    # response it fell in ended cancelled. A start after the reply has fully played interrupts nothing.
+    read -r starts cancelled < <(python3 -I - "$log" <<'PY'
+import sys
+lines = [l for l in open(sys.argv[1])]
+first = next((i for i, l in enumerate(lines) if "first reply audio" in l and "VOS_VOICE" in l), None)
+starts = barges = 0
+if first is not None:
+    after = lines[first + 1:]
+    for i, l in enumerate(after):
+        if " speech started" not in l:
+            continue
+        starts += 1
+        cut = "dropped" in l
+        for m in after[i + 1:]:
+            if " speech started" in m:
+                break
+            if "response done status=" in m:
+                cut = cut or "status=cancelled" in m
+                break
+        barges += cut
+print(starts, barges)
+PY
+)
     reason="$(sed -n 's/.* over after_ms=[0-9]* reason=//p' "$log" | head -1)"
     # Median mic level while VOS plays (>= 0.8 s of reply in that second) and with nothing playing.
     read -r echo_db room_db above < <(python3 -I - "$log" <<'PY'
@@ -117,7 +147,7 @@ PY
     sleep 3
 done
 
-echo "replies: $replied of $replies turns; false speech starts after the reply began: $total_starts; cancelled responses: $total_cancelled"
+echo "replies: $replied of $replies turns; speech starts after the reply began: $total_starts; of them false barge-ins (cut the reply): $total_cancelled"
 if (( replied == 0 )); then
     echo "echo-barge: FAIL (no turn got a reply; nothing measured)"
     exit 1
