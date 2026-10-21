@@ -48,6 +48,12 @@ REQUIRED_BIND_PERMISSION = {
     "android.service.notification.NotificationListenerService": "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
     "android.service.voice.VoiceInteractionService": "android.permission.BIND_VOICE_INTERACTION",
     "android.service.quicksettings.action.QS_TILE": "android.permission.BIND_QUICK_SETTINGS_TILE",
+    # VOS offers no speech recognition to apps: the recognition service the assistant must name is the system's only.
+    "android.speech.RecognitionService": "android.permission.BIND_VOICE_INTERACTION",
+}
+# The same, for system-bound services with no intent action of their own, by class name.
+REQUIRED_BIND_PERMISSION_BY_NAME = {
+    "com.vos.actuator.VosAssistSessionService": "android.permission.BIND_VOICE_INTERACTION",
 }
 
 # Where retired names must not appear: code, manifests, resources, build scripts, CI config.
@@ -292,6 +298,10 @@ def check_exported(app, facts, allowlist):
             if need and c["permission"] != need:
                 fails.append(f"{app}: exported {c['kind']} {c['name']} handles {action} but is not guarded by {need} "
                              f"(has {c['permission']!r})")
+        need = REQUIRED_BIND_PERMISSION_BY_NAME.get(c["name"])
+        if need and c["permission"] != need:
+            fails.append(f"{app}: exported {c['kind']} {c['name']} is bound by the system but is not guarded by {need} "
+                         f"(has {c['permission']!r})")
         key = (c["kind"], c["name"])
         seen.add(key)
         if key not in allowlist:

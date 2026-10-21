@@ -10,4 +10,7 @@
     <string name="turn_channel">VOS listening</string>
     <string name="turn_listening">VOS is listening</string>
     <string name="turn_stop">Stop</string>
+    <string name="setup_channel">VOS setup</string>
+    <string name="role_notice_title">VOS is not your assistant</string>
+    <string name="role_notice_text">The assist gesture and the headset button go to another app or to nothing. Tap, then choose VOS under Digital assistant app.</string>
 </resources>

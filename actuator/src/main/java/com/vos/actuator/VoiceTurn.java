@@ -57,6 +57,9 @@ final class VoiceTurn {
     private ParcelFileDescriptor micWrite;
     private ParcelFileDescriptor speakerRead;
     private ParcelFileDescriptor speakerWrite;
+    private final String source;
+    private final long tEvent; // uptimeMillis when VOS got the summon (tile click, assist onShow), or -1
+    private volatile long tRecording = -1; // uptimeMillis when startRecording returned
     private volatile boolean running = true;
     private AudioRecord record;
     private Thread capture;
@@ -67,9 +70,12 @@ final class VoiceTurn {
     private AudioTrack track;
     private final Object trackLock = new Object();
 
-    VoiceTurn(Context context, String turnId, boolean micFromFile, boolean speakerToFile, Consumer<String> ender) {
+    VoiceTurn(Context context, String turnId, String source, long tEvent, boolean micFromFile, boolean speakerToFile,
+            Consumer<String> ender) {
         this.context = context;
         this.turnId = turnId;
+        this.source = source;
+        this.tEvent = tEvent;
         this.micFromFile = micFromFile;
         this.speakerToFile = speakerToFile;
         this.ender = ender;
@@ -208,6 +214,7 @@ final class VoiceTurn {
             enable(NoiseSuppressor.create(session));
         }
         r.startRecording();
+        tRecording = SystemClock.uptimeMillis();
         return r;
     }
 
@@ -218,12 +225,35 @@ final class VoiceTurn {
         }
     }
 
+    /** Milliseconds from VOS getting the summon to {@code t}, or -1 if either is unknown. */
+    private long since(long t) {
+        return tEvent < 0 || t < 0 ? -1 : t - tEvent;
+    }
+
+    private static boolean nonZero(byte[] buf, int n) {
+        for (int k = 0; k < n; k++) {
+            if (buf[k] != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void liveMic(OutputStream out) {
         byte[] buf = new byte[FRAME];
+        boolean heard = false;
         try {
             while (running) {
                 int n = record.read(buf, 0, FRAME, AudioRecord.READ_BLOCKING);
                 if (n > 0) {
+                    if (!heard && nonZero(buf, n)) { // S-07: VOS getting the summon to the first non-zero mic buffer
+                        heard = true;
+                        long now = SystemClock.uptimeMillis();
+                        Log.i(TAG, "summon source=" + source + " turnId=" + turnId + " first_nonzero_ms="
+                                + (tEvent < 0 ? -1 : now - tEvent) + " to_start_command_ms=" + since(TurnService.tStartCommand)
+                                + " to_foreground_ms=" + since(TurnService.tForeground) + " to_plane_ms=" + since(TurnService.tPlane)
+                                + " to_recording_ms=" + since(tRecording));
+                    }
                     out.write(buf, 0, n);
                 } else if (n < 0) { // the record was invalidated (audio server restart, preemption)
                     if (running) {
