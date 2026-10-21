@@ -16,6 +16,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- The assistant-role check after boot (decision 45). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Defense in depth: strip INTERNET even if a library asks for it. ci/policy_check.py checks the APK. -->
     <uses-permission
@@ -70,6 +72,44 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/hands_service" />
         </service>
+
+        <!-- The assistant role (decision 45, §3.1): only the system (BIND_VOICE_INTERACTION) binds
+             these. ci/policy_check.py enforces the guard. -->
+        <service
+            android:name=".VosAssistService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/vos_assistant" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".VosAssistSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+
+        <!-- Required by the voice-interaction-service XML; refuses every request, never opens the mic. -->
+        <service
+            android:name=".VosRecognitionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".BootCheck"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".NotificationsService"

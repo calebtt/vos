@@ -29,6 +29,8 @@ public final class TurnService extends Service {
     static final String ACTION_SUMMON = "com.vos.actuator.action.SUMMON";
     static final String ACTION_STOP = "com.vos.actuator.action.STOP";
     static final String EXTRA_SOURCE = "source";
+    /** {@code SystemClock.uptimeMillis()} when VOS got the summon (the tile click, the assist session showing), for S-07. */
+    static final String EXTRA_T_EVENT = "t_event";
     /** Debug builds only (ignored otherwise): mic from files/debug/mic-inject.pcm, speaker to a file. */
     static final String EXTRA_DEBUG_MIC_FILE = "debug_mic_file";
     static final String EXTRA_DEBUG_SPEAKER_FILE = "debug_speaker_file";
@@ -40,8 +42,18 @@ public final class TurnService extends Service {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     private static volatile TurnService live;
+    private static volatile boolean inForeground; // startForeground succeeded for the current turn
+    /** S-07 breakdown: uptimeMillis when the summon reached onStartCommand, and when startForeground returned. */
+    static volatile long tStartCommand = -1;
+    static volatile long tForeground = -1;
+    static volatile long tPlane = -1; // the AudioPlane's summon (focus, media, mode, device) returned
     private volatile VoiceTurn turn; // read from Binder threads (callTool)
     private final Runnable cap = () -> finish("max turn length");
+
+    /** Has the microphone service reached the foreground (the assist session hides after this)? */
+    static boolean inForeground() {
+        return inForeground;
+    }
 
     /** Is a turn open now (for the tile)? */
     static boolean turnOpen() {
@@ -136,7 +148,7 @@ public final class TurnService extends Service {
         String action = intent == null ? null : intent.getAction();
         String source = intent == null ? null : intent.getStringExtra(EXTRA_SOURCE);
         if (ACTION_SUMMON.equals(action)) {
-            summon(source == null ? "unknown" : source,
+            summon(source == null ? "unknown" : source, intent.getLongExtra(EXTRA_T_EVENT, -1),
                     BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEBUG_MIC_FILE, false),
                     BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEBUG_SPEAKER_FILE, false));
         } else if (ACTION_STOP.equals(action)) {
@@ -149,9 +161,12 @@ public final class TurnService extends Service {
         return START_NOT_STICKY;
     }
 
-    private void summon(String source, boolean micFromFile, boolean speakerToFile) {
+    private void summon(String source, long tEvent, boolean micFromFile, boolean speakerToFile) {
+        tStartCommand = android.os.SystemClock.uptimeMillis();
         try {
             startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+            inForeground = true;
+            tForeground = android.os.SystemClock.uptimeMillis();
         } catch (RuntimeException e) { // ForegroundServiceStartNotAllowedException, SecurityException
             Log.w(VoiceTurn.TAG, "summon refused: cannot start the microphone service (" + e.getClass().getSimpleName() + ")");
             stopSelf();
@@ -162,11 +177,12 @@ public final class TurnService extends Service {
             return;
         }
         String id = ((ActuatorApp) getApplication()).audioPlane().summon(source);
+        tPlane = android.os.SystemClock.uptimeMillis();
         if (id == null) {
             stopTurnService();
             return;
         }
-        turn = new VoiceTurn(this, id, micFromFile, speakerToFile, reason -> MAIN.post(() -> finishIf(id, reason)));
+        turn = new VoiceTurn(this, id, source, tEvent, micFromFile, speakerToFile, reason -> MAIN.post(() -> finishIf(id, reason)));
         // A call that starts during the turn ends it (§3.3: "call starts" goes to RESTORE).
         ((ActuatorApp) getApplication()).audioPlatform().watchCalls(() -> MAIN.post(() -> finishIf(id, "call started")));
         try {
@@ -215,6 +231,7 @@ public final class TurnService extends Service {
     }
 
     private void stopTurnService() {
+        inForeground = false;
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -234,7 +251,12 @@ public final class TurnService extends Service {
 
     /** Summon or stop from any actuator component that has a foreground moment. */
     static void toggle(Context context, String source) {
-        Intent i = new Intent(context, TurnService.class).putExtra(EXTRA_SOURCE, source);
+        toggle(context, source, android.os.SystemClock.uptimeMillis());
+    }
+
+    /** As {@link #toggle(Context, String)}, with the {@code uptimeMillis} at which VOS got the summon, for S-07. */
+    static void toggle(Context context, String source, long tEvent) {
+        Intent i = new Intent(context, TurnService.class).putExtra(EXTRA_SOURCE, source).putExtra(EXTRA_T_EVENT, tEvent);
         if (turnOpen()) {
             context.startService(i.setAction(ACTION_STOP));
         } else {
