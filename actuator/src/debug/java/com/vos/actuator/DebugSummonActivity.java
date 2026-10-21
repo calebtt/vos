@@ -9,7 +9,7 @@ import android.os.Bundle;
  * the foreground moment the microphone service needs; it finishes at once.
  *
  * <pre>
- * am start -n com.vos.actuator/.DebugSummonActivity --es op start [--ez mic_file true] [--ez speaker_file true]
+ * am start -n com.vos.actuator/.DebugSummonActivity --es op start [--ez mic_file true | --ez mic_file_then_live true] [--ez raw_mic true] [--ez speaker_file true]
  * am start -n com.vos.actuator/.DebugSummonActivity --es op stop
  * am start -n com.vos.actuator/.DebugSummonActivity --es op volume --ei stream 3 --ei index 7
  * </pre>
@@ -30,6 +30,8 @@ public final class DebugSummonActivity extends Activity {
         } else {
             startForegroundService(i.setAction(TurnService.ACTION_SUMMON)
                     .putExtra(TurnService.EXTRA_DEBUG_MIC_FILE, in.getBooleanExtra("mic_file", false))
+                    .putExtra(TurnService.EXTRA_DEBUG_MIC_FILE_THEN_LIVE, in.getBooleanExtra("mic_file_then_live", false))
+                    .putExtra(TurnService.EXTRA_DEBUG_RAW_MIC, in.getBooleanExtra("raw_mic", false))
                     .putExtra(TurnService.EXTRA_DEBUG_SPEAKER_FILE, in.getBooleanExtra("speaker_file", false)));
         }
         finish();
