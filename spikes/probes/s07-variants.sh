@@ -49,20 +49,22 @@ trap cleanup EXIT
 adb install -r -t "$apk" >/dev/null
 adb shell pm grant com.vos.spike.s07 android.permission.RECORD_AUDIO
 
-adb logcat -c
-lines() { adb logcat -d -s VOS_S07 | grep -c "VOS_S07 trial" || true; }
-done_n=0
+# Each trial's line is saved as soon as it appears and logcat is cleared after it: over a long run
+# the phone's log buffer wraps, and lines read only at the end would be lost.
+: > "$out/trials.log"
+trial_line() { adb logcat -d -s VOS_S07 | tr -d '\r' | grep "VOS_S07 trial" || true; }
 for i in $(seq "$trials"); do
     for v in "${variants[@]}"; do
+        adb logcat -c
         adb shell input keyevent KEYCODE_WAKEUP
         adb shell am start -n com.vos.spike.s07/.TrialActivity --es variant "$v" >/dev/null
-        done_n=$((done_n + 1))
-        for _ in $(seq 40); do (( $(lines) >= done_n )) && break; sleep 0.2; done
+        line=""
+        for _ in $(seq 40); do line="$(trial_line)"; [ -n "$line" ] && break; sleep 0.2; done
+        if [ -n "$line" ]; then echo "$line" >> "$out/trials.log"; else echo "no trial line for $v in round $i"; fi
         sleep 3
     done
     echo "round $i/$trials done"
 done
-adb logcat -d -s VOS_S07 | tr -d '\r' | grep "VOS_S07 trial" > "$out/trials.log" || true
 echo "$(wc -l < "$out/trials.log") trial lines for $((trials * ${#variants[@]})) trials"
 python3 -I "$ROOT/spikes/probes/summarize.py" "$out/trials.log" | tee "$out/summary.txt"
 

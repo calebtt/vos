@@ -191,11 +191,17 @@ public class MicFgs extends Service {
         }
     }
 
-    /** Reads for RECORD_MS: marks first; puts max_gap (between reads) and zero_run (after first). */
+    /**
+     * Reads for RECORD_MS: marks first; puts max_gap (between reads), zero_run (after first) and
+     * short_ms: how much less audio arrived than the time that passed between the first and last
+     * read. A reroute that only delays reads keeps it near zero; one that drops audio raises it.
+     */
     private static void read(AudioRecord rec, Marks marks) {
         short[] buf = new short[READ_SAMPLES];
         long end = SystemClock.uptimeMillis() + RECORD_MS;
         long last = -1;
+        long firstRead = -1;
+        long samplesAfterFirst = 0;
         long maxGap = 0;
         long zeroRun = 0;
         long maxZeroRun = 0;
@@ -219,10 +225,16 @@ public class MicFgs extends Service {
                 zeroRun = nonzero ? 0 : zeroRun + n;
                 maxZeroRun = Math.max(maxZeroRun, zeroRun);
             }
-            if (last >= 0) maxGap = Math.max(maxGap, now - last);
+            if (last >= 0) {
+                maxGap = Math.max(maxGap, now - last);
+                samplesAfterFirst += n;
+            } else {
+                firstRead = now;
+            }
             last = now;
         }
         marks.put("max_gap_ms", maxGap);
+        marks.put("short_ms", firstRead < 0 ? -1 : (last - firstRead) - samplesAfterFirst * 1000 / RATE);
         marks.put("zero_run_ms", maxZeroRun * 1000 / RATE);
     }
 
