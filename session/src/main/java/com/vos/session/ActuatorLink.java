@@ -38,46 +38,38 @@ final class ActuatorLink implements ModelCalls {
     }
 
     void turnReady(String turnId) {
-        send(a -> {
-            try {
-                a.turnReady(turnId);
-            } catch (RemoteException e) {
-                Log.w(SessionTurns.TAG, "turnReady not delivered: " + e.getClass().getSimpleName());
-            }
-        });
+        oneway("turnReady", a -> a.turnReady(turnId));
     }
 
     void endTurn(String turnId, String reason) {
-        send(a -> {
-            try {
-                a.endTurn(turnId, reason);
-            } catch (RemoteException e) {
-                Log.w(SessionTurns.TAG, "endTurn not delivered: " + e.getClass().getSimpleName());
-            }
-        });
+        oneway("endTurn", a -> a.endTurn(turnId, reason));
     }
 
     /** A model call for this turn started: the actuator's generating indicator (Shell Contract row 13). */
     @Override
     public void started(String turnId, String callId) {
         Log.i(SessionTurns.TAG, "model call started turnId=" + turnId + " t_up=" + android.os.SystemClock.uptimeMillis());
-        send(a -> {
-            try {
-                a.modelCallStarted(turnId, callId);
-            } catch (RemoteException e) {
-                Log.w(SessionTurns.TAG, "modelCallStarted not delivered: " + e.getClass().getSimpleName());
-            }
-        });
+        oneway("modelCallStarted", a -> a.modelCallStarted(turnId, callId));
     }
 
     @Override
     public void ended(String turnId, String callId) {
         Log.i(SessionTurns.TAG, "model call ended turnId=" + turnId + " t_up=" + android.os.SystemClock.uptimeMillis());
+        oneway("modelCallEnded", a -> a.modelCallEnded(turnId, callId));
+    }
+
+    /** One oneway call to the actuator. */
+    private interface Call {
+        void on(IVosActuator a) throws RemoteException;
+    }
+
+    /** Sends a oneway call, queued until the link is up; a failure is logged, never thrown. */
+    private void oneway(String what, Call call) {
         send(a -> {
             try {
-                a.modelCallEnded(turnId, callId);
+                call.on(a);
             } catch (RemoteException e) {
-                Log.w(SessionTurns.TAG, "modelCallEnded not delivered: " + e.getClass().getSimpleName());
+                Log.w(SessionTurns.TAG, what + " not delivered: " + e.getClass().getSimpleName());
             }
         });
     }

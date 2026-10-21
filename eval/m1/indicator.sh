@@ -30,6 +30,10 @@ while (( $# )); do
     esac
     shift
 done
+if ! [[ "$stall" =~ ^[0-9]+$ ]] || (( stall < 4 )); then
+    echo "--stall-s: a whole number of seconds, at least 4" >&2
+    exit 2
+fi
 : "${GROK_API_KEY:?set GROK_API_KEY (used for the fixture; never printed)}"
 
 stamp="$(date +%Y-%m-%d)/indicator-$(date +%H%M%S)"
@@ -43,7 +47,9 @@ a11y_before="$(adb shell settings get secure enabled_accessibility_services | tr
 a11y_on_before="$(adb shell settings get secure accessibility_enabled | tr -d '\r')"
 emulator=0
 [ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" = 1 ] || [ "$(adb shell getprop ro.boot.qemu | tr -d '\r')" = 1 ] && emulator=1
-if [[ ",$a11y_before," != *",$HANDS,"* ]]; then
+# Android lists enabled services separated by ':', each in the short or the full component form.
+has_hands() { tr ':' '\n' <<<"$1" | grep -qxE 'com\.vos\.actuator/(\.|com\.vos\.actuator\.)HandsService'; }
+if ! has_hands "$a11y_before"; then
     if (( ! emulator )); then
         echo "VOS's accessibility service is off on this phone; the overlay needs it. Turning it on is the owner's call: run on the emulator, or enable it in Settings first." >&2
         exit 2
@@ -87,8 +93,12 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
-if (( enabled_by_us )); then
-    adb shell settings put secure enabled_accessibility_services "$HANDS"
+if (( enabled_by_us )); then # added to whatever else is on, never in place of it
+    if [ "$a11y_before" = null ] || [ -z "$a11y_before" ]; then
+        adb shell settings put secure enabled_accessibility_services "$HANDS"
+    else
+        adb shell settings put secure enabled_accessibility_services "$a11y_before:$HANDS"
+    fi
     adb shell settings put secure accessibility_enabled 1
     sleep 3
 fi
