@@ -2,8 +2,10 @@
 # S-07 follow-up (#261): where VOS's summon-to-mic time goes. Runs the S-07 probe's audio-path
 # variants (see MicFgs) N times each, round-robin, from TrialActivity (am start: no Quick Settings
 # change), 3 s apart so every capture opens cold like a real summon. Then summarizes each variant's
-# steps, uninstalls the probe, and checks the phone is as it was: the audio mode normal and the
-# assistant role holder unchanged. The probe makes no sound; the live mic runs 08:00-22:00 only.
+# steps, checks the audio mode is back to normal (before uninstalling, so the probe's own restore is
+# what is tested), uninstalls the probe, and checks it is gone and the assistant role holder is
+# unchanged. It fails unless every variant has N ok trials. The probe makes no sound; the live mic
+# runs 08:00-22:00 only.
 #
 # Usage: spikes/probes/s07-variants.sh [--no-build] [--trials N] [variant ...]
 
@@ -41,9 +43,10 @@ mode_before="$(mode)"
 echo "before: assistant '$holder_before', audio mode $mode_before"
 [ "$mode_before" = MODE_NORMAL ] || { echo "the audio mode is $mode_before (a call?): not starting" >&2; exit 1; }
 
+installed() { adb shell pm list packages com.vos.spike.s07 | tr -d '\r' | grep -c . || true; }
 cleanup() {
     adb uninstall com.vos.spike.s07 >/dev/null 2>&1 || true
-    echo "after: assistant '$(holder)', audio mode $(mode), probe $(adb shell pm list packages com.vos.spike.s07 | tr -d '\r' | grep -c . || true) installed"
+    echo "after: assistant '$(holder)', audio mode $(mode), probe $(installed) installed"
 }
 trap cleanup EXIT
 adb install -r -t "$apk" >/dev/null
@@ -68,10 +71,19 @@ done
 echo "$(wc -l < "$out/trials.log") trial lines for $((trials * ${#variants[@]})) trials"
 python3 -I "$ROOT/spikes/probes/summarize.py" "$out/trials.log" | tee "$out/summary.txt"
 
+fails=0
+for v in "${variants[@]}"; do
+    ok="$(grep -c " variant=$v .* ok=true " "$out/trials.log" || true)"
+    (( ok == trials )) || { echo "FAIL $v: $ok of $trials trials ok"; fails=1; }
+done
+# Before uninstalling: the probe's own restore is what has to have put the mode back.
+mode_after="$(mode)"
+[ "$mode_after" = MODE_NORMAL ] || { echo "FAIL audio mode after the trials is $mode_after"; fails=1; }
 cleanup
 trap - EXIT
-fails=0
+[ "$(installed)" -eq 0 ] || { echo "FAIL the probe is still installed"; fails=1; }
 [ "$(holder)" = "$holder_before" ] || { echo "FAIL assistant holder changed: '$(holder)'"; fails=1; }
-[ "$(mode)" = MODE_NORMAL ] || { echo "FAIL audio mode is $(mode)"; fails=1; }
-(( fails == 0 )) && echo "phone restored: assistant '$holder_before', MODE_NORMAL, probe uninstalled"
+if (( fails == 0 )); then
+    echo "PASS all trials ok; phone restored: assistant '$holder_before', MODE_NORMAL, probe uninstalled"
+fi
 exit "$fails"

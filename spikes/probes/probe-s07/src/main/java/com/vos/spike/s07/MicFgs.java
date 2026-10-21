@@ -131,6 +131,11 @@ public class MicFgs extends Service {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
+                if (planeThread.isAlive() && err == null) {
+                    // take() may still set the mode after restore(): not a valid trial (the runner then
+                    // finds the mode left changed and fails).
+                    err = "plane_thread_still_running_after_5s";
+                }
             }
             if (rec != null) {
                 AudioDeviceInfo routed = rec.getRoutedDevice();
@@ -348,16 +353,37 @@ public class MicFgs extends Service {
             return t;
         }
 
-        /** Gives back what take() took; returns an error description, or null. */
+        /**
+         * Gives back what take() took, each step on its own so one failure does not skip the others
+         * (like VOS's AudioPlane.undo); returns an error description, or null.
+         */
         String restore() {
-            try {
-                if (deviceSet) am.clearCommunicationDevice();
-                if (savedMode >= 0) am.setMode(savedMode);
-                if (focus != null) am.abandonAudioFocusRequest(focus);
-                return asyncErr;
-            } catch (RuntimeException e) {
-                return "restore:" + Probe.describe(e);
+            List<String> failed = new ArrayList<>();
+            if (deviceSet) {
+                try {
+                    am.clearCommunicationDevice();
+                } catch (RuntimeException e) {
+                    failed.add("clearCommunicationDevice:" + e.getClass().getSimpleName());
+                }
             }
+            if (savedMode >= 0) {
+                try {
+                    am.setMode(savedMode);
+                } catch (RuntimeException e) {
+                    failed.add("setMode:" + e.getClass().getSimpleName());
+                }
+            }
+            if (focus != null) {
+                try {
+                    am.abandonAudioFocusRequest(focus);
+                } catch (RuntimeException e) {
+                    failed.add("abandonAudioFocusRequest:" + e.getClass().getSimpleName());
+                }
+            }
+            if (!failed.isEmpty()) {
+                return "restore:" + String.join(",", failed);
+            }
+            return asyncErr;
         }
     }
 }
