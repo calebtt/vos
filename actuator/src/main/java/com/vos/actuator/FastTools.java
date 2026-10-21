@@ -109,6 +109,14 @@ public final class FastTools {
         this.platform = platform;
     }
 
+    /** The tools {@link #run} knows; anything else is FAILED without acting. */
+    static final java.util.Set<String> NAMES = java.util.Set.of("time_get", "volume_set", "volume_step", "media_control");
+
+    /** Whether {@code name} is a tool {@link #run} can run (the indicator shows acting only for these). */
+    static boolean knows(String name) {
+        return name != null && NAMES.contains(name);
+    }
+
     /** Runs {@code name} with the session's JSON arguments. Never throws for bad input. */
     public Result run(String name, String argsJson, MediaIntent media) {
         JSONObject args;

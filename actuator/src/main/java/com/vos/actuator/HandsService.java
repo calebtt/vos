@@ -8,6 +8,7 @@ import android.graphics.PixelFormat;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
@@ -66,10 +67,16 @@ public final class HandsService extends AccessibilityService {
     public void onInterrupt() {
     }
 
-    /** Draws the indicator's state: nothing when IDLE, else the chip, spinning while GENERATING. */
+    /**
+     * Draws the indicator's state: nothing when IDLE, else the chip, spinning while GENERATING. The
+     * "indicator drawn" line (the eval's timing) is logged when the chip's next frame is about to be
+     * drawn, or when its window is removed; a call that changes nothing logs nothing.
+     */
     void show(Indicator.State state) {
         if (state == Indicator.State.IDLE) {
-            remove();
+            if (remove()) {
+                Log.i(TAG, "indicator drawn state=IDLE t_up=" + SystemClock.uptimeMillis());
+            }
         } else {
             if (chip == null && !add()) {
                 return; // the overlay cannot be drawn now; the notification title still carries the state
@@ -83,8 +90,22 @@ public final class HandsService extends AccessibilityService {
                 spin.cancel();
                 chip.setRotation(0);
             }
+            logNextFrame(chip, state);
         }
-        Log.i(TAG, "indicator drawn state=" + state + " t_up=" + SystemClock.uptimeMillis());
+    }
+
+    /** Logs "indicator drawn" just before the chip's next frame (once). */
+    private static void logNextFrame(ImageView view, Indicator.State state) {
+        ViewTreeObserver vto = view.getViewTreeObserver();
+        vto.addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                view.getViewTreeObserver().removeOnPreDrawListener(this);
+                Log.i(TAG, "indicator drawn state=" + state + " t_up=" + SystemClock.uptimeMillis());
+                return true;
+            }
+        });
+        view.invalidate();
     }
 
     /** Adds the chip window; false (nothing added) if the system refuses, e.g. the service was just unbound. */
@@ -120,9 +141,10 @@ public final class HandsService extends AccessibilityService {
         return true;
     }
 
-    private void remove() {
+    /** Removes the chip's window; false if there was none. */
+    private boolean remove() {
         if (chip == null) {
-            return;
+            return false;
         }
         spin.cancel();
         try {
@@ -132,5 +154,6 @@ public final class HandsService extends AccessibilityService {
         }
         chip = null;
         spin = null;
+        return true;
     }
 }
