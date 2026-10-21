@@ -27,6 +27,8 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -38,17 +40,26 @@ import java.util.function.Consumer;
  * <p>Debug builds can replace the mic with a pushed PCM file ({@code files/debug/mic-inject.pcm},
  * played in real time and followed by silence, like a quiet mic) and the speaker with a file
  * ({@code files/debug/speaker-<turnId>.pcm}), so a turn can be tested without speaking or making
- * a sound. Release builds never get those flags (TurnService).
+ * a sound. {@link Mic#FILE_THEN_LIVE} opens the live mic as in production but sends the pushed PCM
+ * in place of its first frames, then the room: a question nobody has to speak, followed by what the
+ * mic really hears (#249: VOS's own reply on the speaker). {@code rawMic} (debug) records from
+ * {@code MIC} with no AEC or NS, the control for that echo test. Release builds never get those
+ * flags (TurnService).
  */
 final class VoiceTurn {
     static final String TAG = "VOS_TURN";
+
+    /** Where the turn's mic audio comes from; anything but LIVE is debug-only (TurnService). */
+    enum Mic { LIVE, FILE, FILE_THEN_LIVE }
+
     private static final int RATE = Ipc.TURN_SAMPLE_RATE;
     private static final int FRAME = Ipc.TURN_FRAME_BYTES;
 
     final String turnId;
     final boolean speakerToFile;
     private final Context context;
-    private final boolean micFromFile;
+    private final Mic mic;
+    private final boolean rawMic;
     private final Consumer<String> ender;
     private final long openedAt = SystemClock.elapsedRealtime();
     private final List<AudioEffect> effects = new ArrayList<>();
@@ -69,14 +80,17 @@ final class VoiceTurn {
     /** The playing track; set and released by play() under {@link #trackLock}, only paused by close(). */
     private AudioTrack track;
     private final Object trackLock = new Object();
+    /** Reply bytes handed to the speaker so far (debug: the mic level line's played_bytes, #249). */
+    private final AtomicLong played = new AtomicLong();
 
-    VoiceTurn(Context context, String turnId, String source, long tEvent, boolean micFromFile, boolean speakerToFile,
+    VoiceTurn(Context context, String turnId, String source, long tEvent, Mic mic, boolean rawMic, boolean speakerToFile,
             Consumer<String> ender) {
         this.context = context;
         this.turnId = turnId;
         this.source = source;
         this.tEvent = tEvent;
-        this.micFromFile = micFromFile;
+        this.mic = mic;
+        this.rawMic = rawMic;
         this.speakerToFile = speakerToFile;
         this.ender = ender;
     }
@@ -90,12 +104,13 @@ final class VoiceTurn {
         speakerRead = speaker[0];
         speakerWrite = speaker[1];
         OutputStream micOut = new ParcelFileDescriptor.AutoCloseOutputStream(micWrite);
-        if (micFromFile) {
-            byte[] pcm = Files.readAllBytes(new File(context.getFilesDir(), "debug/mic-inject.pcm").toPath());
+        if (this.mic == Mic.FILE) {
+            byte[] pcm = injected();
             capture = new Thread(() -> fileMic(pcm, micOut), "vos-mic-file");
         } else {
+            byte[] prefix = this.mic == Mic.FILE_THEN_LIVE ? injected() : null;
             record = openRecord();
-            capture = new Thread(() -> liveMic(micOut), "vos-mic");
+            capture = new Thread(() -> liveMic(micOut, prefix), "vos-mic");
         }
         capture.start();
         playback = new Thread(this::play, "vos-speaker");
@@ -193,7 +208,7 @@ final class VoiceTurn {
         AudioRecord r;
         try {
             r = new AudioRecord.Builder()
-                    .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+                    .setAudioSource(rawMic ? MediaRecorder.AudioSource.MIC : MediaRecorder.AudioSource.VOICE_COMMUNICATION)
                     .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE)
                             .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                             .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
@@ -207,15 +222,33 @@ final class VoiceTurn {
             throw new IOException("mic did not initialize");
         }
         int session = r.getAudioSessionId();
-        if (AcousticEchoCanceler.isAvailable()) {
+        if (AcousticEchoCanceler.isAvailable() && !rawMic) {
             enable(AcousticEchoCanceler.create(session));
         }
-        if (NoiseSuppressor.isAvailable()) {
+        if (NoiseSuppressor.isAvailable() && !rawMic) {
             enable(NoiseSuppressor.create(session));
         }
         r.startRecording();
         tRecording = SystemClock.uptimeMillis();
+        AudioDeviceInfo in = r.getRoutedDevice();
+        Log.i(TAG, "capture turnId=" + turnId + " source=" + (rawMic ? "MIC" : "VOICE_COMMUNICATION") + " aec=" + enabled(AcousticEchoCanceler.class)
+                + " ns=" + enabled(NoiseSuppressor.class) + " inDev=" + (in == null ? "none" : in.getType()));
         return r;
+    }
+
+    /** Whether an effect of this class was created and enabled for the capture. */
+    private boolean enabled(Class<? extends AudioEffect> type) {
+        for (AudioEffect e : effects) {
+            if (type.isInstance(e) && e.getEnabled()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Debug: the pushed PCM ({@code files/debug/mic-inject.pcm}). */
+    private byte[] injected() throws IOException {
+        return Files.readAllBytes(new File(context.getFilesDir(), "debug/mic-inject.pcm").toPath());
     }
 
     private void enable(AudioEffect e) {
@@ -239,9 +272,15 @@ final class VoiceTurn {
         return false;
     }
 
-    private void liveMic(OutputStream out) {
+    /** The live mic; with a {@code prefix} (debug), its bytes go out in place of the first frames read. */
+    private void liveMic(OutputStream out, byte[] prefix) {
         byte[] buf = new byte[FRAME];
         boolean heard = false;
+        int prefixOff = prefix == null ? -1 : 0;
+        int prefixLen = prefix == null ? 0 : prefix.length & ~1; // whole 16-bit samples only
+        double sumSq = 0;
+        int samples = 0;
+        long lastPlayed = 0;
         try {
             while (running) {
                 int n = record.read(buf, 0, FRAME, AudioRecord.READ_BLOCKING);
@@ -253,6 +292,32 @@ final class VoiceTurn {
                                 + (tEvent < 0 ? -1 : now - tEvent) + " to_start_command_ms=" + since(TurnService.tStartCommand)
                                 + " to_foreground_ms=" + since(TurnService.tForeground) + " to_plane_ms=" + since(TurnService.tPlane)
                                 + " to_recording_ms=" + since(tRecording));
+                    }
+                    if (BuildConfig.DEBUG) { // #249: the live mic's level each second, and the reply audio played meanwhile
+                        for (int k = 0; k + 1 < n; k += 2) {
+                            int v = (short) ((buf[k] & 0xff) | (buf[k + 1] << 8));
+                            sumSq += (double) v * v;
+                        }
+                        samples += n / 2;
+                        if (samples >= RATE) {
+                            long p = played.get();
+                            double rms = Math.sqrt(sumSq / samples);
+                            Log.i(TAG, "mic level turnId=" + turnId + " t_ms=" + (SystemClock.elapsedRealtime() - openedAt)
+                                    + " dbfs=" + String.format(Locale.ROOT, "%.1f", 20 * Math.log10(Math.max(rms, 1) / 32768.0))
+                                    + " played_bytes=" + (p - lastPlayed));
+                            lastPlayed = p;
+                            sumSq = 0;
+                            samples = 0;
+                        }
+                    }
+                    if (prefixOff >= 0) { // the rest of a frame the prefix ends in stays live
+                        int k = Math.min(n, prefixLen - prefixOff);
+                        System.arraycopy(prefix, prefixOff, buf, 0, k);
+                        prefixOff += k;
+                        if (prefixOff >= prefixLen) {
+                            prefixOff = -1;
+                            Log.i(TAG, "turn " + turnId + " mic prefix done, live from here");
+                        }
                     }
                     out.write(buf, 0, n);
                 } else if (n < 0) { // the record was invalidated (audio server restart, preemption)
@@ -321,6 +386,7 @@ final class VoiceTurn {
                     }
                 }
                 bytes += n;
+                played.addAndGet(n);
                 if (sink != null) {
                     sink.write(buf, 0, n);
                 } else {
