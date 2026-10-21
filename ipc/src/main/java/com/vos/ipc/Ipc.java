@@ -5,8 +5,11 @@ import android.content.Intent;
 
 /** Names and the protocol version shared by the session and the actuator (§3.1, §5.3). */
 public final class Ipc {
-    /** Bumped on any incompatible change to IVosActuator or IVosSession. 2: voice turns. 3: callTool. */
-    public static final int PROTOCOL_VERSION = 3;
+    /**
+     * Bumped on any incompatible change to IVosActuator or IVosSession. 2: voice turns. 3: callTool.
+     * 4: modelCallStarted/modelCallEnded (the generating indicator).
+     */
+    public static final int PROTOCOL_VERSION = 4;
 
     /** Turn audio on both pipes: mono, signed 16-bit little-endian, at this rate (§3.2). */
     public static final int TURN_SAMPLE_RATE = 16000;

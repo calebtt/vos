@@ -30,6 +30,8 @@ import org.json.JSONArray;
  *       time plus that lead; a barge-in (the vendor's VAD hears the owner) drops the interrupted
  *       response's queued audio and any of its deltas that arrive afterwards, so at most about one
  *       lead of it is still in the pipe;</li>
+ *   <li>each vendor response is a model call for the actuator's generating indicator ({@link ModelCalls}):
+ *       started at {@code response.created}, ended at {@code response.done}, whatever its status;</li>
  *   <li>a tool call goes to the actuator ({@link ToolCaller}) off the WebSocket thread, and its result
  *       (VERIFIED, UNVERIFIED or FAILED from the actuator's oracle) goes back to the model. The calls
  *       of one response form a batch: the model is asked to answer once, after all their results. If
@@ -76,10 +78,11 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
     private final Supplier<String> instructions;
     private final JSONArray toolSchemas;
     private final ToolCaller tools;
+    private final ModelCalls calls;
     private final Timing timing;
 
     XaiRealtimeBackend(Egress egress, KeyVault vault, ModelPolicy.Entry model, TranscriptLog transcripts,
-            Supplier<String> instructions, JSONArray toolSchemas, ToolCaller tools, Timing timing) {
+            Supplier<String> instructions, JSONArray toolSchemas, ToolCaller tools, ModelCalls calls, Timing timing) {
         this.egress = egress;
         this.vault = vault;
         this.model = model;
@@ -87,6 +90,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         this.instructions = instructions;
         this.toolSchemas = toolSchemas;
         this.tools = tools;
+        this.calls = calls;
         this.timing = timing;
     }
 
@@ -393,6 +397,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void responseCreated(String responseId) {
+            calls.started(turnId, responseId); // the model is producing output (the indicator spins)
             if (responseId.isEmpty()) {
                 return;
             }
@@ -453,6 +458,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void responseDone(String responseId, String status) {
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
+            calls.ended(turnId, responseId); // completed, cancelled or failed: it no longer produces output
             boolean hadCall = responseHadCall;
             responseHadCall = false;
             if ("cancelled".equals(status) || cancelled(responseId)) {
