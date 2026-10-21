@@ -1,6 +1,7 @@
 package com.vos.actuator;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
@@ -83,6 +84,18 @@ public class FastToolsTest {
 
     private JSONObject run(String name, String args) throws Exception {
         return tools.run(name, args, media).json;
+    }
+
+    @Test
+    public void knowsExactlyTheToolsItRuns() throws Exception {
+        for (String n : FastTools.NAMES) {
+            assertTrue(n, FastTools.knows(n));
+            assertFalse(n + " is dispatched, not unknown",
+                    run(n, "{}").optString("detail").equals("unknown tool"));
+        }
+        assertFalse(FastTools.knows("rm_rf"));
+        assertFalse(FastTools.knows(null));
+        assertEquals("unknown tool", run("rm_rf", "{}").getString("detail"));
     }
 
     @Test

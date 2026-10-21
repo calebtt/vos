@@ -132,7 +132,7 @@ python3 -I - "$out/leg1.txt" > "$out/leg1-times.txt" <<'PY'
 import re, sys
 ev = []
 for line in open(sys.argv[1]):
-    m = re.search(r"model call (started|ended) turnId=\S+ t_up=(\d+)", line)
+    m = re.search(r"model call (started|ended) turnId=\S+ callId=\S+ t_up=(\d+)", line)
     if m:
         ev.append((int(m.group(2)), "call_" + m.group(1)))
     m = re.search(r"indicator drawn state=(\w+) t_up=(\d+)", line)
@@ -165,7 +165,19 @@ check "the chip spun <= 200 ms after a call started (ms: $show_ms)" "[ '$show_ms
 check "the chip cleared <= 200 ms after the last call ended (ms: $clear_ms)" "[ '$clear_ms' != - ] && python3 -c 'import sys; sys.exit(0 if max(map(int, \"$clear_ms\".split(\",\"))) <= 200 else 1)'"
 check "the tool showed the acting state ($acting times)" "(( acting >= 1 ))"
 check "nothing showing after the turn (last drawn: $final)" "[ '$final' = IDLE ]"
-check "the tool ran and was VERIFIED" "adb shell 'run-as com.vos.actuator cat files/audit/audit.jsonl' | tail -20 | grep '\"tool\":\"volume_set\"' | grep -q VERIFIED"
+turn="$(sed -n 's/.*turn opened in session turnId=\([0-9a-f-]*\).*/\1/p' "$out/leg1.txt" | head -1)"
+check "this turn's tool ran and was VERIFIED (turn ${turn:-?})" "[ -n '$turn' ] && adb shell 'run-as com.vos.actuator cat files/audit/audit.jsonl' | grep -F '\"turnId\":\"$turn\"' | grep '\"tool\":\"volume_set\"' | grep -q VERIFIED"
+pairs="$(python3 -I - "$out/leg1.txt" <<'PY'
+import re, sys
+started, ended = set(), set()
+for line in open(sys.argv[1]):
+    m = re.search(r"model call (started|ended) turnId=(\S+) callId=(\S+) ", line)
+    if m:
+        (started if m.group(1) == "started" else ended).add((m.group(2), m.group(3)))
+print("ok" if started and started == ended else f"unpaired: started {sorted(started - ended)} ended {sorted(ended - started)}")
+PY
+)"
+check "every model call the session started also ended ($pairs)" "[ '$pairs' = ok ]"
 
 echo "== leg 2: a stalled model call for ${stall} s, then stop"
 adb shell "run-as com.vos.session sh -c 'mkdir -p files/debug && echo debug:echo > files/debug/chat_voice'"

@@ -48,13 +48,15 @@ final class ActuatorLink implements ModelCalls {
     /** A model call for this turn started: the actuator's generating indicator (Shell Contract row 13). */
     @Override
     public void started(String turnId, String callId) {
-        Log.i(SessionTurns.TAG, "model call started turnId=" + turnId + " t_up=" + android.os.SystemClock.uptimeMillis());
+        Log.i(SessionTurns.TAG, "model call started turnId=" + turnId + " callId=" + callId + " t_up="
+                + android.os.SystemClock.uptimeMillis());
         oneway("modelCallStarted", a -> a.modelCallStarted(turnId, callId));
     }
 
     @Override
     public void ended(String turnId, String callId) {
-        Log.i(SessionTurns.TAG, "model call ended turnId=" + turnId + " t_up=" + android.os.SystemClock.uptimeMillis());
+        Log.i(SessionTurns.TAG, "model call ended turnId=" + turnId + " callId=" + callId + " t_up="
+                + android.os.SystemClock.uptimeMillis());
         oneway("modelCallEnded", a -> a.modelCallEnded(turnId, callId));
     }
 

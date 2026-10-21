@@ -89,7 +89,10 @@ public final class TurnService extends Service {
         if (t == null || !t.turnId.equals(turnId) || app.audioPlane().state() != AudioPlane.State.CONVERSE) {
             r = FastTools.Result.of(FastTools.Status.FAILED, "detail", "no open turn " + turnId);
         } else {
-            app.indicator().actingStarted(turnId); // the actuator acts: the indicator's acting state
+            boolean acts = FastTools.knows(name); // an unknown tool fails without acting: no acting state for it
+            if (acts) {
+                app.indicator().actingStarted(turnId); // the actuator acts: the indicator's acting state
+            }
             try {
                 r = app.fastTools().run(name, argsJson, new FastTools.MediaIntent() {
                     @Override
@@ -103,7 +106,9 @@ public final class TurnService extends Service {
                     }
                 });
             } finally {
-                app.indicator().actingEnded(turnId);
+                if (acts) {
+                    app.indicator().actingEnded(turnId);
+                }
             }
             Earcons.play(app, r.status, t.speakerToFile); // never throws: the result and audit line follow
         }
@@ -292,10 +297,6 @@ public final class TurnService extends Service {
         if (s != null && s.turn != null && inForeground) {
             s.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, s.notification(pendingTitle));
         }
-    }
-
-    private Notification notification() {
-        return notification(Indicator.State.IDLE);
     }
 
     private Notification notification(Indicator.State state) {
