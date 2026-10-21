@@ -22,6 +22,11 @@ final class Indicator {
     /** More open calls than this for one turn are not tracked (the indicator already spins). */
     static final int MAX_CALLS = 16;
 
+    /** A call id from the session: printable ASCII without spaces, at most 64 characters. Anything else is refused. */
+    static boolean validCallId(String id) {
+        return id != null && !id.isEmpty() && id.length() <= 64 && id.chars().allMatch(c -> c > 0x20 && c < 0x7f);
+    }
+
     private final View view;
     private String turnId; // the turn the actuator has open, or null
     private final Set<String> calls = new HashSet<>();
@@ -50,9 +55,9 @@ final class Indicator {
         }
     }
 
-    /** Returns false if ignored: not the open turn, or too many open calls. */
+    /** Returns false if ignored: not the open turn, a malformed call id, or too many open calls. */
     synchronized boolean callStarted(String turn, String callId) {
-        if (!isOpen(turn) || calls.size() >= MAX_CALLS) {
+        if (!isOpen(turn) || !validCallId(callId) || calls.size() >= MAX_CALLS) {
             return false;
         }
         calls.add(callId);

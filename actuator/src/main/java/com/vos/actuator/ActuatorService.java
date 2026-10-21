@@ -55,13 +55,13 @@ public final class ActuatorService extends Service {
         @Override
         public void modelCallStarted(String turnId, String callId) {
             guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
-            ((ActuatorApp) getApplication()).indicator().callStarted(clip(turnId), clip(callId));
+            ((ActuatorApp) getApplication()).indicator().callStarted(turnId, callId); // ids are checked there, not clipped
         }
 
         @Override
         public void modelCallEnded(String turnId, String callId) {
             guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
-            ((ActuatorApp) getApplication()).indicator().callEnded(clip(turnId), clip(callId));
+            ((ActuatorApp) getApplication()).indicator().callEnded(turnId, callId);
         }
     };
 

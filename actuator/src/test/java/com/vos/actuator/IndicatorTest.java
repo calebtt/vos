@@ -108,6 +108,20 @@ public class IndicatorTest {
     }
 
     @Test
+    public void malformedIdsAreRefusedNotClipped() {
+        ind.turnOpened("t1");
+        assertFalse(ind.callStarted(null, "r1"));
+        assertFalse(ind.callStarted("t1", null));
+        assertFalse(ind.callStarted("t1", ""));
+        assertFalse(ind.callStarted("t1", "has space"));
+        assertFalse(ind.callStarted("t1", "x".repeat(65)));
+        assertFalse(ind.callStarted("t1", "nul\u0000"));
+        assertTrue(ind.callStarted("t1", "x".repeat(64)));
+        ind.callEnded("t1", null); // nothing to end, no throw
+        assertEquals(State.GENERATING, ind.state());
+    }
+
+    @Test
     public void unbalancedActingEndsDoNotGoNegative() {
         ind.turnOpened("t1");
         ind.actingEnded("t1");

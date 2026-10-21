@@ -8,6 +8,7 @@ import android.graphics.PixelFormat;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.animation.LinearInterpolator;
@@ -100,10 +101,13 @@ public final class HandsService extends AccessibilityService {
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.END;
         lp.x = size / 2;
-        lp.y = size * 2; // below the status bar
+        WindowManager wm = getSystemService(WindowManager.class);
+        int top = wm.getCurrentWindowMetrics().getWindowInsets()
+                .getInsets(WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout()).top;
+        lp.y = top + size / 4; // just below the status bar and any cutout
         lp.setTitle("VOS indicator"); // what eval/m1/indicator.sh looks for in dumpsys window
         try {
-            getSystemService(WindowManager.class).addView(chip, lp);
+            wm.addView(chip, lp);
         } catch (RuntimeException e) { // WindowManager.BadTokenException and the like: never crash the actuator
             Log.w(TAG, "indicator overlay not added: " + e.getClass().getSimpleName());
             chip = null;

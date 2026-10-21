@@ -185,7 +185,9 @@ public final class TurnService extends Service {
     private void summon(String source, long tEvent, VoiceTurn.Mic mic, boolean rawMic, boolean speakerToFile) {
         tStartCommand = android.os.SystemClock.uptimeMillis();
         try {
-            startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+            // The current state, not IDLE: a second summon during a turn must not reset the title.
+            startForeground(NOTIFICATION_ID, notification(((ActuatorApp) getApplication()).indicator().state()),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
             inForeground = true;
             tForeground = android.os.SystemClock.uptimeMillis();
         } catch (RuntimeException e) { // ForegroundServiceStartNotAllowedException, SecurityException
