@@ -14,7 +14,7 @@ import org.json.JSONObject;
  * ModelRouter v0 (§3.2.1): the checked-in registry and policy table ({@code res/raw/model_policy.json}).
  * For a task class it walks the policy's ordered list and returns the first entry that is available
  * (its key is present, it is not debug-only in a release build). A debug build may put one id first
- * with an override (eval/m1). Only {@code chat_voice} is bound in this build.
+ * with an override (eval/m1). {@code chat_voice} and {@code compact} (decision 46) are bound in this build.
  */
 public final class ModelPolicy {
     /** One registry entry; {@code fields} keeps the whole JSON object for the backend's own settings. */

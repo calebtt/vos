@@ -1,6 +1,6 @@
 {
   "version": 0,
-  "_comment": "ModelRouter v0 (TARGET-PLAN §3.2.1): the model registry and, per task class, the ordered backends to try. Only chat_voice is bound in this build. debug_only entries exist in debug builds only. The router records the model the vendor reports serving, which can differ from the one asked for.",
+  "_comment": "ModelRouter v0 (TARGET-PLAN §3.2.1): the model registry and, per task class, the ordered backends to try. chat_voice and compact (decision 46) are bound in this build. debug_only entries exist in debug builds only. The router records the model the vendor reports serving, which can differ from the one asked for. context_window and max_output_tokens feed decision 46's context budget; xAI does not publish grok-voice-3.0's window, so the value is a conservative estimate.",
   "registry": [
     {
       "id": "xai:grok-voice-3.0",
@@ -10,8 +10,26 @@
       "model": "grok-voice-3.0",
       "voice": "ara",
       "url": "wss://api.x.ai/v1/realtime",
-      "egress_hosts": ["api.x.ai"],
-      "cost_tier": 2
+      "egress_hosts": [
+        "api.x.ai"
+      ],
+      "cost_tier": 2,
+      "context_window": 32768,
+      "max_output_tokens": 1024
+    },
+    {
+      "id": "xai:grok-4.20-0309-non-reasoning",
+      "kind": "text_chat",
+      "where": "cloud:xai",
+      "vendor": "xai",
+      "model": "grok-4.20-0309-non-reasoning",
+      "url": "https://api.x.ai/v1/chat/completions",
+      "egress_hosts": [
+        "api.x.ai"
+      ],
+      "context_window": 131072,
+      "max_output_tokens": 2048,
+      "cost_tier": 1
     },
     {
       "id": "debug:echo",
@@ -22,6 +40,11 @@
     }
   ],
   "policy": {
-    "chat_voice": ["xai:grok-voice-3.0"]
+    "chat_voice": [
+      "xai:grok-voice-3.0"
+    ],
+    "compact": [
+      "xai:grok-4.20-0309-non-reasoning"
+    ]
   }
 }
