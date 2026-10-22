@@ -17,15 +17,16 @@
 # Needs GROK_API_KEY (the fixtures; sealing the key into the session if it holds none) and python3
 # with `websockets`, like fast-tools.sh.
 #
-# The default budget (500 tokens) leaves the summary 125 tokens; much smaller and the summary's own
-# framing crowds out what it must keep.
+# The default budget (450 tokens) leaves the summary 112 tokens and keeps about three turns verbatim,
+# so ten turns compact at least twice; much smaller and the summary's own framing crowds out what it
+# must keep.
 #
 # Usage: eval/m1/context-budget.sh [--no-build] [--budget TOKENS] [--restore-volumes]
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-build=1 budget=500 restore=0
+build=1 budget=450 restore=0
 while (( $# )); do
     case "$1" in
         --no-build) build=0 ;;
