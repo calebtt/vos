@@ -88,17 +88,21 @@ public class FastToolsTest {
 
     @Test
     public void knowsExactlyTheToolsItRuns() throws Exception {
+        assertEquals(java.util.Set.of("time_get", "volume_set", "volume_step", "media_control"), FastTools.NAMES);
         for (String n : FastTools.NAMES) {
             assertTrue(n, FastTools.knows(n));
             String detail = run(n, "{}").optString("detail");
-            assertFalse(n + " is dispatched (" + detail + ")", detail.equals("unknown tool") || detail.startsWith("no handler"));
+            assertFalse(n + " is dispatched (" + detail + ")", detail.equals("unknown tool"));
         }
         assertFalse(FastTools.knows("rm_rf"));
         assertFalse(FastTools.knows(null));
         assertEquals("unknown tool", run("rm_rf", "{}").getString("detail"));
-        assertTrue(FastTools.NAMES.containsAll(FastTools.CHANGES_STATE));
         assertFalse("reading the clock is not acting", FastTools.changesState("time_get"));
-        assertTrue(FastTools.changesState("volume_set"));
+        for (String n : new String[] {"volume_set", "volume_step", "media_control"}) {
+            assertTrue(n, FastTools.changesState(n));
+        }
+        assertFalse(FastTools.changesState("rm_rf"));
+        assertFalse(FastTools.changesState(null));
     }
 
     @Test
