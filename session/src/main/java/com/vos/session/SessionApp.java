@@ -98,11 +98,11 @@ public final class SessionApp extends Application {
             return null;
         }
         if (e.id.equals("debug:echo")) {
-            return new EchoBackend();
+            return new EchoBackend(actuatorLink());
         }
         if ("xai".equals(e.vendor) && "realtime_voice".equals(e.kind)) {
             return new XaiRealtimeBackend(egress, keyVault, e, transcripts, SessionApp::instructions, fastTools,
-                    actuatorLink()::callTool, new XaiRealtimeBackend.Timing());
+                    actuatorLink()::callTool, actuatorLink(), new XaiRealtimeBackend.Timing());
         }
         return null;
     }

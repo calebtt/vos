@@ -1,6 +1,7 @@
 package com.vos.actuator;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
@@ -83,6 +84,25 @@ public class FastToolsTest {
 
     private JSONObject run(String name, String args) throws Exception {
         return tools.run(name, args, media).json;
+    }
+
+    @Test
+    public void knowsExactlyTheToolsItRuns() throws Exception {
+        assertEquals(java.util.Set.of("time_get", "volume_set", "volume_step", "media_control"), FastTools.NAMES);
+        for (String n : FastTools.NAMES) {
+            assertTrue(n, FastTools.knows(n));
+            String detail = run(n, "{}").optString("detail");
+            assertFalse(n + " is dispatched (" + detail + ")", detail.equals("unknown tool"));
+        }
+        assertFalse(FastTools.knows("rm_rf"));
+        assertFalse(FastTools.knows(null));
+        assertEquals("unknown tool", run("rm_rf", "{}").getString("detail"));
+        assertFalse("reading the clock is not acting", FastTools.changesState("time_get"));
+        for (String n : new String[] {"volume_set", "volume_step", "media_control"}) {
+            assertTrue(n, FastTools.changesState(n));
+        }
+        assertFalse(FastTools.changesState("rm_rf"));
+        assertFalse(FastTools.changesState(null));
     }
 
     @Test

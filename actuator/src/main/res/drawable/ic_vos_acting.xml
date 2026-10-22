@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The acting indicator (Shell Contract row 13): a closed amber ring with a dot while the actuator
+     taps, types or changes state. Placeholder art until VOS has a logo. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M12,3 A9,9 0 1,1 11.99,3"
+        android:strokeWidth="2.5"
+        android:strokeColor="#FFFFB74D"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M12,9 A3,3 0 1,1 11.99,9 Z"
+        android:fillColor="#FFFFB74D" />
+</vector>

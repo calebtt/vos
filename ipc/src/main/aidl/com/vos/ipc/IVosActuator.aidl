@@ -23,4 +23,15 @@ interface IVosActuator {
      * (FAILED) unless {@code turnId} is the turn the actuator opened and is still conversing.
      */
     String callTool(String turnId, String name, String argsJson);
+
+    /**
+     * A model started producing output for the open turn {@code turnId} (a vendor response, a
+     * ui_step, an escalation): the actuator shows the generating indicator until every started call
+     * has ended or the turn ends (Shell Contract row 13). {@code callId} pairs it with its end; the
+     * events carry no model output. Ignored for any turn but the one the actuator has open.
+     */
+    oneway void modelCallStarted(String turnId, String callId);
+
+    /** The model call {@code callId} of turn {@code turnId} no longer produces output (done, cancelled or failed). */
+    oneway void modelCallEnded(String turnId, String callId);
 }
