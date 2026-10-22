@@ -89,17 +89,27 @@ public final class TurnService extends Service {
         if (t == null || !t.turnId.equals(turnId) || app.audioPlane().state() != AudioPlane.State.CONVERSE) {
             r = FastTools.Result.of(FastTools.Status.FAILED, "detail", "no open turn " + turnId);
         } else {
-            r = app.fastTools().run(name, argsJson, new FastTools.MediaIntent() {
-                @Override
-                public Runnable ownerPausing() {
-                    return app.audioPlane().ownerPausing(turnId);
-                }
+            boolean acts = FastTools.changesState(name); // acting only while the device's state may change
+            if (acts) {
+                app.indicator().actingStarted(turnId); // the actuator acts: the indicator's acting state
+            }
+            try {
+                r = app.fastTools().run(name, argsJson, new FastTools.MediaIntent() {
+                    @Override
+                    public Runnable ownerPausing() {
+                        return app.audioPlane().ownerPausing(turnId);
+                    }
 
-                @Override
-                public Runnable ownerPlaying() {
-                    return app.audioPlane().ownerPlaying(turnId);
+                    @Override
+                    public Runnable ownerPlaying() {
+                        return app.audioPlane().ownerPlaying(turnId);
+                    }
+                });
+            } finally {
+                if (acts) {
+                    app.indicator().actingEnded(turnId);
                 }
-            });
+            }
             Earcons.play(app, r.status, t.speakerToFile); // never throws: the result and audit line follow
         }
         Map<String, Object> line = new LinkedHashMap<>();
@@ -156,6 +166,7 @@ public final class TurnService extends Service {
                     micOf(intent), BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEBUG_RAW_MIC, false),
                     BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_DEBUG_SPEAKER_FILE, false));
         } else if (ACTION_STOP.equals(action)) {
+            Log.i(VoiceTurn.TAG, "stop received source=" + source + " t_up=" + android.os.SystemClock.uptimeMillis());
             if (turn != null) {
                 finish("owner stop: " + (source == null ? "unknown" : source));
             } else {
@@ -179,7 +190,9 @@ public final class TurnService extends Service {
     private void summon(String source, long tEvent, VoiceTurn.Mic mic, boolean rawMic, boolean speakerToFile) {
         tStartCommand = android.os.SystemClock.uptimeMillis();
         try {
-            startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+            // The current state, not IDLE: a second summon during a turn must not reset the title.
+            startForeground(NOTIFICATION_ID, notification(((ActuatorApp) getApplication()).indicator().state()),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
             inForeground = true;
             tForeground = android.os.SystemClock.uptimeMillis();
         } catch (RuntimeException e) { // ForegroundServiceStartNotAllowedException, SecurityException
@@ -198,6 +211,7 @@ public final class TurnService extends Service {
             return;
         }
         turn = new VoiceTurn(this, id, source, tEvent, mic, rawMic, speakerToFile, reason -> MAIN.post(() -> finishIf(id, reason)));
+        ((ActuatorApp) getApplication()).indicator().turnOpened(id); // only this turn's calls and tools show
         // A call that starts during the turn ends it (§3.3: "call starts" goes to RESTORE).
         ((ActuatorApp) getApplication()).audioPlatform().watchCalls(() -> MAIN.post(() -> finishIf(id, "call started")));
         try {
@@ -224,6 +238,12 @@ public final class TurnService extends Service {
         turn = null;
         MAIN.removeCallbacks(cap);
         ActuatorApp app = (ActuatorApp) getApplication();
+        if (t != null) {
+            app.indicator().turnEnded(t.turnId); // stop clears both states (Shell Contract row 13)
+            // After the turn's last indicator posts (queued in decision order): nothing still queued
+            // for this turn's title may land on the next turn's notification.
+            MAIN.post(TITLE::cancel);
+        }
         app.audioPlatform().unwatchCalls();
         try {
             if (t != null) {
@@ -251,13 +271,31 @@ public final class TurnService extends Service {
         stopSelf();
     }
 
-    private Notification notification() {
+    /** The turn notification's title, paced for Android's notification rate limit (main thread only). */
+    private static final TitlePacer TITLE = new TitlePacer(android.os.SystemClock::uptimeMillis,
+            (delayMs, task) -> MAIN.postDelayed(task, delayMs), TurnService::postTitle);
+
+    /** The indicator changed (main thread): the turn notification's title carries it, for when no overlay can be drawn. */
+    static void indicatorChanged(Indicator.State state) {
+        TITLE.changed(state);
+    }
+
+    private static void postTitle(Indicator.State state) {
+        TurnService s = live;
+        if (s != null && s.turn != null && inForeground) {
+            s.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, s.notification(state));
+        }
+    }
+
+    private Notification notification(Indicator.State state) {
         PendingIntent stop = PendingIntent.getService(this, 0,
                 new Intent(this, TurnService.class).setAction(ACTION_STOP).putExtra(EXTRA_SOURCE, "notification"),
                 PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_vos)
-                .setContentTitle(getString(R.string.turn_listening))
+                .setContentTitle(getString(state == Indicator.State.GENERATING ? R.string.indicator_generating
+                        : state == Indicator.State.ACTING ? R.string.indicator_acting : R.string.turn_listening))
+                .setOnlyAlertOnce(true)
                 .setOngoing(true)
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .addAction(new Notification.Action.Builder(null, getString(R.string.turn_stop), stop).build())

@@ -30,6 +30,14 @@ import org.json.JSONArray;
  *       time plus that lead; a barge-in (the vendor's VAD hears the owner) drops the interrupted
  *       response's queued audio and any of its deltas that arrive afterwards, so at most about one
  *       lead of it is still in the pipe;</li>
+ *   <li>each vendor response is a model call for the actuator's generating indicator ({@link ModelCalls}).
+ *       The realtime API runs one response at a time, so the turn tracks one open call under ids of its
+ *       own ("c1", "c2", …), whatever ids the vendor sends: {@code response.created} ends any open call
+ *       and starts a new one; its {@code response.done} (any done when the vendor sends no ids), a
+ *       barge-in (the owner cut the reply off: VOS discards the rest of it) and the turn ending end the
+ *       open call, and once the turn is ending no new call starts. A late done for another response
+ *       (a dropped follow-up's) does not end it. A follow-up
+ *       dropped because the owner is speaking is not reported: nothing is being generated for the owner;</li>
  *   <li>a tool call goes to the actuator ({@link ToolCaller}) off the WebSocket thread, and its result
  *       (VERIFIED, UNVERIFIED or FAILED from the actuator's oracle) goes back to the model. The calls
  *       of one response form a batch: the model is asked to answer once, after all their results. If
@@ -76,10 +84,11 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
     private final Supplier<String> instructions;
     private final JSONArray toolSchemas;
     private final ToolCaller tools;
+    private final ModelCalls calls;
     private final Timing timing;
 
     XaiRealtimeBackend(Egress egress, KeyVault vault, ModelPolicy.Entry model, TranscriptLog transcripts,
-            Supplier<String> instructions, JSONArray toolSchemas, ToolCaller tools, Timing timing) {
+            Supplier<String> instructions, JSONArray toolSchemas, ToolCaller tools, ModelCalls calls, Timing timing) {
         this.egress = egress;
         this.vault = vault;
         this.model = model;
@@ -87,6 +96,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         this.instructions = instructions;
         this.toolSchemas = toolSchemas;
         this.tools = tools;
+        this.calls = calls;
         this.timing = timing;
     }
 
@@ -142,6 +152,13 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         volatile String currentResponse = "";
         /** Responses the owner talked over; their late deltas and calls are dropped. */
         final java.util.Set<String> cancelledResponses = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        /** Guards openCall, callSeq and callsClosed: vendor events and the turn's teardown run on different threads. */
+        private final Object callLock = new Object();
+        private String openCall; // the model call reported to the indicator and not yet ended, or null
+        private String openCallResponse = ""; // the vendor's id for openCall's response ("" if none was sent)
+        private final java.util.Set<String> createdResponses = new java.util.HashSet<>(); // every vendor id seen this turn
+        private int callSeq;
+        private boolean callsClosed; // the turn is ending: no new call starts
         private String endReason;
         private boolean ended;
         private boolean actuatorEnded;
@@ -218,6 +235,10 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 t.interrupt();
             }
             toolRunner.shutdownNow();
+            synchronized (callLock) { // a response still open at the end ends with the turn; none starts after it
+                callsClosed = true;
+                endCallLocked();
+            }
             synchronized (this) {
                 Log.i(TAG, "turn " + turnId + " over after_ms=" + (now() - openedAt) + " reason="
                         + (actuatorEnded ? "actuator" : endReason));
@@ -386,6 +407,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             if (!currentResponse.isEmpty()) {
                 cancelledResponses.add(currentResponse); // barge-in: the rest of that response is not played
             }
+            endCall(); // the reply is cut off: nothing more is generated for it (its late done ends nothing)
             int dropped = replyQueue.size();
             replyQueue.clear();
             Log.i(TAG, "turn " + turnId + " speech started" + (dropped > 0 ? ", dropped " + dropped + " reply chunks" : ""));
@@ -393,15 +415,27 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void responseCreated(String responseId) {
-            if (responseId.isEmpty()) {
-                return;
+            synchronized (callLock) { // started and ended reach the actuator in order, never after the turn's end
+                endCallLocked(); // one response at a time: a new one means the last has finished
+                if (!speaking && !callsClosed) { // the model is producing output for the owner: the indicator spins
+                    openCall = "c" + (++callSeq);
+                    openCallResponse = responseId;
+                    calls.started(turnId, openCall);
+                }
+                if (!responseId.isEmpty()) {
+                    createdResponses.add(responseId);
+                }
             }
-            currentResponse = responseId; // so a barge-in before its first audio still drops it
+            if (!responseId.isEmpty()) {
+                currentResponse = responseId; // so a barge-in before its first audio still drops it
+            }
             if (speaking) {
                 // Only our tool follow-up can open a response while the owner talks (the vendor's VAD
                 // opens one when speech stops). It answers what came before the new speech: drop it, and
-                // cancel it so the vendor answers the owner instead.
-                cancelledResponses.add(responseId);
+                // cancel it so the vendor answers the owner instead (with or without an id).
+                if (!responseId.isEmpty()) {
+                    cancelledResponses.add(responseId);
+                }
                 WebSocket w = ws;
                 if (w != null && !over()) {
                     w.send(XaiRealtime.responseCancel());
@@ -445,6 +479,20 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             replyQueue.add(new Chunk(responseId, pcm));
         }
 
+        /** Ends the open model call, if any: on a done, a barge-in, or the turn's teardown. */
+        private void endCall() {
+            synchronized (callLock) {
+                endCallLocked();
+            }
+        }
+
+        private void endCallLocked() {
+            if (openCall != null) {
+                calls.ended(turnId, openCall);
+                openCall = null;
+            }
+        }
+
         @Override
         public void replyTranscript(String text) {
             transcripts.write(turnId, "vos", text);
@@ -453,6 +501,15 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void responseDone(String responseId, String status) {
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
+            synchronized (callLock) { // completed, cancelled or failed: that response no longer produces output
+                // A done ends the open call when it is that call's (same id), carries no id, or carries an
+                // id this turn never saw created (the open call was created without one). A done for
+                // any earlier response is late and ends nothing.
+                if (responseId.isEmpty() || responseId.equals(openCallResponse)
+                        || (openCallResponse.isEmpty() && !createdResponses.contains(responseId))) {
+                    endCallLocked();
+                }
+            }
             boolean hadCall = responseHadCall;
             responseHadCall = false;
             if ("cancelled".equals(status) || cancelled(responseId)) {
