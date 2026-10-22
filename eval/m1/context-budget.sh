@@ -141,11 +141,12 @@ PY
     echo "turn $n: $( (( over )) && echo ended || echo 'did not end') $(grep "^turn$n " "$out/session.txt" | grep -o 'context tokens~[0-9]* budget=[0-9]*[a-z ]*' | head -1)"
     sleep 3 # the turn's background compaction
 done
-# Wait for the last turn's post-turn work ("after turn ... done", logged whether it compacted or not):
-# up to 45 s, three compact call timeouts. Logcat was cleared when turn 10 started.
+# Wait for the last turn's own post-turn work ("after turn <id> done", logged whether it compacted or
+# not): up to 45 s, three compact call timeouts. A done line for an earlier turn does not count.
+last_turn="$(grep "^turn${#asks[@]} " "$out/session.txt" | grep -o 'turn [0-9a-f-]\{36\} over after_ms=' | head -1 | cut -d' ' -f2)"
 post_done=0
 for _ in $(seq 1 90); do
-    adb logcat -d -s VOS_CONTEXT | grep -q 'after turn .* done:' && { post_done=1; break; }
+    [ -n "$last_turn" ] && adb logcat -d -s VOS_CONTEXT | grep -q "after turn $last_turn done:" && { post_done=1; break; }
     sleep 0.5
 done
 adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/session.txt"
