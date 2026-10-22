@@ -54,6 +54,12 @@ public final class TurnService extends Service {
     private volatile VoiceTurn turn; // read from Binder threads (callTool)
     private final Runnable cap = () -> finish("max turn length");
 
+    /** Whether a voice turn is open (a typed turn waits for it to end). */
+    static boolean voiceTurnOpen() {
+        TurnService s = live;
+        return s != null && s.turn != null;
+    }
+
     /** Has the microphone service reached the foreground (the assist session hides after this)? */
     static boolean inForeground() {
         return inForeground;

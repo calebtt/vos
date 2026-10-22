@@ -11,6 +11,8 @@ import android.os.Bundle;
  * <pre>
  * am start -n com.vos.actuator/.DebugSummonActivity --es op start [--ez mic_file true | --ez mic_file_then_live true] [--ez raw_mic true] [--ez speaker_file true]
  * am start -n com.vos.actuator/.DebugSummonActivity --es op stop
+ * am start -n com.vos.actuator/.DebugSummonActivity --es op typed --es text "what time is it"
+ * am start -n com.vos.actuator/.DebugSummonActivity --es op reply --es text "and now?"
  * am start -n com.vos.actuator/.DebugSummonActivity --es op volume --ei stream 3 --ei index 7
  * am start -n com.vos.actuator/.DebugSummonActivity --es op setting [--es key agent_mode --es value quiet]
  * </pre>
@@ -34,6 +36,13 @@ public final class DebugSummonActivity extends Activity {
                 android.util.Log.i("VOS_SETTINGS", "set " + in.getStringExtra("key") + ": " + (why == null ? "ok" : why));
             }
             android.util.Log.i("VOS_SETTINGS", "settings " + new org.json.JSONObject(s.all()));
+        } else if ("typed".equals(in.getStringExtra("op"))) {
+            // As if typed in the chat window: the same TypedChat.send the window calls (eval/m1/chat.sh).
+            String why = ((ActuatorApp) getApplication()).typedChat().send(in.getStringExtra("text"), "debug_window");
+            android.util.Log.i(TypedChat.TAG, "debug typed: " + (why == null ? "sent" : why));
+        } else if ("reply".equals(in.getStringExtra("op"))) {
+            // As if replied from the chat notification: the receiver's own handler, without the system UI.
+            ChatNotification.Reply.handle(this, in.getStringExtra("text"), "debug_notification");
         } else if ("stop".equals(in.getStringExtra("op"))) {
             startService(i.setAction(TurnService.ACTION_STOP));
         } else {

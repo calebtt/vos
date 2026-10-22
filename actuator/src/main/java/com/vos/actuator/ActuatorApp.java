@@ -68,6 +68,16 @@ public final class ActuatorApp extends Application {
         return audioPlane;
     }
 
+    private TypedChat typedChat;
+
+    /** Typed chat (decision 21): the actuator-owned typed turns and the chat thread. */
+    synchronized TypedChat typedChat() {
+        if (typedChat == null) {
+            typedChat = new TypedChat(this);
+        }
+        return typedChat;
+    }
+
     /** Guards ActuatorService: only the session package, signed with this app's cert (§5.3). */
     BinderGuard sessionGuard() {
         return sessionGuard;

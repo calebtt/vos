@@ -14,5 +14,12 @@
     <string name="indicator_acting">VOS is acting</string>
     <string name="setup_channel">VOS setup</string>
     <string name="role_notice_title">VOS is not your assistant</string>
+    <string name="chat_label">VOS chat</string>
+    <string name="chat_channel">VOS chat</string>
+    <string name="chat_hint">Message VOS</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_reply">Reply</string>
+    <string name="chat_you">You</string>
+    <string name="chat_model_label">VOS (model reply, data)</string>
     <string name="role_notice_text">The assist gesture and the headset button go to another app or to nothing. Tap, then choose VOS under Digital assistant app.</string>
 </resources>

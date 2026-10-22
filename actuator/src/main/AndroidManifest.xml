@@ -113,6 +113,23 @@
             </intent-filter>
         </service>
 
+        <!-- Typed chat (decision 21, row 25): the actuator-owned window, and the chat notification's
+             direct reply, which only the actuator's own PendingIntent reaches (not exported). -->
+        <activity
+            android:name=".ChatActivity"
+            android:exported="true"
+            android:label="@string/chat_label"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".ChatNotification$Reply"
+            android:exported="false" />
+
         <receiver
             android:name=".BootCheck"
             android:exported="false">

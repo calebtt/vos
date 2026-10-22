@@ -41,6 +41,10 @@ final class ActuatorLink implements ModelCalls {
         oneway("turnReady", a -> a.turnReady(turnId));
     }
 
+    void typedReply(String turnId, String text) {
+        oneway("typedReply", a -> a.typedReply(turnId, text));
+    }
+
     void endTurn(String turnId, String reason) {
         oneway("endTurn", a -> a.endTurn(turnId, reason));
     }
