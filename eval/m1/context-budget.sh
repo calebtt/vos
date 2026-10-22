@@ -166,6 +166,8 @@ while (( f < ${#fillers[@]} )); do
     f=$((f + 1))
     (( f >= 6 && $(compactions_so_far) >= 2 )) && break
 done
+# The recall questions only count after two compactions; their own compactions do not.
+before_questions="$(compactions_so_far)"
 for q in "${questions[@]}"; do run_turn "$q"; done
 post_done=$turn_done
 adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/session.txt"
@@ -216,7 +218,7 @@ get() { sed -n "s/.*$1=\([^ ]*\).*/\1/p" "$out/summary.txt" | head -1; }
 ring_args="$(grep 'tool.call' "$out/session.txt" | grep 'volume_' | grep -c 'ring' || true)"
 check "the last turn's post-turn compaction finished before scoring" "(( post_done ))"
 check "every turn ended ($n turns, $f fillers)" "(( \$(grep -c 'turn [0-9]*: ended' '$out/run.log') == n ))"
-check "compaction ran at least twice ($(get compactions), failed $(get failed))" "(( $(get compactions) >= 2 ))"
+check "compaction ran at least twice before the recall questions ($before_questions; $(get compactions) in all, failed $(get failed))" "(( before_questions >= 2 ))"
 check "every turn started under the budget (max $(get max_start_tokens) <= $budget, over-budget refusals $(get over_budget))" "(( $(get max_start_tokens) >= 0 && $(get max_start_tokens) <= budget && $(get over_budget) == 0 ))"
 check "each compaction line has counts only" "[ '$(get counts_only)' = True ]"
 check "the sister question gets Dana from the compacted conversation" "[ '$(get sister_answer_has_dana)' = True ]"
