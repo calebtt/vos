@@ -11,12 +11,14 @@
 # (decided) and "indicator drawn" lines, all SystemClock.uptimeMillis (one clock for the whole
 # device). A chip shown or changed is "drawn" just before its next frame; a chip cleared is "drawn"
 # when its window is removed (the app cannot see the compositor finish). Every state change, ACTING
-# included, must be drawn <= 200 ms after the actuator decided it.
+# included, must be drawn <= 200 ms after the actuator decided it; a state after ACTING waits until
+# ACTING has been on screen 100 ms (so a tool that returns within a frame is still seen), and its
+# 200 ms count from the end of that wait.
 #
 # The chip is an accessibility overlay, so VOS's accessibility service (HandsService) must be on. On
 # an emulator the script turns it on and restores the setting afterwards. On a real phone it does not:
 # that is the owner's decision (Phone B holds personal data), so it stops unless the service is
-# already on. Needs GROK_API_KEY (the fixture; sealing the key into the session if it holds none) and
+# already on and bound. Needs GROK_API_KEY (the fixture; sealing the key into the session if it holds none) and
 # python3 with `websockets`, like fast-tools.sh.
 #
 # Usage: eval/m1/indicator.sh [--no-build] [--stall-s N]
@@ -173,9 +175,14 @@ for t, k in ev:
 starts = sum(1 for _, k in ev if k == "call_started")
 print(f"calls={starts} show_ms={','.join(map(str, show)) or '-'} clear_ms={','.join(map(str, clear)) or '-'} acting={acting} final={prev}")
 PY
+# A "drawn" line names the state on the chip at that frame. A state drawn after ACTING is held until
+# ACTING has been on screen for ACTING_MIN_MS (HandsService), so its lag is measured from the later
+# of its decision and the end of that hold; the hold itself is checked too.
 python3 -I - "$out/leg1.txt" > "$out/leg1-draws.txt" <<'PY'
 import re, sys
-decided, lags = [], []
+ACTING_MIN_MS = 100
+decided, lags, held = [], [], []
+prev = None  # (state, t) of the previous draw
 for line in open(sys.argv[1]):
     m = re.search(r"indicator state=(\w+) t_up=(\d+)", line)
     if m:
@@ -185,8 +192,13 @@ for line in open(sys.argv[1]):
         state, t = m.group(1), int(m.group(2))
         before = [d for s, d in decided if s == state and d <= t]
         if before:
-            lags.append(t - before[-1])
-print(f"changes={len(lags)} max_ms={max(lags) if lags else -1}")
+            start = before[-1]
+            if prev and prev[0] == "ACTING":
+                held.append(t - prev[1])
+                start = max(start, prev[1] + ACTING_MIN_MS)
+            lags.append(t - start)
+        prev = (state, t)
+print(f"changes={len(lags)} max_ms={max(lags) if lags else -1} acting_held_ms={min(held) if held else -1}")
 PY
 cat "$out/leg1-times.txt"
 read -r calls show_ms clear_ms acting final < <(sed 's/[a-z_]*=//g' "$out/leg1-times.txt")
@@ -195,8 +207,9 @@ check "the chip spun <= 200 ms after a call started (ms: $show_ms)" "[ '$show_ms
 check "the chip cleared <= 200 ms after the last call ended (ms: $clear_ms)" "[ '$clear_ms' != - ] && python3 -c 'import sys; sys.exit(0 if max(map(int, \"$clear_ms\".split(\",\"))) <= 200 else 1)'"
 check "the tool showed the acting state ($acting times)" "(( acting >= 1 ))"
 check "nothing showing after the turn (last drawn: $final)" "[ '$final' = IDLE ]"
-read -r changes draw_max < <(sed 's/[a-z_]*=//g' "$out/leg1-draws.txt")
-check "every state change was drawn <= 200 ms after the actuator decided it ($changes changes, max ${draw_max} ms)" "(( changes >= 3 && draw_max >= 0 && draw_max <= 200 ))"
+read -r changes draw_max acting_held < <(sed 's/[a-z_]*=//g' "$out/leg1-draws.txt")
+check "every state change was drawn <= 200 ms after the actuator decided it, or after ACTING's minimum time ($changes changes, max ${draw_max} ms)" "(( changes >= 3 && draw_max >= 0 && draw_max <= 200 ))"
+check "ACTING stayed on screen >= 100 ms before the next state (min ${acting_held} ms)" "(( acting_held >= 100 ))"
 turn="$(sed -n 's/.*turn opened in session turnId=\([0-9a-f-]*\).*/\1/p' "$out/leg1.txt" | head -1)"
 check "this turn's tool ran and was VERIFIED (turn ${turn:-?})" "[ -n '$turn' ] && adb shell 'run-as com.vos.actuator cat files/audit/audit.jsonl' | grep -F '\"turnId\":\"$turn\"' | grep '\"tool\":\"volume_set\"' | grep -q VERIFIED"
 pairs="$(python3 -I - "$out/leg1.txt" <<'PY'

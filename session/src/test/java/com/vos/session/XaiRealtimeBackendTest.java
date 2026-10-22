@@ -859,6 +859,52 @@ public class XaiRealtimeBackendTest {
     }
 
     @Test
+    public void aLateDoneDoesNotEndACallCreatedWithoutAnId() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean sent;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                if (text.contains("\"session.update\"")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (text.contains("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !sent) {
+                    sent = true;
+                    ws.send(STARTED);
+                    ws.send(STOPPED);
+                    ws.send("{\"type\":\"response.created\",\"response\":{\"id\":\"r1\",\"status\":\"in_progress\"}}");
+                    ws.send("{\"type\":\"response.created\"}"); // c2, no id: c1 ends here
+                    ws.send(done("r1", "completed")); // late, for c1: c2 keeps going
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(400);
+                        } catch (InterruptedException ignored) {
+                            // test
+                        }
+                        ws.send("{\"type\":\"response.done\"}"); // c2's own done
+                    }).start();
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        assertEquals("idle", backend(500).run("t-32", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(List.of("started t-32 c1", "ended t-32 c1", "started t-32 c2", "ended t-32 c2"), modelCalls);
+        long ms = (modelCallNanos.get(3) - modelCallNanos.get(2)) / 1_000_000;
+        assertTrue("c2 ended with its own done, not r1's late one (" + ms + " ms)", ms >= 300);
+    }
+
+    @Test
     public void modelCallsPairUpWhenTheVendorSendsNoIds() throws Exception {
         vault.put(KeyVault.XAI, "xai-test-key");
         server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {

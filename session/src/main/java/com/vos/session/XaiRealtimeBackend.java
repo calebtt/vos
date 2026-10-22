@@ -156,6 +156,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         private final Object callLock = new Object();
         private String openCall; // the model call reported to the indicator and not yet ended, or null
         private String openCallResponse = ""; // the vendor's id for openCall's response ("" if none was sent)
+        private final java.util.Set<String> createdResponses = new java.util.HashSet<>(); // every vendor id seen this turn
         private int callSeq;
         private boolean callsClosed; // the turn is ending: no new call starts
         private String endReason;
@@ -421,16 +422,20 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                     openCallResponse = responseId;
                     calls.started(turnId, openCall);
                 }
+                if (!responseId.isEmpty()) {
+                    createdResponses.add(responseId);
+                }
             }
-            if (responseId.isEmpty()) {
-                return;
+            if (!responseId.isEmpty()) {
+                currentResponse = responseId; // so a barge-in before its first audio still drops it
             }
-            currentResponse = responseId; // so a barge-in before its first audio still drops it
             if (speaking) {
                 // Only our tool follow-up can open a response while the owner talks (the vendor's VAD
                 // opens one when speech stops). It answers what came before the new speech: drop it, and
-                // cancel it so the vendor answers the owner instead.
-                cancelledResponses.add(responseId);
+                // cancel it so the vendor answers the owner instead (with or without an id).
+                if (!responseId.isEmpty()) {
+                    cancelledResponses.add(responseId);
+                }
                 WebSocket w = ws;
                 if (w != null && !over()) {
                     w.send(XaiRealtime.responseCancel());
@@ -497,7 +502,11 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         public void responseDone(String responseId, String status) {
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
             synchronized (callLock) { // completed, cancelled or failed: that response no longer produces output
-                if (responseId.isEmpty() || openCallResponse.isEmpty() || responseId.equals(openCallResponse)) {
+                // A done ends the open call when it is that call's (same id), carries no id, or carries an
+                // id this turn never saw created (the open call was created without one). A done for
+                // any earlier response is late and ends nothing.
+                if (responseId.isEmpty() || responseId.equals(openCallResponse)
+                        || (openCallResponse.isEmpty() && !createdResponses.contains(responseId))) {
                     endCallLocked();
                 }
             }
