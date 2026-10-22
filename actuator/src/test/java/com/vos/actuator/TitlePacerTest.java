@@ -86,6 +86,21 @@ public class TitlePacerTest {
     }
 
     @Test
+    public void nothingQueuedForAnEndedTurnReachesTheNext() {
+        pacer.changed(GENERATING);
+        advance(0);
+        advance(200);
+        pacer.changed(ACTING); // scheduled for t=250, with IDLE after it
+        pacer.changed(IDLE);
+        pacer.cancel(); // the owner stopped at t=220
+        advance(10);
+        pacer.changed(GENERATING); // the next turn's first call, at t=230
+        advance(1000);
+        assertEquals(List.of("GENERATING", "GENERATING"), published);
+        assertEquals("the gap still counts from the last real post", 250, publishedAt.get(1) - publishedAt.get(0));
+    }
+
+    @Test
     public void neverTwoTitlesCloserThanTheGap() {
         Indicator.State[] states = {GENERATING, ACTING, GENERATING, IDLE, GENERATING, ACTING, IDLE};
         for (int i = 0; i < 40; i++) {

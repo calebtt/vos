@@ -240,6 +240,9 @@ public final class TurnService extends Service {
         ActuatorApp app = (ActuatorApp) getApplication();
         if (t != null) {
             app.indicator().turnEnded(t.turnId); // stop clears both states (Shell Contract row 13)
+            // After the turn's last indicator posts (queued in decision order): nothing still queued
+            // for this turn's title may land on the next turn's notification.
+            MAIN.post(TITLE::cancel);
         }
         app.audioPlatform().unwatchCalls();
         try {
