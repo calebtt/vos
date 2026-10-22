@@ -3,6 +3,7 @@ package com.vos.actuator;
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.graphics.Insets;
 import android.graphics.PixelFormat;
 import android.os.SystemClock;
 import android.util.Log;
@@ -27,18 +28,35 @@ public final class HandsService extends AccessibilityService {
     private ImageView chip;
     private WindowManager.LayoutParams chipLayout;
     private boolean spinning;
+    /** The spin's step: 20 a second is smooth enough for a 32 dp chip and redraws far less than every frame. */
+    static final long SPIN_STEP_MS = 50;
     /**
-     * The spin, one turn a second, stepped on each display frame. Not an Animator: those follow the
-     * system animation scale, and with "Remove animations" on they would never turn, while the
-     * indicator must keep moving to tell a slow model from a hung one.
+     * The spin, one turn a second. Not an Animator: those follow the system animation scale, and with
+     * "Remove animations" on they would never turn, while the indicator must keep moving to tell a
+     * slow model from a hung one.
      */
     private final Runnable spinStep = new Runnable() {
         @Override
         public void run() {
             if (chip != null && spinning) {
                 chip.setRotation((SystemClock.uptimeMillis() % 1000) * 0.36f);
-                chip.postOnAnimation(this);
+                chip.postDelayed(this, SPIN_STEP_MS);
             }
+        }
+    };
+    /** The state to log as drawn at the chip's next frame, or null; one listener, so changes while the screen is off do not pile up. */
+    private Indicator.State drawPending;
+    private final ViewTreeObserver.OnPreDrawListener drawLogger = new ViewTreeObserver.OnPreDrawListener() {
+        @Override
+        public boolean onPreDraw() {
+            if (chip != null) {
+                chip.getViewTreeObserver().removeOnPreDrawListener(this);
+            }
+            if (drawPending != null) {
+                Log.i(TAG, "indicator drawn state=" + drawPending + " t_up=" + SystemClock.uptimeMillis());
+                drawPending = null;
+            }
+            return true;
         }
     };
 
@@ -99,26 +117,21 @@ public final class HandsService extends AccessibilityService {
             chip.setContentDescription(getString(generating ? R.string.indicator_generating : R.string.indicator_acting));
             if (generating && !spinning) {
                 spinning = true;
-                chip.postOnAnimation(spinStep);
+                chip.post(spinStep);
             } else if (!generating) {
                 stopSpin();
             }
-            logNextFrame(chip, state);
+            logNextFrame(state);
         }
     }
 
-    /** Logs "indicator drawn" just before the chip's next frame (once). */
-    private static void logNextFrame(ImageView view, Indicator.State state) {
-        ViewTreeObserver vto = view.getViewTreeObserver();
-        vto.addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
-            @Override
-            public boolean onPreDraw() {
-                view.getViewTreeObserver().removeOnPreDrawListener(this);
-                Log.i(TAG, "indicator drawn state=" + state + " t_up=" + SystemClock.uptimeMillis());
-                return true;
-            }
-        });
-        view.invalidate();
+    /** Logs "indicator drawn" just before the chip's next frame, for the latest state only. */
+    private void logNextFrame(Indicator.State state) {
+        if (drawPending == null) {
+            chip.getViewTreeObserver().addOnPreDrawListener(drawLogger);
+        }
+        drawPending = state;
+        chip.invalidate();
     }
 
     /** Adds the chip window; false (nothing added) if the system refuses, e.g. the service was just unbound. */
@@ -133,10 +146,9 @@ public final class HandsService extends AccessibilityService {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
-        lp.gravity = Gravity.TOP | Gravity.END;
-        lp.x = size / 2;
+        lp.gravity = Gravity.TOP | Gravity.RIGHT;
         WindowManager wm = getSystemService(WindowManager.class);
-        lp.y = topOffset(wm, size);
+        place(wm, lp);
         lp.setTitle("VOS indicator"); // what eval/m1/indicator.sh looks for in dumpsys window
         try {
             wm.addView(chip, lp);
@@ -149,19 +161,23 @@ public final class HandsService extends AccessibilityService {
         return true;
     }
 
-    /** Just below the status bar and any cutout, as they are now. */
-    private static int topOffset(WindowManager wm, int size) {
-        int top = wm.getCurrentWindowMetrics().getWindowInsets()
-                .getInsets(WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout()).top;
-        return top + size / 4;
+    /**
+     * Just below the status bar and left of a navigation bar or cutout on the right (landscape), as
+     * they are now.
+     */
+    private static void place(WindowManager wm, WindowManager.LayoutParams lp) {
+        Insets in = wm.getCurrentWindowMetrics().getWindowInsets().getInsets(WindowInsets.Type.statusBars()
+                | WindowInsets.Type.navigationBars() | WindowInsets.Type.displayCutout());
+        lp.x = in.right + lp.width / 2;
+        lp.y = in.top + lp.height / 4;
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        if (chip != null) { // rotation moves the status bar and the cutout
+        if (chip != null) { // rotation moves the status bar, the navigation bar and the cutout
             WindowManager wm = getSystemService(WindowManager.class);
-            chipLayout.y = topOffset(wm, chipLayout.height);
+            place(wm, chipLayout);
             try {
                 wm.updateViewLayout(chip, chipLayout);
             } catch (IllegalArgumentException ignored) {
@@ -184,6 +200,7 @@ public final class HandsService extends AccessibilityService {
             return false;
         }
         stopSpin();
+        drawPending = null; // the listener goes with the removed view; the next chip gets its own
         try {
             getSystemService(WindowManager.class).removeView(chip);
         } catch (IllegalArgumentException ignored) {

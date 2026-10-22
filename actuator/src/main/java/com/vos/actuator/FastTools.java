@@ -109,17 +109,35 @@ public final class FastTools {
         this.platform = platform;
     }
 
+    private interface Handler {
+        Result run(FastTools tools, JSONObject args, MediaIntent media) throws BadArgs, InterruptedException;
+    }
+
+    /** One tool: how to run it, and whether it changes the device's state (the indicator shows acting only then). */
+    private static final class Tool {
+        final boolean changesState;
+        final Handler handler;
+
+        Tool(boolean changesState, Handler handler) {
+            this.changesState = changesState;
+            this.handler = handler;
+        }
+    }
+
     /** The tools {@link #run} runs, and the only names it dispatches; anything else is FAILED without acting. */
-    static final java.util.Set<String> NAMES = java.util.Set.of("time_get", "volume_set", "volume_step", "media_control");
-    /** The tools that change the device's state, for which the indicator shows acting (time_get only reads the clock). */
-    static final java.util.Set<String> CHANGES_STATE = java.util.Set.of("volume_set", "volume_step", "media_control");
+    private static final Map<String, Tool> TOOLS = Map.of(
+            "time_get", new Tool(false, (t, args, media) -> t.timeGet(args)), // only reads the clock
+            "volume_set", new Tool(true, (t, args, media) -> t.volumeSet(args, false)),
+            "volume_step", new Tool(true, (t, args, media) -> t.volumeSet(args, true)),
+            "media_control", new Tool(true, (t, args, media) -> t.mediaControl(args, media)));
+    static final Set<String> NAMES = TOOLS.keySet();
 
     static boolean knows(String name) {
-        return name != null && NAMES.contains(name);
+        return name != null && TOOLS.containsKey(name);
     }
 
     static boolean changesState(String name) {
-        return name != null && CHANGES_STATE.contains(name);
+        return knows(name) && TOOLS.get(name).changesState;
     }
 
     /** Runs {@code name} with the session's JSON arguments. Never throws for bad input. */
@@ -134,18 +152,7 @@ public final class FastTools {
             return Result.of(Status.FAILED, "detail", "unknown tool");
         }
         try {
-            switch (name) {
-                case "time_get":
-                    return timeGet(args);
-                case "volume_set":
-                    return volumeSet(args, false);
-                case "volume_step":
-                    return volumeSet(args, true);
-                case "media_control":
-                    return mediaControl(args, media);
-                default: // a name in NAMES with no case here: a programming error the tests catch
-                    return Result.of(Status.FAILED, "detail", "no handler for " + name);
-            }
+            return TOOLS.get(name).handler.run(this, args, media);
         } catch (BadArgs e) {
             return Result.of(Status.FAILED, "detail", e.getMessage());
         } catch (InterruptedException e) {

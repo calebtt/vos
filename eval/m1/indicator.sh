@@ -53,6 +53,13 @@ emulator=0
 [ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" = 1 ] || [ "$(adb shell getprop ro.boot.qemu | tr -d '\r')" = 1 ] && emulator=1
 # Android lists enabled services separated by ':', each in the short or the full component form.
 has_hands() { tr ':' '\n' <<<"$1" | grep -qxE 'com\.vos\.actuator/(\.|com\.vos\.actuator\.)HandsService'; }
+# Listed and switched on is not enough: the system must have bound the service (dumpsys lists it
+# under "Bound services" by its label, VOS) or there is no window token to draw with.
+hands_bound() {
+    local d; d="$(adb shell dumpsys accessibility | tr -d '\r')"
+    grep -E 'Enabled services:' <<<"$d" | grep -qE 'com\.vos\.actuator/(\.|com\.vos\.actuator\.)HandsService' \
+        && grep -E 'Bound services:' <<<"$d" | grep -q 'label=VOS[,}]'
+}
 if ! has_hands "$a11y_before"; then
     if (( ! emulator )); then
         echo "VOS's accessibility service is off on this phone; the overlay needs it. Turning it on is the owner's call: run on the emulator, or enable it in Settings first." >&2
@@ -61,6 +68,10 @@ if ! has_hands "$a11y_before"; then
     enabled_by_us=1
 else
     enabled_by_us=0
+    if [ "$a11y_on_before" != 1 ] || ! hands_bound; then
+        echo "VOS's accessibility service is listed but not running (accessibility_enabled=$a11y_on_before, or not bound); turn it on in Settings first." >&2
+        exit 2
+    fi
 fi
 
 if (( build )); then
@@ -104,7 +115,8 @@ if (( enabled_by_us )); then # added to whatever else is on, never in place of i
         adb shell settings put secure enabled_accessibility_services "$a11y_before:$HANDS"
     fi
     adb shell settings put secure accessibility_enabled 1
-    sleep 3
+    for _ in $(seq 1 20); do hands_bound && break; sleep 0.5; done
+    hands_bound || { echo "VOS's accessibility service did not bind within 10 s" >&2; exit 1; }
 fi
 
 fails=0
