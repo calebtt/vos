@@ -85,13 +85,16 @@ final class SharedConversation implements ContextKeeper {
     public synchronized void afterTurn(String turnId) {
         pending = worker.submit(() -> {
             ContextBudget b = budget.get();
-            if (b.fits(conversation.summary(), conversation.items())) {
-                return;
+            String outcome = "under budget";
+            try {
+                if (!b.fits(conversation.summary(), conversation.items())) {
+                    Conversation.Compactor c = compactor.get();
+                    outcome = c != null && conversation.fit(b, c) ? "compacted" : "still over (the next turn retries)";
+                }
+            } finally { // always logged, so eval/m1 knows the post-turn work is over
+                Log.i(TAG, "after turn " + turnId + " done: " + outcome + " tokens~" + conversation.tokens()
+                        + " budget=" + b.budget);
             }
-            Conversation.Compactor c = compactor.get();
-            boolean ok = c != null && conversation.fit(b, c);
-            Log.i(TAG, "after turn " + turnId + " compacted to tokens~" + conversation.tokens() + " budget=" + b.budget
-                    + (ok ? "" : " (still over; the next turn retries)"));
         });
     }
 }

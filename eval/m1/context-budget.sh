@@ -141,13 +141,12 @@ PY
     echo "turn $n: $( (( over )) && echo ended || echo 'did not end') $(grep "^turn$n " "$out/session.txt" | grep -o 'context tokens~[0-9]* budget=[0-9]*[a-z ]*' | head -1)"
     sleep 3 # the turn's background compaction
 done
-# Wait for the last turn's background compaction: the conversation file stops changing.
-prev=""
-for _ in $(seq 1 30); do
-    cur="$(adb shell "run-as com.vos.session sh -c 'stat -c %Y.%s files/conversation/conversation.json 2>/dev/null'" | tr -d '\r')"
-    [ -n "$cur" ] && [ "$cur" = "$prev" ] && break
-    prev="$cur"
-    sleep 2
+# Wait for the last turn's post-turn work ("after turn ... done", logged whether it compacted or not):
+# up to 45 s, three compact call timeouts. Logcat was cleared when turn 10 started.
+post_done=0
+for _ in $(seq 1 90); do
+    adb logcat -d -s VOS_CONTEXT | grep -q 'after turn .* done:' && { post_done=1; break; }
+    sleep 0.5
 done
 adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/session.txt"
 ring_after="$(vol 2)"
@@ -195,6 +194,7 @@ cat "$out/summary.txt"
 get() { sed -n "s/.*$1=\([^ ]*\).*/\1/p" "$out/summary.txt" | head -1; }
 # The actuator's tool.call audit lines (VOS_AUDIT in logcat) carry each call's arguments.
 ring_args="$(grep 'tool.call' "$out/session.txt" | grep 'volume_' | grep -c 'ring' || true)"
+check "the last turn's post-turn compaction finished before scoring" "(( post_done ))"
 check "every turn ended" "(( \$(grep -c 'turn [0-9]*: ended' '$out/run.log') == ${#asks[@]} ))"
 check "compaction ran at least twice ($(get compactions), failed $(get failed))" "(( $(get compactions) >= 2 ))"
 check "every turn started under the budget (max $(get max_start_tokens) <= $budget, over-budget refusals $(get over_budget))" "(( $(get max_start_tokens) >= 0 && $(get max_start_tokens) <= budget && $(get over_budget) == 0 ))"
