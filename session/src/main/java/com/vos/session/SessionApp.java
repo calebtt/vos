@@ -45,6 +45,7 @@ public final class SessionApp extends Application {
     private TranscriptLog transcripts;
     private org.json.JSONArray fastTools;
     private ActuatorLink actuatorLink;
+    private SharedConversation conversation;
 
     @Override
     public void onCreate() {
@@ -62,7 +63,39 @@ public final class SessionApp extends Application {
         } catch (org.json.JSONException e) {
             throw new IllegalStateException("bad fast_tools.json", e);
         }
+        conversation = new SharedConversation(
+                new Conversation(new File(getFilesDir(), "conversation"), audit::record), this::contextBudget,
+                this::compactor);
         keyWorker.execute(this::importPushedKeys);
+    }
+
+    /**
+     * Decision 46's budget for the shared conversation: Q44's 50 % of the chat_voice model's context
+     * window, minus the instructions and tool definitions sent with every turn and the reply's reserved
+     * output. A debug build may set the budget in tokens with files/debug/context_budget (eval/m1).
+     */
+    ContextBudget contextBudget() {
+        String debug = debugFile("context_budget");
+        if (debug != null) {
+            try {
+                return new ContextBudget(Integer.parseInt(debug));
+            } catch (NumberFormatException ignored) {
+                // fall through to the real budget
+            }
+        }
+        List<String> ids = modelPolicy.candidates("chat_voice");
+        ModelPolicy.Entry e = ids.isEmpty() ? null : modelPolicy.entry(ids.get(0));
+        int window = e == null ? 0 : e.fields.optInt("context_window", 0);
+        int reserved = e == null ? 0 : e.fields.optInt("max_output_tokens", 0);
+        int prefix = ContextBudget.tokens(instructions()) + ContextBudget.tokens(fastTools.toString());
+        return ContextBudget.of(window, ContextBudget.DEFAULT_SHARE, prefix, reserved);
+    }
+
+    /** The compact task class (decision 46): the policy's first available model, or null. */
+    Conversation.Compactor compactor() {
+        ModelPolicy.Entry e = modelPolicy.pick("compact", null, BuildConfig.DEBUG, this::available);
+        return e != null && "xai".equals(e.vendor) && "text_chat".equals(e.kind)
+                ? new XaiCompactor(egress, keyVault, e) : null;
     }
 
     private SessionTurns turns;
@@ -102,7 +135,7 @@ public final class SessionApp extends Application {
         }
         if ("xai".equals(e.vendor) && "realtime_voice".equals(e.kind)) {
             return new XaiRealtimeBackend(egress, keyVault, e, transcripts, SessionApp::instructions, fastTools,
-                    actuatorLink()::callTool, actuatorLink(), new XaiRealtimeBackend.Timing());
+                    actuatorLink()::callTool, actuatorLink(), new XaiRealtimeBackend.Timing(), conversation);
         }
         return null;
     }
@@ -115,10 +148,15 @@ public final class SessionApp extends Application {
     }
 
     private String debugOverride() {
+        return debugFile("chat_voice");
+    }
+
+    /** A debug build's override file under files/debug (eval/m1), trimmed; null in release builds. */
+    private String debugFile(String name) {
         if (!BuildConfig.DEBUG) {
             return null;
         }
-        File f = new File(getFilesDir(), "debug/chat_voice");
+        File f = new File(getFilesDir(), "debug/" + name);
         try {
             return f.isFile() ? new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8).trim() : null;
         } catch (IOException e) {
