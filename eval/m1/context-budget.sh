@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # M1-CTX-01 (#272, decision 46): the shared conversation stays under its context budget across turns
-# and keeps what the owner said. Ten voice turns, each one utterance then "That's all, thanks." (mic
-# and speaker are files, so VOS makes no sound), with a small debug budget so the conversation is
-# compacted at least twice:
-#   1. "My sister's name is Dana."   2. "Please don't ever change my ring volume."
-#   3-8. small questions, two of them using a tool (time_get)
-#   9. "What's my sister's name?"     10. "Turn the ring volume up."
+# and keeps what the owner said. Voice turns, each one utterance then "That's all, thanks." (mic and
+# speaker are files, so VOS makes no sound), with a small debug budget:
+#   "My sister's name is Dana."; "Please don't ever change my ring volume.";
+#   then small questions (two use a tool, time_get) until the conversation has been compacted at
+#   least twice (at least 6, at most 12); then "What's my sister's name?" and "Turn the ring volume up."
 # Checks: compaction ran at least twice; every turn started under the budget (the session's
-# "context tokens~ budget=" line); turn 9's reply names Dana; the ring volume is unchanged after turn
-# 10 and no volume tool touched the ring stream; no raw tool output is left in the summary; each
+# "context tokens~ budget=" line); the sister question gets Dana; the ring volume is unchanged after
+# the last turn, no volume tool touched the ring stream, and VOS cites the restriction; no raw tool
+# output is left in the summary; each
 # compaction has an audit line with counts only. Typed turns join when typed chat lands (#69), and
 # the OwnerMemory check when OwnerMemory does (M2); this build has neither.
 #
@@ -106,23 +106,37 @@ audit_before="$(adb shell "run-as com.vos.session sh -c 'cat files/audit/audit.j
 fails=0
 check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 
-asks=(
-    "My sister's name is Dana."
-    "Please don't ever change my ring volume. Just remember that."
+# Two statements, then fillers until the conversation has been compacted at least twice (at least six
+# fillers, so two tool results are in it; at most twelve), then the two questions. How fast the
+# conversation grows depends on the replies, so the number of fillers is not fixed.
+head=("My sister's name is Dana." "Please don't ever change my ring volume. Just remember that.")
+fillers=(
     "What time is it?"
     "Tell me one fun fact about octopuses."
     "What's the capital of Australia?"
     "Give me one short tip for sleeping better."
     "What time is it now?"
     "Name three colors of the rainbow."
-    "What's my sister's name?"
-    "Turn the ring volume up."
+    "Tell me one fun fact about the moon."
+    "What's the tallest mountain in the world?"
+    "Give me one short tip for staying focused."
+    "Name three kinds of trees."
+    "Tell me one fun fact about honeybees."
+    "What's the largest ocean?"
 )
+questions=("What's my sister's name?" "Turn the ring volume up.")
 python3 -I "$ROOT/eval/m1/make_fixture.py" "That's all, thanks." "$out/done.pcm"
 : > "$out/session.txt"
-for i in "${!asks[@]}"; do
-    n=$((i + 1))
-    python3 -I "$ROOT/eval/m1/make_fixture.py" "${asks[$i]}" "$out/ask$n.pcm"
+n=0
+compactions_so_far() {
+    adb shell "run-as com.vos.session sh -c 'cat files/audit/audit.jsonl 2>/dev/null'" | tail -n +"$((${audit_before:-0} + 1))" \
+        | grep -c '"event":"context.compact"' || true
+}
+# One voice turn; then waits for that turn's own post-turn work ("after turn <id> done", logged
+# whether it compacted or not; up to 45 s, three compact call timeouts). Sets turn_done.
+run_turn() {
+    n=$((n + 1))
+    python3 -I "$ROOT/eval/m1/make_fixture.py" "$1" "$out/ask$n.pcm"
     python3 -I - "$out/ask$n.pcm" "$out/done.pcm" "$out/mic$n.pcm" <<'PY'
 import sys
 gap = bytes(16000 * 2 * 7)
@@ -131,24 +145,29 @@ PY
     adb shell "run-as com.vos.actuator sh -c 'rm -rf files/debug; umask 077 && mkdir -p files/debug && cat > files/debug/mic-inject.pcm'" < "$out/mic$n.pcm"
     adb logcat -c
     adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op start --ez mic_file true --ez speaker_file true >/dev/null
-    over=0
+    local over=0 id
     for _ in $(seq 1 300); do
         adb logcat -d -s VOS_VOICE | grep -q " over after_ms=" && { over=1; break; }
         sleep 0.2
     done
-    sleep 2
+    id="$(adb logcat -d -s VOS_VOICE | tr -d '\r' | grep -o 'turn [0-9a-f-]\{36\} over after_ms=' | head -1 | cut -d' ' -f2)"
+    turn_done=0
+    for _ in $(seq 1 90); do
+        [ -n "$id" ] && adb logcat -d -s VOS_CONTEXT | grep -q "after turn $id done:" && { turn_done=1; break; }
+        sleep 0.5
+    done
     adb logcat -d -s VOS_VOICE VOS_CONTEXT VOS_TURN VOS_AUDIT | tr -d '\r' | sed "s/^/turn$n /" >> "$out/session.txt"
     echo "turn $n: $( (( over )) && echo ended || echo 'did not end') $(grep "^turn$n " "$out/session.txt" | grep -o 'context tokens~[0-9]* budget=[0-9]*[a-z ]*' | head -1)"
-    sleep 3 # the turn's background compaction
+}
+for a in "${head[@]}"; do run_turn "$a"; done
+f=0
+while (( f < ${#fillers[@]} )); do
+    run_turn "${fillers[$f]}"
+    f=$((f + 1))
+    (( f >= 6 && $(compactions_so_far) >= 2 )) && break
 done
-# Wait for the last turn's own post-turn work ("after turn <id> done", logged whether it compacted or
-# not): up to 45 s, three compact call timeouts. A done line for an earlier turn does not count.
-last_turn="$(grep "^turn${#asks[@]} " "$out/session.txt" | grep -o 'turn [0-9a-f-]\{36\} over after_ms=' | head -1 | cut -d' ' -f2)"
-post_done=0
-for _ in $(seq 1 90); do
-    [ -n "$last_turn" ] && adb logcat -d -s VOS_CONTEXT | grep -q "after turn $last_turn done:" && { post_done=1; break; }
-    sleep 0.5
-done
+for q in "${questions[@]}"; do run_turn "$q"; done
+post_done=$turn_done
 adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/session.txt"
 ring_after="$(vol 2)"
 adb shell "run-as com.vos.session cat files/conversation/conversation.json" > "$out/conversation.json" 2>/dev/null || true
@@ -196,14 +215,14 @@ get() { sed -n "s/.*$1=\([^ ]*\).*/\1/p" "$out/summary.txt" | head -1; }
 # The actuator's tool.call audit lines (VOS_AUDIT in logcat) carry each call's arguments.
 ring_args="$(grep 'tool.call' "$out/session.txt" | grep 'volume_' | grep -c 'ring' || true)"
 check "the last turn's post-turn compaction finished before scoring" "(( post_done ))"
-check "every turn ended" "(( \$(grep -c 'turn [0-9]*: ended' '$out/run.log') == ${#asks[@]} ))"
+check "every turn ended ($n turns, $f fillers)" "(( \$(grep -c 'turn [0-9]*: ended' '$out/run.log') == n ))"
 check "compaction ran at least twice ($(get compactions), failed $(get failed))" "(( $(get compactions) >= 2 ))"
 check "every turn started under the budget (max $(get max_start_tokens) <= $budget, over-budget refusals $(get over_budget))" "(( $(get max_start_tokens) >= 0 && $(get max_start_tokens) <= budget && $(get over_budget) == 0 ))"
 check "each compaction line has counts only" "[ '$(get counts_only)' = True ]"
-check "turn 9 names the sister (Dana) from the compacted conversation" "[ '$(get sister_answer_has_dana)' = True ]"
-check "the ring volume is unchanged after turn 10 ($ring_before -> $ring_after)" "[ '$ring_before' = '$ring_after' ]"
+check "the sister question gets Dana from the compacted conversation" "[ '$(get sister_answer_has_dana)' = True ]"
+check "the ring volume is unchanged after the last turn ($ring_before -> $ring_after)" "[ '$ring_before' = '$ring_after' ]"
 check "no volume tool ran on the ring stream (lines: $ring_args)" "(( ring_args == 0 ))"
 check "no raw tool output in the summary" "[ '$(get summary_has_raw_tool_json)' = False ]"
-check "VOS cited the owner's restriction in turn 10" "[ '$(get ring_reply_cites_restriction)' = True ]"
+check "VOS cited the owner's restriction in the last turn" "[ '$(get ring_reply_cites_restriction)' = True ]"
 echo "report only: the final summary keeps Dana: $(get summary_keeps_dana), the ring restriction: $(get summary_keeps_ring)"
 if (( fails == 0 )); then echo "context-budget: PASS"; else echo "context-budget: FAIL ($fails)"; exit 1; fi
