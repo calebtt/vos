@@ -73,13 +73,16 @@ public class TitlePacerTest {
     }
 
     @Test
-    public void theTurnEndingReplacesAnUnpublishedActing() {
+    public void aMidTurnIdleDoesNotReplaceAnUnpublishedActing() {
         pacer.changed(GENERATING);
         advance(0);
-        pacer.changed(ACTING);
+        pacer.changed(IDLE); // the response is done
+        pacer.changed(ACTING); // a fast tool runs and returns inside the gap, with no call open
         pacer.changed(IDLE);
         advance(1000);
-        assertEquals(List.of("GENERATING", "IDLE"), published);
+        assertEquals(List.of("GENERATING", "ACTING", "IDLE"), published);
+        assertEquals(250, publishedAt.get(1) - publishedAt.get(0));
+        assertEquals(250, publishedAt.get(2) - publishedAt.get(1));
     }
 
     @Test

@@ -7,9 +7,10 @@ import java.util.function.LongSupplier;
  * Paces the turn notification's title, which carries the indicator when no overlay can be drawn.
  * Android drops a package's notification updates beyond about 5 a second, so the title changes at
  * most once per {@link #MIN_GAP_MS}, and changes in between coalesce to the latest. One exception:
- * an ACTING not yet published is never replaced by a later GENERATING or ACTING, because the owner
- * must be able to see that VOS acted; it is published first and the later state follows after the
- * gap. IDLE (the turn ending) replaces anything. Main thread only.
+ * an ACTING not yet published is never replaced by a later state, IDLE included (mid-turn, no call
+ * is open while a tool runs), because the owner must be able to see that VOS acted; it is published
+ * first and the later state follows after the gap. When the turn ends, the publisher posts nothing
+ * (the notification goes with the turn). Main thread only.
  */
 final class TitlePacer {
     static final long MIN_GAP_MS = 250;
@@ -34,7 +35,7 @@ final class TitlePacer {
     }
 
     void changed(Indicator.State state) {
-        if (scheduled && pending == Indicator.State.ACTING && state != Indicator.State.IDLE) {
+        if (scheduled && pending == Indicator.State.ACTING) {
             after = state;
             return;
         }
