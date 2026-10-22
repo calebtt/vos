@@ -30,11 +30,14 @@ final class ContextBudget {
         return text == null ? 0 : (text.getBytes(StandardCharsets.UTF_8).length + 3) / 4;
     }
 
-    /** What a context costs: its summary and every item, with a few tokens of framing each. */
+    /** Per seeded message: the role and item wrapper the vendor counts. */
+    static final int PER_ITEM = 4;
+
+    /** What a context costs as seeded: the summary and every item, with the text they are wrapped in. */
     static int tokens(String summary, List<Conversation.Item> items) {
-        int t = summary == null ? 0 : tokens(summary) + 16;
+        int t = summary == null ? 0 : tokens(Conversation.summaryFrame(true)) + tokens(summary) + 4 + PER_ITEM;
         for (Conversation.Item i : items) {
-            t += tokens(i.text) + 4;
+            t += tokens(i.text) + PER_ITEM + (i.role == Conversation.Role.TOOL ? tokens(Conversation.TOOL_FRAME) + 1 : 0);
         }
         return t;
     }
@@ -53,7 +56,8 @@ final class ContextBudget {
             return 0;
         }
         int n = Math.max(0, items.size() - VERBATIM_ITEMS);
-        while (n < items.size() && summaryCap + 16 + tokens(null, items.subList(n, items.size())) > budget) {
+        int frame = tokens(Conversation.summaryFrame(true)) + 4 + PER_ITEM;
+        while (n < items.size() && summaryCap + frame + tokens(null, items.subList(n, items.size())) > budget) {
             n++;
         }
         return Math.max(n, 1);

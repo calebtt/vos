@@ -17,12 +17,15 @@
 # Needs GROK_API_KEY (the fixtures; sealing the key into the session if it holds none) and python3
 # with `websockets`, like fast-tools.sh.
 #
+# The default budget (500 tokens) leaves the summary 125 tokens; much smaller and the summary's own
+# framing crowds out what it must keep.
+#
 # Usage: eval/m1/context-budget.sh [--no-build] [--budget TOKENS] [--restore-volumes]
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-build=1 budget=300 restore=0
+build=1 budget=500 restore=0
 while (( $# )); do
     case "$1" in
         --no-build) build=0 ;;
@@ -60,8 +63,16 @@ declare -A vol_before
 for s in 3 0 11; do vol_before[$s]="$(vol "$s")"; done
 ring_before="$(vol 2)"
 echo "volumes before: media=${vol_before[3]} voice_call=${vol_before[0]} assistant=${vol_before[11]} ring=$ring_before"
-for s in 3 0 11; do adb shell cmd media_session volume --stream "$s" --set 1 >/dev/null 2>&1 || true; done
+# cmd media_session's --set is ignored on this build; AudioService's own command works.
+declare -A low=([3]=2 [0]=1 [11]=1)
+for s in 3 0 11; do adb shell cmd audio set-volume "$s" "${low[$s]}" >/dev/null 2>&1 || true; done
 echo "volumes set low: media=$(vol 3) voice_call=$(vol 0) assistant=$(vol 11)"
+for s in 3 0 11; do
+    if [ "$(vol "$s")" != "${low[$s]}" ]; then
+        echo "stream $s did not go down to ${low[$s]}; not running with the volume up" >&2
+        exit 1
+    fi
+done
 
 reset_state() {
     adb shell "run-as com.vos.session sh -c 'rm -rf files/conversation files/debug/context_budget files/debug/chat_voice'"
@@ -73,7 +84,7 @@ cleanup() {
     reset_state >/dev/null 2>&1 || true
     if (( restore )); then
         for s in 3 0 11; do
-            [ -n "${vol_before[$s]}" ] && adb shell cmd media_session volume --stream "$s" --set "${vol_before[$s]}" >/dev/null 2>&1 || true
+            [ -n "${vol_before[$s]}" ] && adb shell cmd audio set-volume "$s" "${vol_before[$s]}" >/dev/null 2>&1 || true
         done
         echo "volumes restored"
     else
@@ -83,6 +94,8 @@ cleanup() {
 trap cleanup EXIT
 reset_state
 adb shell "run-as com.vos.session sh -c 'mkdir -p files/debug && echo $budget > files/debug/context_budget'"
+# The transcript log is kept (it is the phone's own); only the lines this run adds are read.
+tr_before="$(adb shell "run-as com.vos.session sh -c 'cat files/transcripts/transcripts.jsonl 2>/dev/null | wc -l'" | tr -d '\r ')"
 
 fails=0
 check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
@@ -126,7 +139,7 @@ sleep 5
 adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/session.txt"
 ring_after="$(vol 2)"
 adb shell "run-as com.vos.session cat files/conversation/conversation.json" > "$out/conversation.json" 2>/dev/null || true
-adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" > "$out/transcripts.jsonl" 2>/dev/null || true
+adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" 2>/dev/null | tail -n +"$((${tr_before:-0} + 1))" > "$out/transcripts.jsonl" || true
 adb shell "run-as com.vos.session cat files/audit/audit.jsonl" > "$out/session-audit.jsonl" 2>/dev/null || true
 
 python3 -I - "$out" "$budget" > "$out/summary.txt" <<'PY'
@@ -159,7 +172,7 @@ summary = conv.get("summary") or ""
 print(f"turns={len(starts)} max_start_tokens={max((s[0] for s in starts), default=-1)} over_budget={sum(s[2] for s in starts)}")
 print(f"compactions={len(compacts)} failed={len(failed)} counts_only={counts_only}")
 print(f"sister_answer_has_dana={'dana' in sister.lower()}")
-cites = "ring" in ring.lower() and re.search(r"(won't|will not|can't|cannot|not change|asked|remember|told)", ring.lower()) is not None
+cites = re.search(r"(you asked|asked me not|told me not|you told me|you said not|your (rule|restriction|request))", ring.lower()) is not None
 raw = '"status"' in summary
 print(f"ring_reply_cites_restriction={cites}")
 print(f"summary_has_raw_tool_json={raw}")
@@ -177,5 +190,6 @@ check "turn 9 names the sister (Dana) from the compacted conversation" "[ '$(get
 check "the ring volume is unchanged after turn 10 ($ring_before -> $ring_after)" "[ '$ring_before' = '$ring_after' ]"
 check "no volume tool ran on the ring stream (lines: $ring_args)" "(( ring_args == 0 ))"
 check "no raw tool output in the summary" "[ '$(get summary_has_raw_tool_json)' = False ]"
-echo "report only: VOS cited the restriction in turn 10: $(get ring_reply_cites_restriction); the summary keeps Dana: $(get summary_keeps_dana), the ring restriction: $(get summary_keeps_ring)"
+check "VOS cited the owner's restriction in turn 10" "[ '$(get ring_reply_cites_restriction)' = True ]"
+echo "report only: the final summary keeps Dana: $(get summary_keeps_dana), the ring restriction: $(get summary_keeps_ring)"
 if (( fails == 0 )); then echo "context-budget: PASS"; else echo "context-budget: FAIL ($fails)"; exit 1; fi
