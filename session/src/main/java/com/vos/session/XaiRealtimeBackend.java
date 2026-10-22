@@ -20,6 +20,7 @@ import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * The {@code chat_voice} backend on the xAI realtime API (§3.2). Per turn:
@@ -81,6 +82,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
     private final KeyVault vault;
     private final ModelPolicy.Entry model;
     private final TranscriptLog transcripts;
+    private final ContextKeeper context;
     private final Supplier<String> instructions;
     private final JSONArray toolSchemas;
     private final ToolCaller tools;
@@ -88,7 +90,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
     private final Timing timing;
 
     XaiRealtimeBackend(Egress egress, KeyVault vault, ModelPolicy.Entry model, TranscriptLog transcripts,
-            Supplier<String> instructions, JSONArray toolSchemas, ToolCaller tools, ModelCalls calls, Timing timing) {
+            Supplier<String> instructions, JSONArray toolSchemas, ToolCaller tools, ModelCalls calls, Timing timing,
+            ContextKeeper context) {
         this.egress = egress;
         this.vault = vault;
         this.model = model;
@@ -98,6 +101,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         this.tools = tools;
         this.calls = calls;
         this.timing = timing;
+        this.context = context;
     }
 
     @Override
@@ -111,7 +115,15 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         if (key == null) {
             return "no xAI key";
         }
-        return new Turn(turnId, mic, speaker, ready).run(key);
+        String refused = context.beforeTurn(turnId); // never send a request over the context budget
+        if (refused != null) {
+            return refused;
+        }
+        try {
+            return new Turn(turnId, mic, speaker, ready).run(key);
+        } finally {
+            context.afterTurn(turnId);
+        }
     }
 
     private final class Turn implements XaiRealtime.Handler {
@@ -385,6 +397,16 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void sessionUpdated() {
             if (!configured) {
+                List<JSONObject> seed = context.seed(); // before any mic audio: the conversation so far
+                WebSocket w = ws;
+                if (w != null && !seed.isEmpty()) {
+                    int tokens = 0;
+                    for (JSONObject item : seed) {
+                        w.send(XaiRealtime.itemCreate(item));
+                        tokens += ContextBudget.tokens(item.toString());
+                    }
+                    Log.i(TAG, "turn " + turnId + " seeded items=" + seed.size() + " tokens~" + tokens);
+                }
                 configuredAt = now();
                 configured = true;
                 Log.i(TAG, "turn " + turnId + " configured after_ms=" + (configuredAt - openedAt)
@@ -459,6 +481,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void ownerTranscript(String text) {
             transcripts.write(turnId, "owner", text);
+            context.owner(turnId, text);
         }
 
         @Override
@@ -496,6 +519,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void replyTranscript(String text) {
             transcripts.write(turnId, "vos", text);
+            context.vos(turnId, text);
         }
 
         @Override
@@ -610,6 +634,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 long t0 = now();
                 String result = tools.call(turnId, name, argsJson);
                 Log.i(TAG, "turn " + turnId + " tool " + name + " " + statusOf(result) + " ms=" + (now() - t0));
+                context.tool(turnId, name, result);
                 WebSocket ws2 = ws;
                 if (ws2 != null && !over()) {
                     ws2.send(XaiRealtime.functionOutput(callId, result));
