@@ -76,6 +76,8 @@ public class XaiRealtimeBackendTest {
     /** The model-call events the backend reported for the generating indicator, and when (nanoTime). */
     private final List<String> modelCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final List<Long> modelCallNanos = new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** The shared conversation a test gives the backend; none by default. */
+    private ContextKeeper context = ContextKeeper.NONE;
     private volatile long toolDelayMs;
 
     private XaiRealtimeBackend backend(long idleMs) throws Exception {
@@ -110,7 +112,7 @@ public class XaiRealtimeBackendTest {
                         modelCalls.add("ended " + turnId + " " + callId);
                         modelCallNanos.add(System.nanoTime());
                     }
-                }, t);
+                }, t, context);
     }
 
     /** A fake vendor: configures, and after a few mic appends hears speech and answers once. */
@@ -210,6 +212,112 @@ public class XaiRealtimeBackendTest {
                 ws.close(1000, null);
             }
         }));
+    }
+
+    /** Records what a turn tells the shared conversation; seeds two items. */
+    private final class RecordingContext implements ContextKeeper {
+        final List<String> events = new java.util.concurrent.CopyOnWriteArrayList<>();
+        String refuse;
+
+        @Override
+        public String beforeTurn(String turnId) {
+            events.add("before " + turnId);
+            return refuse;
+        }
+
+        @Override
+        public List<JSONObject> seed() {
+            try {
+                return List.of(new JSONObject("{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"My sister's name is Dana.\"}]}"),
+                        new JSONObject("{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Got it.\"}]}"));
+            } catch (org.json.JSONException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        @Override
+        public void owner(String turnId, String text) {
+            events.add("owner " + text);
+        }
+
+        @Override
+        public void vos(String turnId, String text) {
+            events.add("vos " + text);
+        }
+
+        @Override
+        public void tool(String turnId, String name, String result) {
+            events.add("tool " + name);
+        }
+
+        @Override
+        public void afterTurn(String turnId) {
+            events.add("after " + turnId);
+        }
+    }
+
+    @Test
+    public void theConversationIsSeededBeforeAnyMicAudioAndGrowsWithTheTurn() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        RecordingContext rc = new RecordingContext();
+        context = rc;
+        List<String> order = new java.util.concurrent.CopyOnWriteArrayList<>();
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            boolean answered;
+
+            @Override
+            public void onOpen(WebSocket ws, Response r) {
+                ws.send("{\"type\":\"session.created\",\"session\":{\"model\":\"grok-voice-3.0\"}}");
+            }
+
+            @Override
+            public void onMessage(WebSocket ws, String text) {
+                JSONObject m;
+                try {
+                    m = new JSONObject(text);
+                } catch (Exception e) {
+                    return;
+                }
+                String type = m.optString("type");
+                if (order.isEmpty() || !order.get(order.size() - 1).equals(type) || !type.equals("input_audio_buffer.append")) {
+                    order.add(type);
+                }
+                if (type.equals("session.update")) {
+                    ws.send("{\"type\":\"session.updated\",\"session\":{}}");
+                } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !answered) {
+                    answered = true;
+                    ws.send(STARTED);
+                    ws.send(STOPPED);
+                    ws.send("{\"type\":\"conversation.item.input_audio_transcription.completed\",\"transcript\":\"hello\"}");
+                    ws.send("{\"type\":\"response.output_audio_transcript.done\",\"transcript\":\"hi there\"}");
+                    ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}");
+                }
+            }
+
+            @Override
+            public void onClosing(WebSocket ws, int code, String reason) {
+                ws.close(1000, null);
+            }
+        }));
+        Mic mic = new Mic();
+        assertEquals("idle", backend(300).run("t-40", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(List.of("session.update", "conversation.item.create", "conversation.item.create",
+                "input_audio_buffer.append"), order.subList(0, 4));
+        assertEquals(List.of("before t-40", "owner hello", "vos hi there", "after t-40"), rc.events);
+    }
+
+    @Test
+    public void aConversationOverItsBudgetStopsTheTurnBeforeAnyRequest() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        RecordingContext rc = new RecordingContext();
+        rc.refuse = "context over budget";
+        context = rc;
+        Mic mic = new Mic();
+        assertEquals("context over budget", backend(300).run("t-41", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(0, server.getRequestCount());
+        assertEquals(List.of("before t-41"), rc.events);
     }
 
     @Test

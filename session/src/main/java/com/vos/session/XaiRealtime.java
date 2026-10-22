@@ -83,6 +83,15 @@ final class XaiRealtime {
         }
     }
 
+    /** One conversation item (a message), for seeding a new session with the conversation so far. */
+    static String itemCreate(JSONObject item) {
+        try {
+            return new JSONObject().put("type", "conversation.item.create").put("item", item).toString();
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** A tool's result for the model, as a function_call_output item. */
     static String functionOutput(String callId, String outputJson) {
         try {
