@@ -5,6 +5,8 @@ import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Insets;
 import android.graphics.PixelFormat;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.Gravity;
@@ -53,10 +55,32 @@ public final class HandsService extends AccessibilityService {
                 chip.getViewTreeObserver().removeOnPreDrawListener(this);
             }
             if (drawPending != null) {
-                Log.i(TAG, "indicator drawn state=" + drawPending + " t_up=" + SystemClock.uptimeMillis());
+                long now = SystemClock.uptimeMillis();
+                if (drawPending == Indicator.State.ACTING && actingSetAt != 0 && actingShownAt == 0) {
+                    actingShownAt = now;
+                }
+                Log.i(TAG, "indicator drawn state=" + drawPending + " t_up=" + now);
                 drawPending = null;
             }
             return true;
+        }
+    };
+    /**
+     * ACTING stays on screen at least this long after its first frame, so even a tool that returns
+     * within a frame is seen. Any state after it waits for the rest of that time, IDLE included (mid-
+     * turn, no call is open while a tool runs); the owner's stop then still clears well inside
+     * M1-IND-01's 300 ms.
+     */
+    static final long ACTING_MIN_MS = 100;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private long actingSetAt; // uptime ACTING was put on the chip, 0 while the chip is not ACTING
+    private long actingShownAt; // uptime of ACTING's first drawn frame, 0 if none yet
+    private Indicator.State held; // the state waiting for ACTING's minimum time, or null
+    private final Runnable release = () -> {
+        Indicator.State s = held;
+        held = null;
+        if (s != null) {
+            show(s); // re-checks: ACTING's first frame may have come after the hold began
         }
     };
 
@@ -104,6 +128,22 @@ public final class HandsService extends AccessibilityService {
      * drawn, or when its window is removed; a call that changes nothing logs nothing.
      */
     void show(Indicator.State state) {
+        if (state != Indicator.State.ACTING && actingSetAt != 0) {
+            long wait = (actingShownAt != 0 ? actingShownAt : actingSetAt) + ACTING_MIN_MS - SystemClock.uptimeMillis();
+            if (wait > 0) {
+                if (held == null) {
+                    main.postDelayed(release, wait);
+                }
+                held = state;
+                return;
+            }
+        }
+        held = null;
+        main.removeCallbacks(release);
+        draw(state);
+    }
+
+    private void draw(Indicator.State state) {
         if (state == Indicator.State.IDLE) {
             if (remove()) {
                 Log.i(TAG, "indicator drawn state=IDLE t_up=" + SystemClock.uptimeMillis());
@@ -113,6 +153,12 @@ public final class HandsService extends AccessibilityService {
                 return; // the overlay cannot be drawn now; the notification title still carries the state
             }
             boolean generating = state == Indicator.State.GENERATING;
+            if (generating) {
+                actingSetAt = 0;
+                actingShownAt = 0;
+            } else if (actingSetAt == 0) {
+                actingSetAt = SystemClock.uptimeMillis();
+            }
             chip.setImageResource(generating ? R.drawable.ic_vos_generating : R.drawable.ic_vos_acting);
             chip.setContentDescription(getString(generating ? R.string.indicator_generating : R.string.indicator_acting));
             if (generating && !spinning) {
@@ -201,6 +247,10 @@ public final class HandsService extends AccessibilityService {
         }
         stopSpin();
         drawPending = null; // the listener goes with the removed view; the next chip gets its own
+        actingSetAt = 0;
+        actingShownAt = 0;
+        held = null;
+        main.removeCallbacks(release);
         try {
             getSystemService(WindowManager.class).removeView(chip);
         } catch (IllegalArgumentException ignored) {

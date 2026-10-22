@@ -268,34 +268,19 @@ public final class TurnService extends Service {
         stopSelf();
     }
 
-    /** Android drops a package's notification updates beyond about 5 a second; the title updates at most this often. */
-    private static final long TITLE_MIN_GAP_MS = 250;
-    // Main thread only (IndicatorView posts here).
-    private static Indicator.State pendingTitle = Indicator.State.IDLE;
-    private static boolean titleScheduled;
-    private static long lastTitleAt = -TITLE_MIN_GAP_MS;
+    /** The turn notification's title, paced for Android's notification rate limit (main thread only). */
+    private static final TitlePacer TITLE = new TitlePacer(android.os.SystemClock::uptimeMillis,
+            (delayMs, task) -> MAIN.postDelayed(task, delayMs), TurnService::postTitle);
 
-    /**
-     * The indicator changed (main thread): the turn notification's title carries it, for when no
-     * overlay can be drawn. Changes are coalesced so none is dropped by the rate limit: the latest
-     * state is always the one posted.
-     */
+    /** The indicator changed (main thread): the turn notification's title carries it, for when no overlay can be drawn. */
     static void indicatorChanged(Indicator.State state) {
-        pendingTitle = state;
-        if (titleScheduled) {
-            return;
-        }
-        titleScheduled = true;
-        long wait = Math.max(0, lastTitleAt + TITLE_MIN_GAP_MS - android.os.SystemClock.uptimeMillis());
-        MAIN.postDelayed(TurnService::postTitle, wait);
+        TITLE.changed(state);
     }
 
-    private static void postTitle() {
-        titleScheduled = false;
-        lastTitleAt = android.os.SystemClock.uptimeMillis();
+    private static void postTitle(Indicator.State state) {
         TurnService s = live;
         if (s != null && s.turn != null && inForeground) {
-            s.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, s.notification(pendingTitle));
+            s.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, s.notification(state));
         }
     }
 

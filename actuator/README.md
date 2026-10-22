@@ -12,9 +12,9 @@ Trusted base: sensors and hands, **no `INTERNET`** (TARGET-PLAN §3.1, §5.2).
 - `HandsService` (AccessibilityService) and `NotificationsService` (NLS) — exported but guarded by the system-only `BIND_ACCESSIBILITY_SERVICE` / `BIND_NOTIFICATION_LISTENER_SERVICE` permissions, so only the system can bind them (M1). `HandsService` draws the indicator chip when it is enabled; its other hands (gestures, set-text) come later. `ci/policy_check.py` fails any exported service with one of these actions that lacks its guard.
 - `Indicator` and `IndicatorView` — the generating / acting indicator (Shell Contract row 13, #266). The actuator alone decides it:
   - GENERATING while a model call of the open turn is producing output. The session reports each call's start and end (`IVosActuator.modelCallStarted` / `modelCallEnded`, protocol 4), and those events carry no model output.
-  - ACTING while the actuator runs a tool, which wins over GENERATING.
+  - ACTING while the actuator runs a tool that changes the device's state (not `time_get`), which wins over GENERATING. The chip keeps ACTING on screen at least 100 ms after its first frame, so a tool that returns within a frame is still seen; the next state, IDLE included, waits for the rest of that time.
   - It clears when the turn ends or the owner stops, and it has no timeout, so a stalled call keeps spinning.
-  - It is drawn as a `TYPE_ACCESSIBILITY_OVERLAY` chip by `HandsService` (top right, spinning ring while generating, amber ring while acting; placeholder art). The turn notification's title also says "VOS is thinking" / "VOS is acting", which is all a phone without VOS's accessibility service shows.
+  - It is drawn as a `TYPE_ACCESSIBILITY_OVERLAY` chip by `HandsService` (top right, spinning ring while generating, amber ring while acting; placeholder art). The turn notification's title also says "VOS is thinking" / "VOS is acting", which is all a phone without VOS's accessibility service shows. `TitlePacer` keeps it under Android's notification rate limit (one change per 250 ms, the latest state wins) and never lets a later state replace an ACTING not yet shown.
 - The manifest strips `INTERNET` with `tools:node="remove"`; `ci/policy_check.py` checks the built APK anyway.
 - Depends on `:vtb-sdk` (the actuator hosts the VTB registry, §3.4) and `:ipc` (the session ↔ actuator contract).
 
