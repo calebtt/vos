@@ -8,3 +8,5 @@ service com.vos.actuator.SummonTile android.permission.BIND_QUICK_SETTINGS_TILE
 service com.vos.actuator.VosAssistService android.permission.BIND_VOICE_INTERACTION
 service com.vos.actuator.VosAssistSessionService android.permission.BIND_VOICE_INTERACTION
 service com.vos.actuator.VosRecognitionService android.permission.BIND_VOICE_INTERACTION
+# The chat window (decision 21): a launcher entry; it reads no intent extras, so launching it sends nothing.
+activity com.vos.actuator.ChatActivity -

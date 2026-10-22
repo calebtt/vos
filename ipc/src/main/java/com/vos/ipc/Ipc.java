@@ -7,9 +7,10 @@ import android.content.Intent;
 public final class Ipc {
     /**
      * Bumped on any incompatible change to IVosActuator or IVosSession. 2: voice turns. 3: callTool.
-     * 4: modelCallStarted/modelCallEnded (the generating indicator).
+     * 4: modelCallStarted/modelCallEnded (the generating indicator). 5: typed turns
+     * (onTypedTurn, recentThread, typedReply).
      */
-    public static final int PROTOCOL_VERSION = 4;
+    public static final int PROTOCOL_VERSION = 5;
 
     /** Turn audio on both pipes: mono, signed 16-bit little-endian, at this rate (§3.2). */
     public static final int TURN_SAMPLE_RATE = 16000;

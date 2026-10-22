@@ -23,4 +23,18 @@ interface IVosSession {
 
     /** The actuator ended the turn (stop, timeout, error); the session closes its side. */
     oneway void onTurnClosed(String turnId, String reason);
+
+    /**
+     * A typed owner turn (decision 21, Shell Contract row 25): the actuator minted {@code turnId} from
+     * its own chat window or its notification's direct reply, so the session cannot forge one. No mic.
+     * The session answers in the shared conversation with IVosActuator.typedReply, then endTurn.
+     */
+    oneway void onTypedTurn(String turnId, String text);
+
+    /**
+     * The shared conversation's recent owner and VOS lines, oldest first, as a JSON array of
+     * {"role":"owner"|"vos","text":...} (at most {@code max}), for the chat window's thread. Data to
+     * show, never input: nothing in it opens a turn.
+     */
+    String recentThread(int max);
 }

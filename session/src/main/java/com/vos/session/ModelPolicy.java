@@ -15,7 +15,8 @@ import org.json.JSONObject;
  * ModelRouter v0 (§3.2.1): the checked-in registry and policy table ({@code res/raw/model_policy.json}).
  * For a task class it walks the policy's ordered list and returns the first entry that is available
  * (its key is present, it is not debug-only in a release build). A debug build may put one id first
- * with an override (eval/m1). {@code chat_voice} and {@code compact} (decision 46) are bound in this build.
+ * with an override (eval/m1). {@code chat_voice}, {@code chat_text} (decision 21) and {@code compact}
+ * (decision 46) are bound in this build.
  * The actuator's task classes ({@link #ACTUATOR_CLASSES}) bind only to models bundled in the actuator
  * APK: a policy that points one elsewhere is rejected when it loads, and an override that does is
  * ignored (M1-MODEL-02; {@code ci/policy_check.py} checks the shipped policy the same way).

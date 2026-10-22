@@ -80,6 +80,7 @@ ACTUATOR_OK = dict(
     permissions=["android.permission.RECORD_AUDIO", "com.vos.permission.ACTUATOR"],
     components=[
         ("service", "com.vos.actuator.ActuatorService", True, "com.vos.permission.SESSION", [], []),
+        ("activity", "com.vos.actuator.ChatActivity", True, None, ["android.intent.action.MAIN"], []),
         ("service", "com.vos.actuator.HandsService", True, "android.permission.BIND_ACCESSIBILITY_SERVICE",
          ["android.accessibilityservice.AccessibilityService"], ["android.accessibilityservice"]),
         ("service", "com.vos.actuator.NotificationsService", True,

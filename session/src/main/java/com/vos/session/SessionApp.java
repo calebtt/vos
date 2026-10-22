@@ -49,6 +49,7 @@ public final class SessionApp extends Application {
     private org.json.JSONArray fastTools;
     private ActuatorLink actuatorLink;
     private SharedConversation conversation;
+    private TypedTurns typedTurns;
 
     @Override
     public void onCreate() {
@@ -69,8 +70,64 @@ public final class SessionApp extends Application {
         conversation = new SharedConversation(
                 new Conversation(new File(getFilesDir(), "conversation"), audit::record), this::contextBudget,
                 this::compactor);
+        typedTurns = new TypedTurns(() -> new TypedTurns.Wiring() {
+            @Override
+            public ContextKeeper context() {
+                return conversation;
+            }
+
+            @Override
+            public XaiTextBackend backend() {
+                return textBackend();
+            }
+
+            @Override
+            public ActuatorLink actuator() {
+                return actuatorLink();
+            }
+
+            @Override
+            public TranscriptLog transcripts() {
+                return transcripts;
+            }
+        });
         keyWorker.execute(this::importPushedKeys);
     }
+
+    /**
+     * A typed turn the actuator opened (decision 21). A debug build can make the session also post a
+     * reply for a turn the actuator never opened (files/debug/forge_typed), so eval/m1/chat.sh can
+     * check that the actuator refuses it; the file is deleted on use.
+     */
+    void typedTurn(String turnId, String text) {
+        importPushedKeys();
+        String forge = debugFile("forge_typed");
+        if (forge != null) {
+            new File(getFilesDir(), "debug/forge_typed").delete();
+            actuatorLink().typedReply("forged-" + java.util.UUID.randomUUID(), "owner: " + forge);
+        }
+        typedTurns.open(turnId, text);
+    }
+
+    String recentThread(int max) {
+        return conversation.recentThread(max);
+    }
+
+    /** chat_text (decision 21): the policy's first available text model, or null. */
+    XaiTextBackend textBackend() {
+        ModelPolicy.Entry e = modelPolicy.pick("chat_text", null, BuildConfig.DEBUG, this::available);
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("event", "model.pick");
+        line.put("task_class", "chat_text");
+        line.put("model", e == null ? null : e.id);
+        audit.record(line);
+        return e != null && "xai".equals(e.vendor) && "text_chat".equals(e.kind)
+                ? new XaiTextBackend(egress, keyVault, e, instructions() + TYPED_NOTE, fastTools) : null;
+    }
+
+    /** Added to the instructions for a typed turn: the owner reads the reply. */
+    static final String TYPED_NOTE = " This turn is typed in VOS's chat window: the owner reads your reply, so "
+            + "answer in plain text, without speech-only phrasing.";
 
     /**
      * Decision 46's budget for the shared conversation: Q44's 50 % of the chat_voice model's context
@@ -86,12 +143,22 @@ public final class SessionApp extends Application {
                 // fall through to the real budget
             }
         }
-        List<String> ids = modelPolicy.candidates("chat_voice");
-        ModelPolicy.Entry e = ids.isEmpty() ? null : modelPolicy.entry(ids.get(0));
-        int window = e == null ? 0 : e.fields.optInt("context_window", 0);
-        int reserved = e == null ? 0 : e.fields.optInt("max_output_tokens", 0);
-        int prefix = ContextBudget.tokens(instructions()) + ContextBudget.tokens(fastTools.toString());
-        return ContextBudget.of(window, ContextBudget.DEFAULT_SHARE, prefix, reserved);
+        // The shared conversation takes the smaller of its chat_voice and chat_text budgets (§9 Q44).
+        int prefix = ContextBudget.tokens(instructions() + TYPED_NOTE) + ContextBudget.tokens(fastTools.toString());
+        ContextBudget smallest = null;
+        for (String taskClass : new String[] {"chat_voice", "chat_text"}) {
+            List<String> ids = modelPolicy.candidates(taskClass);
+            ModelPolicy.Entry e = ids.isEmpty() ? null : modelPolicy.entry(ids.get(0));
+            if (e == null) {
+                continue;
+            }
+            ContextBudget b = ContextBudget.of(e.fields.optInt("context_window", 0), ContextBudget.DEFAULT_SHARE, prefix,
+                    e.fields.optInt("max_output_tokens", 0));
+            if (smallest == null || b.budget < smallest.budget) {
+                smallest = b;
+            }
+        }
+        return smallest == null ? new ContextBudget(0) : smallest;
     }
 
     /** The compact task class (decision 46): the policy's first available model, or null. */

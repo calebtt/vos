@@ -1,6 +1,6 @@
 {
   "version": 0,
-  "_comment": "ModelRouter v0 (TARGET-PLAN §3.2.1): the model registry and, per task class, the ordered backends to try. chat_voice and compact (decision 46) are bound in this build. debug_only entries exist in debug builds only. The router records the model the vendor reports serving, which can differ from the one asked for. context_window and max_output_tokens feed decision 46's context budget; xAI does not publish grok-voice-3.0's window, so the value is a conservative estimate. A realtime_voice entry may carry turn_detection per owner patience level (standard, long, extra_long: silence_duration_ms, prefix_padding_ms; decision 31, #247); none is set yet, so the vendor's own end-of-turn applies until the Phone B sweep picks the values.",
+  "_comment": "ModelRouter v0 (TARGET-PLAN §3.2.1): the model registry and, per task class, the ordered backends to try. chat_voice, chat_text (typed turns, decision 21) and compact (decision 46) are bound in this build. debug_only entries exist in debug builds only. The router records the model the vendor reports serving, which can differ from the one asked for. context_window and max_output_tokens feed decision 46's context budget; xAI does not publish grok-voice-3.0's window, so the value is a conservative estimate. A realtime_voice entry may carry turn_detection per owner patience level (standard, long, extra_long: silence_duration_ms, prefix_padding_ms; decision 31, #247); none is set yet, so the vendor's own end-of-turn applies until the Phone B sweep picks the values.",
   "registry": [
     {
       "id": "xai:grok-voice-3.0",
@@ -44,6 +44,9 @@
       "xai:grok-voice-3.0"
     ],
     "compact": [
+      "xai:grok-4.20-0309-non-reasoning"
+    ],
+    "chat_text": [
       "xai:grok-4.20-0309-non-reasoning"
     ]
   }

@@ -90,6 +90,19 @@ public final class FastTools {
 
         /** The owner asked for playback; as {@link #ownerPausing}. */
         Runnable ownerPlaying();
+
+        /** No summon to restore after (a typed turn): nothing to record. */
+        MediaIntent NONE = new MediaIntent() {
+            @Override
+            public Runnable ownerPausing() {
+                return () -> { };
+            }
+
+            @Override
+            public Runnable ownerPlaying() {
+                return () -> { };
+            }
+        };
     }
 
     /** One tool result: its status plus fields for the model and the audit line. */
