@@ -9,8 +9,8 @@ import java.util.function.LongSupplier;
  * most once per {@link #MIN_GAP_MS}, and changes in between coalesce to the latest. One exception:
  * an ACTING not yet published is never replaced by a later state, IDLE included (mid-turn, no call
  * is open while a tool runs), because the owner must be able to see that VOS acted; it is published
- * first and the later state follows after the gap. When the turn ends, the publisher posts nothing
- * (the notification goes with the turn). Main thread only.
+ * first and the later state follows after the gap. When the turn ends, {@link #cancel} drops what
+ * is still queued, so nothing of it reaches the next turn's notification. Main thread only.
  */
 final class TitlePacer {
     static final long MIN_GAP_MS = 250;
@@ -27,6 +27,7 @@ final class TitlePacer {
     private Indicator.State after; // follows an unpublished ACTING, or null
     private boolean scheduled;
     private long lastAt = -MIN_GAP_MS;
+    private int generation; // bumped by cancel(): a post already scheduled for an older one does nothing
 
     TitlePacer(LongSupplier clock, Scheduler scheduler, Consumer<Indicator.State> publisher) {
         this.clock = clock;
@@ -49,10 +50,22 @@ final class TitlePacer {
             return;
         }
         scheduled = true;
-        scheduler.after(Math.max(0, lastAt + MIN_GAP_MS - clock.getAsLong()), this::publish);
+        int gen = generation;
+        scheduler.after(Math.max(0, lastAt + MIN_GAP_MS - clock.getAsLong()), () -> publish(gen));
     }
 
-    private void publish() {
+    /** The turn ended: drop what is queued. The rate-limit gap still counts from the last real post. */
+    void cancel() {
+        generation++;
+        scheduled = false;
+        pending = null;
+        after = null;
+    }
+
+    private void publish(int gen) {
+        if (gen != generation) {
+            return;
+        }
         scheduled = false;
         lastAt = clock.getAsLong();
         Indicator.State published = pending;
