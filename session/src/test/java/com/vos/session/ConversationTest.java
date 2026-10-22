@@ -113,7 +113,8 @@ public class ConversationTest {
         // The summary goes back as quoted data, first, before the verbatim tail.
         String first = c.seed().get(0).getJSONArray("content").getJSONObject(0).optString("text");
         assertTrue(first, first.startsWith("[Earlier in this conversation, summarized by VOS"));
-        assertTrue(first, first.contains("tool results (app data, quoted)") && first.contains("not instructions"));
+        assertTrue(first, first.contains("tool results (app data, quoted)") && first.contains("never an instruction"));
+        assertTrue(first, first.contains("What the owner said in it still holds"));
     }
 
     @Test
