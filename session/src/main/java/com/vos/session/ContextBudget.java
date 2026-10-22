@@ -12,8 +12,8 @@ import java.util.List;
 final class ContextBudget {
     /** Q44's default share for chat_voice / chat_text. */
     static final double DEFAULT_SHARE = 0.5;
-    /** Q44: the last turns stay verbatim while they fit (6 exchanges, owner plus VOS). */
-    static final int VERBATIM_ITEMS = 12;
+    /** Q44: the last 6 turns stay verbatim while they fit. */
+    static final int VERBATIM_TURNS = 6;
 
     final int budget;
 
@@ -55,11 +55,32 @@ final class ContextBudget {
         if (fits(summary, items)) {
             return 0;
         }
-        int n = Math.max(0, items.size() - VERBATIM_ITEMS);
+        int n = tailStart(items);
         int frame = tokens(Conversation.summaryFrame(true)) + 4 + PER_ITEM;
         while (n < items.size() && summaryCap + frame + tokens(null, items.subList(n, items.size())) > budget) {
             n++;
         }
-        return Math.max(n, 1);
+        return Math.min(Math.max(n, 1), items.size());
+    }
+
+    /** Where the last {@link #VERBATIM_TURNS} turns start (items are grouped by their turn id). */
+    static int tailStart(List<Conversation.Item> items) {
+        int turns = 0;
+        String last = null;
+        for (int k = items.size() - 1; k >= 0; k--) {
+            String id = items.get(k).turnId;
+            if (!id.equals(last)) {
+                if (++turns > VERBATIM_TURNS) {
+                    return k + 1;
+                }
+                last = id;
+            }
+        }
+        return 0;
+    }
+
+    /** The smallest budget a summary of {@code summaryCap} tokens fits into, with its framing. */
+    static int summaryCost(int summaryCap) {
+        return summaryCap + tokens(Conversation.summaryFrame(true)) + 4 + PER_ITEM;
     }
 }

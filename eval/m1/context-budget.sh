@@ -82,6 +82,10 @@ cleanup() {
     adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op stop >/dev/null 2>&1 || true
     sleep 1
     reset_state >/dev/null 2>&1 || true
+    if [ -n "${ring_before:-}" ] && [ "$(vol 2)" != "$ring_before" ]; then # a failed restriction check moved it
+        adb shell cmd audio set-volume 2 "$ring_before" >/dev/null 2>&1 || true
+        echo "ring volume put back to $ring_before"
+    fi
     if (( restore )); then
         for s in 3 0 11; do
             [ -n "${vol_before[$s]}" ] && adb shell cmd audio set-volume "$s" "${vol_before[$s]}" >/dev/null 2>&1 || true
@@ -96,6 +100,7 @@ reset_state
 adb shell "run-as com.vos.session sh -c 'mkdir -p files/debug && echo $budget > files/debug/context_budget'"
 # The transcript log is kept (it is the phone's own); only the lines this run adds are read.
 tr_before="$(adb shell "run-as com.vos.session sh -c 'cat files/transcripts/transcripts.jsonl 2>/dev/null | wc -l'" | tr -d '\r ')"
+audit_before="$(adb shell "run-as com.vos.session sh -c 'cat files/audit/audit.jsonl 2>/dev/null | wc -l'" | tr -d '\r ')"
 
 fails=0
 check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
@@ -135,12 +140,19 @@ PY
     echo "turn $n: $( (( over )) && echo ended || echo 'did not end') $(grep "^turn$n " "$out/session.txt" | grep -o 'context tokens~[0-9]* budget=[0-9]*[a-z ]*' | head -1)"
     sleep 3 # the turn's background compaction
 done
-sleep 5
+# Wait for the last turn's background compaction: the conversation file stops changing.
+prev=""
+for _ in $(seq 1 30); do
+    cur="$(adb shell "run-as com.vos.session sh -c 'stat -c %Y.%s files/conversation/conversation.json 2>/dev/null'" | tr -d '\r')"
+    [ -n "$cur" ] && [ "$cur" = "$prev" ] && break
+    prev="$cur"
+    sleep 2
+done
 adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/session.txt"
 ring_after="$(vol 2)"
 adb shell "run-as com.vos.session cat files/conversation/conversation.json" > "$out/conversation.json" 2>/dev/null || true
 adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" 2>/dev/null | tail -n +"$((${tr_before:-0} + 1))" > "$out/transcripts.jsonl" || true
-adb shell "run-as com.vos.session cat files/audit/audit.jsonl" > "$out/session-audit.jsonl" 2>/dev/null || true
+adb shell "run-as com.vos.session cat files/audit/audit.jsonl" 2>/dev/null | tail -n +"$((${audit_before:-0} + 1))" > "$out/session-audit.jsonl" || true
 
 python3 -I - "$out" "$budget" > "$out/summary.txt" <<'PY'
 import json, re, sys

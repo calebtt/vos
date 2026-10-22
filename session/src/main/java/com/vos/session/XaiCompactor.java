@@ -20,6 +20,8 @@ import org.json.JSONObject;
  */
 final class XaiCompactor implements Conversation.Compactor {
     private static final MediaType JSON = MediaType.get("application/json");
+    /** The whole call, so a slow summary cannot hold the next turn past SharedConversation.WAIT_MS. */
+    static final long CALL_TIMEOUT_S = 15;
     private final Egress egress;
     private final KeyVault vault;
     private final ModelPolicy.Entry model;
@@ -61,7 +63,9 @@ final class XaiCompactor implements Conversation.Compactor {
                 .header("Authorization", "Bearer " + key)
                 .post(RequestBody.create(body, JSON))
                 .build();
-        try (Response r = egress.client().newCall(req).execute()) {
+        okhttp3.Call call = egress.client().newCall(req);
+        call.timeout().timeout(CALL_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS); // inside the next turn's wait
+        try (Response r = call.execute()) {
             ResponseBody rb = r.body();
             if (!r.isSuccessful() || rb == null) {
                 throw new IOException("compact HTTP " + r.code());

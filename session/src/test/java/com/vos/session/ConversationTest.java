@@ -165,6 +165,49 @@ public class ConversationTest {
     }
 
     @Test
+    public void aBudgetBelowASummaryStopsHonestlyWithoutThrowing() {
+        Conversation c = conversation(tmp.getRoot());
+        exchange(c, 1);
+        assertFalse(c.fit(new ContextBudget(30), fake)); // under the summary's own framing
+        assertEquals("context.compact_failed", audit.get(0).get("event"));
+        assertEquals(2, c.items().size());
+    }
+
+    @Test
+    public void aSummaryOverBudgetWithNoItemsLeftIsResummarized() {
+        Conversation c = conversation(tmp.getRoot());
+        for (int n = 1; n <= 12; n++) {
+            exchange(c, n);
+        }
+        Conversation.Compactor longWinded = new Conversation.Compactor() {
+            @Override
+            public String model() {
+                return "fake:long";
+            }
+
+            @Override
+            public String summarize(String previous, List<Conversation.Item> slice, int maxTokens) {
+                return "The owner asked many things. ".repeat(slice.isEmpty() ? 1 : 200);
+            }
+        };
+        int cost = ContextBudget.summaryCost(Math.max(32, 400 / 4));
+        assertTrue(cost < 400);
+        assertTrue(c.fit(new ContextBudget(400), longWinded)); // clipped to the cap, then the tail fits
+        assertTrue(new ContextBudget(400).fits(c.summary(), c.items()));
+    }
+
+    @Test
+    public void theVerbatimTailIsTheLastSixTurns() {
+        Conversation c = conversation(tmp.getRoot());
+        for (int n = 1; n <= 8; n++) {
+            c.add(Conversation.Role.OWNER, "t" + n, "q" + n);
+            c.add(Conversation.Role.TOOL, "t" + n, "time_get -> {}");
+            c.add(Conversation.Role.VOS, "t" + n, "a" + n);
+        }
+        assertEquals(6, ContextBudget.tailStart(c.items())); // turns t3..t8, three items each
+    }
+
+    @Test
     public void aDamagedFileStartsFresh() throws Exception {
         File dir = tmp.newFolder();
         Files.write(new File(dir, "conversation.json").toPath(), "{not json".getBytes(java.nio.charset.StandardCharsets.UTF_8));
