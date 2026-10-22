@@ -39,9 +39,12 @@ final class SharedConversation implements ContextKeeper {
         synchronized (this) {
             f = pending;
         }
+        boolean busy = false;
         if (f != null) {
             try {
                 f.get(WAIT_MS, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                busy = true; // the last turn's compaction is still running: do not queue behind it
             } catch (Exception e) {
                 // checked below, on this thread
             }
@@ -51,10 +54,10 @@ final class SharedConversation implements ContextKeeper {
             Log.i(TAG, "turn " + turnId + " context tokens~" + conversation.tokens() + " budget=" + b.budget);
             return null;
         }
-        Conversation.Compactor c = compactor.get();
+        Conversation.Compactor c = busy ? null : compactor.get();
         boolean ok = c != null && conversation.fit(b, c);
         Log.i(TAG, "turn " + turnId + " context tokens~" + conversation.tokens() + " budget=" + b.budget
-                + (ok ? "" : " over budget"));
+                + (ok ? "" : busy ? " over budget (compaction still running)" : " over budget"));
         return ok ? null : "context over budget";
     }
 

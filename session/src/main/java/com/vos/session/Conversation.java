@@ -110,13 +110,18 @@ final class Conversation {
             int before;
             int cap = Math.max(32, (int) (budget.budget * SUMMARY_SHARE));
             synchronized (this) {
-                int n = budget.toCompact(summary, items, cap);
-                if (n == 0) {
+                before = ContextBudget.tokens(summary, items);
+                if (budget.fits(summary, items)) {
                     return true;
                 }
+                if (ContextBudget.summaryCost(cap) > budget.budget) { // not even a summary alone would fit
+                    record("context.compact_failed", before, before, budget, List.of(), compactor.model(),
+                            "budget below a summary");
+                    return false;
+                }
+                int n = items.isEmpty() ? 0 : budget.toCompact(summary, items, cap);
                 prev = summary;
-                slice = new ArrayList<>(items.subList(0, n));
-                before = ContextBudget.tokens(summary, items);
+                slice = new ArrayList<>(items.subList(0, n)); // empty: re-summarize the summary alone
             }
             String next;
             try {
