@@ -1,0 +1,9 @@
+# Task classes the actuator runs (TARGET-PLAN §3.2.1 security invariants, M1-MODEL-02): in the
+# session's model policy each may name only registry entries with "where": "on_device_actuator".
+# Kept equal to ModelPolicy.ACTUATOR_CLASSES (ModelPolicyTest checks).
+offline_grammar
+ocr_commit
+control_detect
+tts_house
+vad_aec
+wake
