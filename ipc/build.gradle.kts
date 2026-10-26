@@ -22,4 +22,5 @@ android {
 
 dependencies {
     testImplementation(libs.junit)
+    testImplementation(libs.orgjson) // android.jar's org.json is a stub in JVM tests
 }
