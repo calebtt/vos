@@ -137,10 +137,27 @@ public final class SessionApp extends Application {
             return new EchoBackend(actuatorLink());
         }
         if ("xai".equals(e.vendor) && "realtime_voice".equals(e.kind)) {
+            XaiRealtimeBackend.Timing timing = new XaiRealtimeBackend.Timing();
+            timing.turnDetection = turnDetection(e);
             return new XaiRealtimeBackend(egress, keyVault, e, transcripts, SessionApp::instructions, fastTools,
-                    actuatorLink()::callTool, actuatorLink(), new XaiRealtimeBackend.Timing(), conversation);
+                    actuatorLink()::callTool, actuatorLink(), timing, conversation);
         }
         return null;
+    }
+
+    /**
+     * The end-of-turn settings for the owner's patience (decision 31, #247). The owner setting itself
+     * comes with the Settings keys (#200); until then a debug build reads files/debug/patience, and
+     * files/debug/silence_duration_ms overrides the value for the eval's sweep. Release: standard.
+     */
+    private TurnDetection turnDetection(ModelPolicy.Entry e) {
+        TurnDetection td = TurnDetection.forPatience(e, debugFile("patience"));
+        String sweep = debugFile("silence_duration_ms");
+        try {
+            return sweep == null ? td : td.withSilenceMs(Integer.parseInt(sweep));
+        } catch (NumberFormatException ignored) {
+            return td;
+        }
     }
 
     private boolean available(ModelPolicy.Entry e) {
