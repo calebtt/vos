@@ -87,6 +87,27 @@ public class FastToolsTest {
 
         @Override public String foregroundPackage() { return !hands || nullReads-- > 0 ? null : front; }
         @Override public String homePackage() { return home; }
+
+        final List<String[]> apps = new ArrayList<>(List.of(
+                new String[] {"Maps", "com.google.android.apps.maps", "com.google.android.maps.MapsActivity"},
+                new String[] {"Camera", "com.android.camera", "com.android.camera.Camera"},
+                new String[] {"Google Camera", "com.google.android.GoogleCamera", "com.android.camera.CameraLauncher"},
+                new String[] {"Clock", "com.android.deskclock", "com.android.deskclock.DeskClock"},
+                new String[] {"Café Finder", "com.example.cafe", "com.example.cafe.Main"},
+                new String[] {"Settings", "com.android.settings", "com.android.settings.Settings"}));
+        boolean launchWorks = true;
+        boolean launchShows = true;
+
+        @Override public List<String[]> launchableApps() { return apps; }
+
+        @Override
+        public boolean launch(String pkg, String activity) {
+            acts.add("launch " + pkg);
+            if (launchWorks && launchShows) {
+                front = pkg;
+            }
+            return launchWorks;
+        }
     }
 
     private final FakePlatform platform = new FakePlatform();
@@ -110,7 +131,8 @@ public class FastToolsTest {
 
     @Test
     public void knowsExactlyTheToolsItRuns() throws Exception {
-        assertEquals(java.util.Set.of("time_get", "volume_set", "volume_step", "media_control", "shell_nav"), FastTools.NAMES);
+        assertEquals(java.util.Set.of("time_get", "volume_set", "volume_step", "media_control", "shell_nav", "app_open"),
+                FastTools.NAMES);
         for (String n : FastTools.NAMES) {
             assertTrue(n, FastTools.knows(n));
             String detail = run(n, "{}").optString("detail");
@@ -362,5 +384,83 @@ public class FastToolsTest {
         assertEquals("FAILED", nav("{\"action\":\"home\",\"times\":3}").json.getString("status"));
         assertEquals("FAILED", nav("{}").json.getString("status"));
         assertTrue(platform.acts.isEmpty());
+    }
+
+    private FastTools.Result open(String name) throws Exception {
+        return tools.run("app_open", new JSONObject().put("name", name).toString(), media);
+    }
+
+    @Test
+    public void appOpenStartsTheAppNamedAndSeesItInFront() throws Exception {
+        FastTools.Result r = open("maps");
+        assertEquals("VERIFIED", r.json.getString("status"));
+        assertEquals("Maps", r.json.getString("app"));
+        assertEquals(List.of("launch com.google.android.apps.maps"), platform.acts);
+        assertTrue(FastTools.changesState("app_open"));
+        assertEquals("an exact label wins over one that contains it", "VERIFIED", open("Camera").json.getString("status"));
+        assertEquals("launch com.android.camera", platform.acts.get(1));
+        assertEquals("accents and punctuation are ignored", "VERIFIED", open("cafe finder!").json.getString("status"));
+        assertEquals("a word of the label is enough when only one has it", "VERIFIED", open("finder").json.getString("status"));
+    }
+
+    @Test
+    public void anAmbiguousNameStartsNothingAndListsTheCandidates() throws Exception {
+        platform.apps.add(new String[] {"Camera", "com.example.othercam", "com.example.othercam.Main"});
+        FastTools.Result r = open("camera");
+        assertEquals("FAILED", r.json.getString("status"));
+        assertEquals(2, r.json.getJSONArray("candidates").length());
+        assertTrue(platform.acts.isEmpty());
+        platform.apps.remove(platform.apps.size() - 1);
+        for (int i = 0; i < 8; i++) {
+            platform.apps.add(new String[] {"Notes " + i, "com.example.notes" + i, "com.example.Main"});
+        }
+        FastTools.Result many = open("notes");
+        assertEquals(FastTools.MAX_CANDIDATES, many.json.getJSONArray("candidates").length());
+        assertTrue(platform.acts.isEmpty());
+    }
+
+    @Test
+    public void twoMatchingEntriesOfOneAppAreTwoCandidates() throws Exception {
+        platform.apps.add(new String[] {"My Notes", "com.example.notes", "com.example.notes.Mine"});
+        platform.apps.add(new String[] {"Work Notes", "com.example.notes", "com.example.notes.Work"});
+        FastTools.Result r = open("notes");
+        assertEquals("FAILED", r.json.getString("status"));
+        assertEquals(2, r.json.getJSONArray("candidates").length());
+        assertTrue("nothing started", platform.acts.isEmpty());
+        assertEquals("the exact label starts that entry", "VERIFIED", open("work notes").json.getString("status"));
+    }
+
+    @Test
+    public void noMatchOrAFailedStartIsFailed() throws Exception {
+        assertEquals("FAILED", open("Spreadsheets").json.getString("status"));
+        assertEquals("a part of a word is not a match", "FAILED", open("clo").json.getString("status"));
+        assertTrue(platform.acts.isEmpty());
+        platform.launchWorks = false;
+        FastTools.Result r = open("clock");
+        assertEquals("FAILED", r.json.getString("status"));
+        assertEquals("the app could not be started", r.json.getString("detail"));
+    }
+
+    @Test
+    public void startedButNotSeenInFrontIsUnverified() throws Exception {
+        platform.launchShows = false; // e.g. the system blocked the start, or the screen cannot be read
+        FastTools.Result r = open("settings");
+        assertEquals("UNVERIFIED", r.json.getString("status"));
+        assertEquals(List.of("launch com.android.settings"), platform.acts);
+    }
+
+    @Test
+    public void appOpenRefusesBadArguments() throws Exception {
+        assertEquals("FAILED", tools.run("app_open", "{}", media).json.getString("status"));
+        assertEquals("FAILED", tools.run("app_open", "{\"name\":\"Maps\",\"as_admin\":true}", media).json.getString("status"));
+        assertEquals("FAILED", open("x".repeat(200)).json.getString("status"));
+        assertEquals("FAILED", open("  !! ").json.getString("status"));
+        assertTrue(platform.acts.isEmpty());
+    }
+
+    @Test
+    public void normalizeIgnoresCaseAccentsAndPunctuation() {
+        assertEquals("cafe finder", FastTools.normalize("  Café—Finder! "));
+        assertEquals("", FastTools.normalize(null));
     }
 }
