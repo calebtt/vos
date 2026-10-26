@@ -78,6 +78,10 @@ public class XaiRealtimeBackendTest {
     private final List<Long> modelCallNanos = new java.util.concurrent.CopyOnWriteArrayList<>();
     /** The shared conversation a test gives the backend; none by default. */
     private ContextKeeper context = ContextKeeper.NONE;
+    /** The end-of-turn settings a test gives the backend (#247); the vendor's defaults by default. */
+    private TurnDetection turnDetection = TurnDetection.VENDOR_DEFAULT;
+    /** Every session.update the fake vendor of enqueueVendor received. */
+    private final List<JSONObject> sessionUpdates = new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile long toolDelayMs;
 
     private XaiRealtimeBackend backend(long idleMs) throws Exception {
@@ -89,6 +93,7 @@ public class XaiRealtimeBackendTest {
         t.idleMs = idleMs;
         t.firstSpeechMs = 5_000;
         t.maxTurnMs = 20_000;
+        t.turnDetection = turnDetection;
         org.json.JSONArray schemas = new org.json.JSONArray(
                 "[{\"type\":\"function\",\"name\":\"volume_set\",\"parameters\":{\"type\":\"object\"}}]");
         return new XaiRealtimeBackend(egress, vault, e, transcripts, () -> "be brief", schemas,
@@ -134,6 +139,11 @@ public class XaiRealtimeBackendTest {
                     return;
                 }
                 if (type.equals("session.update")) {
+                    try {
+                        sessionUpdates.add(new JSONObject(text));
+                    } catch (Exception ignored) {
+                        // parsed above
+                    }
                     ws.send("{\"type\":\"session.updated\",\"session\":{}}");
                 } else if (type.equals("input_audio_buffer.append") && appends.incrementAndGet() == 3 && !answered) {
                     answered = true;
@@ -696,6 +706,22 @@ public class XaiRealtimeBackendTest {
         void close() {
             open = false;
         }
+    }
+
+    @Test
+    public void thePatienceSettingsReachTheVendorsSessionUpdate() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        turnDetection = new TurnDetection("long", 1400, 250);
+        enqueueVendor(null);
+        Mic mic = new Mic();
+        String reason = backend(400).run("t-1", mic.in, new ByteArrayOutputStream(), () -> { });
+        mic.close();
+        assertEquals("idle", reason);
+        assertEquals(1, sessionUpdates.size());
+        JSONObject vad = sessionUpdates.get(0).getJSONObject("session").getJSONObject("turn_detection");
+        assertEquals("server_vad", vad.getString("type"));
+        assertEquals(1400, vad.getInt("silence_duration_ms"));
+        assertEquals(250, vad.getInt("prefix_padding_ms"));
     }
 
     @Test
