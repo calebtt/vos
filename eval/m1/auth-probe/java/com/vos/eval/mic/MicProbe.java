@@ -15,8 +15,9 @@ import java.util.Arrays;
 /**
  * M1-AUD-02 probe, run by AuthProbe with {@code -e probe mic} in the session's androidTest APK, so
  * it runs in the session's process and UID. It tries to record. Pass: the session neither requests
- * nor holds RECORD_AUDIO, and AudioRecord yields no audio (it fails to initialize, refuses to
- * start, or is not recording).
+ * nor holds RECORD_AUDIO, and AudioRecord is refused: it fails to initialize, throws a
+ * SecurityException, or does not reach the recording state. Any other outcome fails, a recording
+ * of silence and an error of the probe's own included, so a pass always means a refusal.
  *
  *   am instrument -w -r -e probe mic com.vos.session.test/com.vos.eval.auth.AuthProbe
  */
@@ -42,8 +43,9 @@ public final class MicProbe {
         String outcome;
         AudioRecord r = null;
         try {
+            int min = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
             r = new AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT, 6400);
+                    AudioFormat.ENCODING_PCM_16BIT, Math.max(6400, min)); // never below the minimum: that would throw for its own reason
             if (r.getState() != AudioRecord.STATE_INITIALIZED) {
                 outcome = "not_initialized";
             } else {
@@ -69,7 +71,9 @@ public final class MicProbe {
                 r.release();
             }
         }
-        boolean pass = !requested && !granted && !outcome.equals("recorded");
+        boolean refused = outcome.equals("not_initialized") || outcome.equals("security_exception")
+                || outcome.equals("not_recording");
+        boolean pass = !requested && !granted && refused;
         Bundle res = new Bundle();
         res.putString("outcome", outcome);
         res.putString("requested", String.valueOf(requested));
