@@ -26,6 +26,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/eval/m1/lib.sh"
 build=1 stall=30
 while (( $# )); do
     case "$1" in
@@ -42,10 +43,7 @@ if ! [[ "$stall" =~ ^[0-9]+$ ]] || (( stall < 4 || stall > 590 )); then
 fi
 : "${GROK_API_KEY:?set GROK_API_KEY (used for the fixture; never printed)}"
 
-stamp="$(date +%Y-%m-%d)/indicator-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
-mkdir -p "$out"
-exec > >(tee -a "$out/run.log") 2>&1
+vos_run_dir indicator
 echo "indicator on $(adb get-serialno) ($(adb shell getprop ro.build.fingerprint)); results in $out"
 
 HANDS=com.vos.actuator/.HandsService
@@ -79,21 +77,18 @@ fi
 if (( build )); then
     "$ROOT/gradlew" -p "$ROOT" -q --console=plain :actuator:assembleDebug :session:assembleDebug
 fi
-adb install -r -t "$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk" >/dev/null
-adb install -r -t "$ROOT/session/build/outputs/apk/debug/session-debug.apk" >/dev/null
-adb shell pm grant com.vos.actuator android.permission.RECORD_AUDIO
-adb shell pm grant com.vos.actuator android.permission.POST_NOTIFICATIONS
-if ! adb shell "run-as com.vos.session test -f files/keys/xai.bin"; then
-    printf '%s' "$GROK_API_KEY" | adb shell "run-as com.vos.session sh -c 'umask 077 && mkdir -p files/key-import && cat > files/key-import/xai'"
-fi
-media_volume() { adb shell cmd media_session volume --stream 3 --get | tr -d '\r' | sed -n 's/.*volume is \([0-9]*\) in range.*/\1/p'; }
+vos_install_apps
+vos_grant_mic
+vos_grant_notifications
+vos_seal_key_if_missing
+media_volume() { vos_volume 3 | cut -d' ' -f1; }
 vol_before="$(media_volume)"
 
 cleanup() {
     adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op stop >/dev/null 2>&1 || true
     sleep 1
-    adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op volume --ei stream 3 --ei index "$vol_before" >/dev/null 2>&1 || true
-    adb shell "run-as com.vos.session rm -f files/debug/chat_voice" >/dev/null 2>&1 || true
+    vos_restore_media_volume "$vol_before"
+    vos_clear_debug_overrides >/dev/null 2>&1 || true
     adb shell "run-as com.vos.actuator sh -c 'rm -rf files/debug'" >/dev/null 2>&1 || true
     if (( enabled_by_us )); then # put back exactly what was there; an unset value is deleted, not set empty
         if [ "$a11y_before" = null ] || [ -z "$a11y_before" ]; then
