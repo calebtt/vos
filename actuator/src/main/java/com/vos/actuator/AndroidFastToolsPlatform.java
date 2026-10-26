@@ -126,6 +126,38 @@ final class AndroidFastToolsPlatform implements FastTools.Platform {
         return r == null || r.activityInfo == null ? null : r.activityInfo.packageName;
     }
 
+    @Override
+    public List<String[]> launchableApps() {
+        android.content.pm.PackageManager pm = context.getPackageManager();
+        List<String[]> out = new java.util.ArrayList<>();
+        for (android.content.pm.ResolveInfo r : pm.queryIntentActivities(
+                new android.content.Intent(android.content.Intent.ACTION_MAIN)
+                        .addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)) {
+            String pkg = r.activityInfo == null ? null : r.activityInfo.packageName;
+            if (pkg != null && !pkg.startsWith("com.vos.")) {
+                out.add(new String[] {String.valueOf(r.loadLabel(pm)), pkg, r.activityInfo.name});
+            }
+        }
+        return out;
+    }
+
+    /**
+     * From a turn the actuator runs as a bound accessibility or voice interaction service, which may
+     * start activities from the background (S-26 checks this on Tier S).
+     */
+    @Override
+    public boolean launch(String pkg, String activity) {
+        android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_LAUNCHER).setClassName(pkg, activity);
+        try {
+            context.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    | android.content.Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     private MediaMetadata metadata() {
         List<MediaController> sessions = sessions();
         return sessions == null || sessions.isEmpty() ? null : sessions.get(0).getMetadata();
