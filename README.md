@@ -2,7 +2,7 @@
 
 > **Private repository. VOS is not a public product yet.**
 
-VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 7 (`panther`) as the main dev and flash device and the Pixel 8a (`akita`) as the second, first-class target. You talk, and the agent runs the phone: apps, media, settings, messages, and the audio itself, including driving in-app assistants (for example the assistant button in Google Maps) over its own duplex audio channel. When you ask, that same agent also helps harden privacy — review permissions, inspect declared egress, and set Graphene's toggles, scopes, and sandboxed Play — using the privileges the plan already gives it.
+VOS is an AI-operated Android session layer on GrapheneOS, with the Pixel 7 (`panther`) as the main dev and flash device and the Pixel 8a (`akita`) as the second, first-class target. You talk, and the agent runs the phone: apps, media, settings, messages, and the audio itself, including driving in-app assistants (for example the assistant button in Google Maps) over its own duplex audio channel. When you ask, that same agent also helps harden privacy — review permissions in the Settings UI, inspect VOS's declared egress, and set another app's Network/Sensors toggles and scopes (catastrophic "yes") or whether sandboxed Play is installed in the Owner profile — using the privileges the plan already gives it.
 
 - Packages: `com.vos.session` (voice session, model, network) and `com.vos.actuator` (privileged actuator: mic, audio plane, accessibility, tools; no `INTERNET`). `com.vos.sandbox` arrives at M7.
 - Tool bus: VOS Tool Bus (VTB).
