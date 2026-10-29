@@ -185,9 +185,10 @@ public final class FastTools {
     /**
      * shell_nav {action}: a global action through VOS's accessibility service, then the oracle on the
      * active window: home is VERIFIED when the default home app is active, notifications and quick
-     * settings when System UI is, recents when the home app (which hosts the overview) became active,
-     * and back when another app other than System UI became active. Anything else is UNVERIFIED (an
-     * in-app back cannot be seen this way). FAILED when the service is off (the owner turns it on).
+     * settings when System UI became active (a lock screen, or a shade that was already open, does
+     * not count), recents when the home app (which hosts the overview) became active, and back when
+     * another app other than System UI became active. Anything else is UNVERIFIED (an in-app back
+     * cannot be seen this way). FAILED when the service is off (the owner turns it on).
      */
     private Result shellNav(JSONObject args) throws BadArgs, InterruptedException {
         allowOnly(args, "action");
@@ -212,7 +213,7 @@ public final class FastTools {
                     break;
                 case "notifications":
                 case "quick_settings":
-                    seen = SYSTEM_UI.equals(front);
+                    seen = moved && SYSTEM_UI.equals(front); // System UI must become active
                     break;
                 case "recents":
                     seen = moved && front.equals(home);

@@ -332,9 +332,17 @@ public class FastToolsTest {
     }
 
     @Test
-    public void shellNavShadesAreVerifiedWhenSystemUiIsInFront() throws Exception {
+    public void shellNavShadesAreVerifiedWhenSystemUiBecomesActive() throws Exception {
         assertEquals("VERIFIED", nav("{\"action\":\"notifications\"}").json.getString("status"));
+        platform.front = "com.example.mail"; // the shade closed; quick settings has to open it again
         assertEquals("VERIFIED", nav("{\"action\":\"quick_settings\"}").json.getString("status"));
+    }
+
+    @Test
+    public void aLockScreenOrAnAlreadyOpenShadeIsNotAVerifiedShade() throws Exception {
+        platform.front = FastTools.SYSTEM_UI; // lock screen, or the shade was already open
+        assertEquals("UNVERIFIED", nav("{\"action\":\"notifications\"}").json.getString("status"));
+        assertEquals("UNVERIFIED", nav("{\"action\":\"quick_settings\"}").json.getString("status"));
     }
 
     @Test
