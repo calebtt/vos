@@ -65,6 +65,28 @@ public class FastToolsTest {
         @Override public String mediaId() { return state == null ? null : id; }
         @Override public String mediaTitle() { return state == null ? null : title; }
         @Override public void sleep(long ms) { }
+
+        boolean hands = true; // VOS's accessibility service is connected
+        boolean navReacts = true;
+        String front = "com.example.mail";
+        String home = "com.android.launcher3";
+        String afterBack = "com.example.other"; // the app a back lands in
+        int nullReads; // the next reads of the active window miss (a transient null)
+
+        @Override
+        public boolean globalAction(int action) {
+            acts.add("nav " + action);
+            if (!hands) {
+                return false;
+            }
+            if (navReacts) {
+                front = action == 2 || action == 3 ? home : action == 4 || action == 5 ? FastTools.SYSTEM_UI : afterBack;
+            }
+            return true;
+        }
+
+        @Override public String foregroundPackage() { return !hands || nullReads-- > 0 ? null : front; }
+        @Override public String homePackage() { return home; }
     }
 
     private final FakePlatform platform = new FakePlatform();
@@ -88,7 +110,7 @@ public class FastToolsTest {
 
     @Test
     public void knowsExactlyTheToolsItRuns() throws Exception {
-        assertEquals(java.util.Set.of("time_get", "volume_set", "volume_step", "media_control"), FastTools.NAMES);
+        assertEquals(java.util.Set.of("time_get", "volume_set", "volume_step", "media_control", "shell_nav"), FastTools.NAMES);
         for (String n : FastTools.NAMES) {
             assertTrue(n, FastTools.knows(n));
             String detail = run(n, "{}").optString("detail");
@@ -263,5 +285,90 @@ public class FastToolsTest {
         platform.state = null; // unobservable: the attempt stands
         assertEquals("UNVERIFIED", run("media_control", "{\"action\":\"pause\"}").getString("status"));
         assertEquals(List.of("paused"), intents);
+    }
+
+    private FastTools.Result nav(String args) {
+        return tools.run("shell_nav", args, media);
+    }
+
+    @Test
+    public void shellNavHomeIsVerifiedWhenTheHomeAppIsInFront() throws Exception {
+        FastTools.Result r = nav("{\"action\":\"home\"}");
+        assertEquals("VERIFIED", r.json.getString("status"));
+        assertEquals("com.android.launcher3", r.json.getString("foreground"));
+        assertEquals(List.of("nav 2"), platform.acts);
+        assertTrue(FastTools.changesState("shell_nav"));
+    }
+
+    @Test
+    public void shellNavBackAndRecentsNeedAnotherAppActive() throws Exception {
+        assertEquals("VERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+        assertEquals("VERIFIED", nav("{\"action\":\"recents\"}").json.getString("status"));
+        assertEquals(List.of("nav 1", "nav 3"), platform.acts);
+    }
+
+    @Test
+    public void anInAppBackOrAHeadsUpIsNotAVerifiedBack() throws Exception {
+        platform.afterBack = platform.front; // the back stayed in the same app
+        assertEquals("UNVERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+        platform.afterBack = FastTools.SYSTEM_UI; // System UI became active (a shade), not the app behind
+        assertEquals("UNVERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+    }
+
+    @Test
+    public void aMissedFirstReadIsNotAMove() throws Exception {
+        platform.navReacts = false;
+        platform.nullReads = 1; // the read before the action misses; the app stays in front
+        assertEquals("UNVERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+        platform.front = platform.home;
+        platform.nullReads = 1;
+        assertEquals("UNVERIFIED", nav("{\"action\":\"recents\"}").json.getString("status"));
+    }
+
+    @Test
+    public void recentsFromHomeIsNotVerifiedByStayingHome() throws Exception {
+        platform.front = platform.home;
+        assertEquals("UNVERIFIED", nav("{\"action\":\"recents\"}").json.getString("status"));
+    }
+
+    @Test
+    public void shellNavShadesAreVerifiedWhenSystemUiBecomesActive() throws Exception {
+        assertEquals("VERIFIED", nav("{\"action\":\"notifications\"}").json.getString("status"));
+        platform.front = "com.example.mail"; // the shade closed; quick settings has to open it again
+        assertEquals("VERIFIED", nav("{\"action\":\"quick_settings\"}").json.getString("status"));
+    }
+
+    @Test
+    public void aLockScreenOrAnAlreadyOpenShadeIsNotAVerifiedShade() throws Exception {
+        platform.front = FastTools.SYSTEM_UI; // lock screen, or the shade was already open
+        assertEquals("UNVERIFIED", nav("{\"action\":\"notifications\"}").json.getString("status"));
+        assertEquals("UNVERIFIED", nav("{\"action\":\"quick_settings\"}").json.getString("status"));
+    }
+
+    @Test
+    public void shellNavWithNothingSeenIsUnverified() throws Exception {
+        platform.navReacts = false;
+        FastTools.Result r = nav("{\"action\":\"home\"}");
+        assertEquals("UNVERIFIED", r.json.getString("status"));
+        assertEquals("sent once, not retried", List.of("nav 2"), platform.acts);
+        platform.front = "com.android.launcher3"; // already home: a home press is VERIFIED
+        assertEquals("VERIFIED", nav("{\"action\":\"home\"}").json.getString("status"));
+        assertEquals("but back with no new window is not", "UNVERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+    }
+
+    @Test
+    public void shellNavFailsWhenTheAccessibilityServiceIsOff() throws Exception {
+        platform.hands = false;
+        FastTools.Result r = nav("{\"action\":\"home\"}");
+        assertEquals("FAILED", r.json.getString("status"));
+        assertTrue(r.json.getString("detail").contains("accessibility service is off"));
+    }
+
+    @Test
+    public void shellNavRefusesBadArgumentsWithoutActing() throws Exception {
+        assertEquals("FAILED", nav("{\"action\":\"power_off\"}").json.getString("status"));
+        assertEquals("FAILED", nav("{\"action\":\"home\",\"times\":3}").json.getString("status"));
+        assertEquals("FAILED", nav("{}").json.getString("status"));
+        assertTrue(platform.acts.isEmpty());
     }
 }

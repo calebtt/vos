@@ -105,6 +105,27 @@ final class AndroidFastToolsPlatform implements FastTools.Platform {
         return m == null ? null : m.getString(MediaMetadata.METADATA_KEY_TITLE);
     }
 
+    @Override
+    public boolean globalAction(int action) {
+        HandsService h = HandsService.connected();
+        return h != null && h.performGlobalAction(action);
+    }
+
+    @Override
+    public String foregroundPackage() {
+        HandsService h = HandsService.connected();
+        return h == null ? null : h.activePackage();
+    }
+
+    @Override
+    public String homePackage() {
+        android.content.pm.ResolveInfo r = context.getPackageManager().resolveActivity(
+                new android.content.Intent(android.content.Intent.ACTION_MAIN)
+                        .addCategory(android.content.Intent.CATEGORY_HOME),
+                android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+        return r == null || r.activityInfo == null ? null : r.activityInfo.packageName;
+    }
+
     private MediaMetadata metadata() {
         List<MediaController> sessions = sessions();
         return sessions == null || sessions.isEmpty() ? null : sessions.get(0).getMetadata();

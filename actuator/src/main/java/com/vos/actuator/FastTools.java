@@ -19,8 +19,8 @@ import org.json.JSONObject;
  * an unknown tool, an unknown argument or a value out of range is FAILED without acting.
  *
  * <p>v0: {@code time_get}, {@code volume_set} (a percentage), {@code volume_step} (up or down),
- * {@code media_control}. Tool names use underscores (the vendor's function-name rule); they are the
- * plan's {@code time.get}, {@code volume.set}, {@code media.control}. Setting and stepping are two
+ * {@code media_control}, {@code shell_nav} (home, back, recents, notifications, quick settings). Tool names use underscores (the vendor's function-name rule); they are the
+ * plan's {@code time.get}, {@code volume.set}, {@code media.control}, {@code shell.nav}. Setting and stepping are two
  * tools because a model given one tool with both forms filled in both (seen on Phone B).
  */
 public final class FastTools {
@@ -56,6 +56,21 @@ public final class FastTools {
         String mediaTitle();
 
         void sleep(long ms) throws InterruptedException;
+
+        /**
+         * Performs an {@code AccessibilityService} global action ({@link #NAV_ACTIONS}); false when VOS's
+         * accessibility service is not connected or the system refused it.
+         */
+        boolean globalAction(int action);
+
+        /**
+         * The package of the active (focused) window, read through VOS's accessibility service, or null
+         * when it is off or there is none. A heads-up notification never takes focus, so it never counts.
+         */
+        String foregroundPackage();
+
+        /** The default home app's package, or null if there is none. */
+        String homePackage();
     }
 
     /** Tells the AudioPlane what the owner asked of media during the turn (RESTORE honours it). */
@@ -101,6 +116,11 @@ public final class FastTools {
     static final Map<String, Integer> MEDIA_KEYS = Map.of(
             "play", 126, "pause", 127, "next", 87, "previous", 88, "stop", 86);
     static final long MEDIA_ORACLE_MS = 1500;
+    /** {@code AccessibilityService.GLOBAL_ACTION_*} for shell_nav (the plan's {@code shell.nav}). */
+    static final Map<String, Integer> NAV_ACTIONS = Map.of(
+            "back", 1, "home", 2, "recents", 3, "notifications", 4, "quick_settings", 5);
+    static final String SYSTEM_UI = "com.android.systemui";
+    static final long NAV_ORACLE_MS = 1500;
     private static final long POLL_MS = 100;
 
     private final Platform platform;
@@ -129,7 +149,8 @@ public final class FastTools {
             "time_get", new Tool(false, (t, args, media) -> t.timeGet(args)), // only reads the clock
             "volume_set", new Tool(true, (t, args, media) -> t.volumeSet(args, false)),
             "volume_step", new Tool(true, (t, args, media) -> t.volumeSet(args, true)),
-            "media_control", new Tool(true, (t, args, media) -> t.mediaControl(args, media)));
+            "media_control", new Tool(true, (t, args, media) -> t.mediaControl(args, media)),
+            "shell_nav", new Tool(true, (t, args, media) -> t.shellNav(args)));
     static final Set<String> NAMES = TOOLS.keySet();
 
     static boolean knows(String name) {
@@ -158,6 +179,57 @@ public final class FastTools {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Result.of(Status.FAILED, "detail", "interrupted");
+        }
+    }
+
+    /**
+     * shell_nav {action}: a global action through VOS's accessibility service, then the oracle on the
+     * active window: home is VERIFIED when the default home app is active, notifications and quick
+     * settings when System UI became active (a lock screen, or a shade that was already open, does
+     * not count), recents when the home app (which hosts the overview) became active, and back when
+     * another app other than System UI became active. Anything else is UNVERIFIED (an in-app back
+     * cannot be seen this way). FAILED when the service is off (the owner turns it on).
+     */
+    private Result shellNav(JSONObject args) throws BadArgs, InterruptedException {
+        allowOnly(args, "action");
+        String action = args.optString("action", "");
+        Integer code = NAV_ACTIONS.get(action);
+        if (code == null) {
+            throw new BadArgs("action must be one of " + NAV_ACTIONS.keySet());
+        }
+        String home = platform.homePackage();
+        String before = platform.foregroundPackage();
+        if (!platform.globalAction(code)) {
+            return Result.of(Status.FAILED, "action", action,
+                    "detail", "VOS's accessibility service is off, or the system refused the action");
+        }
+        for (long waited = 0; ; waited += POLL_MS) {
+            String front = platform.foregroundPackage();
+            boolean moved = before != null && front != null && !front.equals(before); // an unknown before never counts
+            boolean seen;
+            switch (action) {
+                case "home":
+                    seen = home != null && home.equals(front);
+                    break;
+                case "notifications":
+                case "quick_settings":
+                    seen = moved && SYSTEM_UI.equals(front); // System UI must become active
+                    break;
+                case "recents":
+                    seen = moved && front.equals(home);
+                    break;
+                default: // back
+                    seen = moved && !SYSTEM_UI.equals(front);
+                    break;
+            }
+            if (seen) {
+                return Result.of(Status.VERIFIED, "action", action, "foreground", front);
+            }
+            if (waited >= NAV_ORACLE_MS) {
+                return Result.of(Status.UNVERIFIED, "action", action,
+                        "detail", "the action was sent but the active window did not show it");
+            }
+            platform.sleep(POLL_MS);
         }
     }
 
