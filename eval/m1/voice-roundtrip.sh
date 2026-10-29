@@ -19,6 +19,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/eval/m1/lib.sh"
 build=1 speaker=0
 for a in "$@"; do
     case "$a" in
@@ -28,35 +29,25 @@ for a in "$@"; do
     esac
 done
 : "${GROK_API_KEY:?set GROK_API_KEY (used for the fixture; never printed)}"
-if (( speaker )); then
-    h=$((10#$(date +%H)))
-    (( h >= 8 && h < 22 )) || { echo "--speaker plays sound: daytime only (08:00-22:00)" >&2; exit 2; }
-fi
+if (( speaker )); then vos_daytime_only "--speaker plays sound"; fi
 
-stamp="$(date +%Y-%m-%d)/voice-roundtrip-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
-mkdir -p "$out"
-exec > >(tee -a "$out/run.log") 2>&1
+vos_run_dir voice-roundtrip
 echo "voice-roundtrip on $(adb get-serialno) ($(adb shell getprop ro.build.fingerprint)); results in $out"
 
 if (( build )); then
     "$ROOT/gradlew" -p "$ROOT" -q --console=plain :actuator:assembleDebug :session:assembleDebug \
         :session:assembleDebugAndroidTest
 fi
-adb install -r -t "$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk" >/dev/null
-adb install -r -t "$ROOT/session/build/outputs/apk/debug/session-debug.apk" >/dev/null
-adb install -r -t "$ROOT/session/build/outputs/apk/androidTest/debug/session-debug-androidTest.apk" >/dev/null
-adb shell pm grant com.vos.actuator android.permission.RECORD_AUDIO
+vos_install_apps "$ROOT/session/build/outputs/apk/androidTest/debug/session-debug-androidTest.apk"
+vos_grant_mic
 
 fails=0
 check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 
 # The session's key: sealed already, or pushed now through stdin (never a command-line argument).
-if ! adb shell "run-as com.vos.session test -f files/keys/xai.bin"; then
-    printf '%s' "$GROK_API_KEY" | adb shell "run-as com.vos.session sh -c 'umask 077 && mkdir -p files/key-import && cat > files/key-import/xai'"
-    echo "pushed the key for the session to seal on its next turn"
-fi
-adb shell "run-as com.vos.session rm -f files/debug/chat_voice"
+vos_seal_key_if_missing
+if (( VOS_KEY_PUSHED )); then echo "pushed the key for the session to seal on its next turn"; fi
+vos_clear_debug_overrides
 
 python3 -I "$ROOT/eval/m1/make_fixture.py" "What time is it?" "$out/question.pcm"
 adb shell "run-as com.vos.actuator sh -c 'rm -rf files/debug; umask 077 && mkdir -p files/debug && cat > files/debug/mic-inject.pcm'" < "$out/question.pcm"
