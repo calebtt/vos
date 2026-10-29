@@ -69,8 +69,11 @@ public final class AgentMsg {
     /** At most this many escalations per task (decision 26); the Conductor counts them. */
     public static final int MAX_ESCALATIONS = 2;
     private static final Pattern ID = Pattern.compile("[A-Za-z0-9_.:-]{1,128}");
-    /** A §5.5 act class (e.g. reversible, irreversible, catastrophic): a short token, never free text. */
-    private static final Pattern ACT_CLASS = Pattern.compile("[a-z_]{1,32}");
+    /**
+     * A §5.5 act class: a short token ({@code reversible}) or a dotted class ({@code comms.send},
+     * {@code settings.security}). Never free text.
+     */
+    private static final Pattern ACT_CLASS = Pattern.compile("[a-z][a-z_]{0,31}(?:\\.[a-z][a-z_]{0,31}){0,3}");
     private static final int MAX_PAYLOAD_CHARS = 64 * 1024;
 
     public final Role from;
@@ -194,19 +197,26 @@ public final class AgentMsg {
         m.put("event", "agent.msg");
         m.put("from_role", from == null ? null : from.wire());
         m.put("to_role", to == null ? null : to.wire());
-        m.put("goalId", goalId);
-        m.put("turnId", turnId);
+        m.put("goalId", idOrInvalid(goalId));
+        m.put("turnId", idOrInvalid(turnId));
         m.put("kind", kind == null ? null : kind.wire());
-        m.put("origin", origin);
+        m.put("origin", idOrInvalid(origin));
         m.put("cross_uid", from != null && to != null && crossesUid());
         if (isVeto()) {
             JSONObject v = payload.optJSONObject("veto");
-            m.put("veto_reason", v == null ? null : v.optString("reason", null));
-            String act = v == null ? "" : v.optString("actId", "");
-            m.put("actId", ID.matcher(act).matches() ? act : "(invalid)"); // an id, never screen text
+            String reason = v == null ? null : v.optString("reason", null);
+            if (reason != null && VETO_REASONS.contains(reason)) { // a Q23 reason, never screen text
+                m.put("veto_reason", reason);
+            }
+            m.put("actId", idOrInvalid(v == null ? null : v.optString("actId", ""))); // an id, never screen text
         }
         m.put("payload_chars", payload.toString().length());
         m.put("verdict", verdict == null ? "ok" : verdict);
         return m;
+    }
+
+    /** An id token, or {@code (invalid)} so screen text cannot land in the audit line. */
+    private static String idOrInvalid(String s) {
+        return s != null && ID.matcher(s).matches() ? s : "(invalid)";
     }
 }
