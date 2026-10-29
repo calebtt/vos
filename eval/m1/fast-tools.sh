@@ -15,6 +15,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/eval/m1/lib.sh"
 build=1 speaker=0
 for a in "$@"; do
     case "$a" in
@@ -24,36 +25,27 @@ for a in "$@"; do
     esac
 done
 : "${GROK_API_KEY:?set GROK_API_KEY (used for the fixtures; never printed)}"
-if (( speaker )); then
-    h=$((10#$(date +%H)))
-    (( h >= 8 && h < 22 )) || { echo "--speaker plays sound: daytime only (08:00-22:00)" >&2; exit 2; }
-fi
+if (( speaker )); then vos_daytime_only "--speaker plays sound"; fi
 
-stamp="$(date +%Y-%m-%d)/fast-tools-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
-mkdir -p "$out"
-exec > >(tee -a "$out/run.log") 2>&1
+vos_run_dir fast-tools
 echo "fast-tools on $(adb get-serialno) ($(adb shell getprop ro.build.fingerprint)); results in $out"
 
 if (( build )); then
     "$ROOT/gradlew" -p "$ROOT" -q --console=plain :actuator:assembleDebug :session:assembleDebug
 fi
-adb install -r -t "$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk" >/dev/null
-adb install -r -t "$ROOT/session/build/outputs/apk/debug/session-debug.apk" >/dev/null
-adb shell pm grant com.vos.actuator android.permission.RECORD_AUDIO
-if ! adb shell "run-as com.vos.session test -f files/keys/xai.bin"; then
-    printf '%s' "$GROK_API_KEY" | adb shell "run-as com.vos.session sh -c 'umask 077 && mkdir -p files/key-import && cat > files/key-import/xai'"
-fi
-adb shell "run-as com.vos.session rm -f files/debug/chat_voice"
+vos_install_apps
+vos_grant_mic
+vos_seal_key_if_missing
+vos_clear_debug_overrides
 
 fails=0
 check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
-media_volume() { adb shell cmd media_session volume --stream 3 --get | tr -d '\r' | sed -n 's/.*volume is \([0-9]*\) in range \[\([0-9]*\)\.\.\([0-9]*\)\].*/\1 \3/p'; }
+media_volume() { vos_volume 3; }
 read -r vol_before vol_max <<<"$(media_volume)"
 echo "media volume before: $vol_before of $vol_max"
 # The shell's own volume command does not apply on Phone B's Android 17; the debug summon activity restores it.
 restore() {
-    adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op volume --ei stream 3 --ei index "$vol_before" >/dev/null 2>&1 || true
+    vos_restore_media_volume "$vol_before"
     sleep 1
 }
 trap restore EXIT

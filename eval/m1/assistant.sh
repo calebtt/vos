@@ -19,6 +19,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/eval/m1/lib.sh"
 build=1 trials=20 standin=""
 while (( $# )); do
     case "$1" in
@@ -29,26 +30,18 @@ while (( $# )); do
     esac
     shift
 done
-h=$((10#$(date +%H)))
-(( h >= 8 && h < 22 )) || { echo "live-mic summons: daytime only (08:00-22:00)" >&2; exit 2; }
+vos_daytime_only "live-mic summons"
 
-stamp="$(date +%Y-%m-%d)/assistant-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
-mkdir -p "$out"
-exec > >(tee -a "$out/run.log") 2>&1
+vos_run_dir assistant
 echo "assistant on $(adb get-serialno) ($(adb shell getprop ro.build.fingerprint)); results in $out"
 
 if (( build )); then
     "$ROOT/gradlew" -p "$ROOT" -q --console=plain :actuator:assembleDebug :session:assembleDebug
 fi
-adb install -r -t "$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk" >/dev/null
-adb install -r -t "$ROOT/session/build/outputs/apk/debug/session-debug.apk" >/dev/null
-adb shell pm grant com.vos.actuator android.permission.RECORD_AUDIO
-adb shell "run-as com.vos.session rm -f files/debug/chat_voice"
-if ! adb shell "run-as com.vos.session test -f files/keys/xai.bin"; then
-    : "${GROK_API_KEY:?the session holds no key: set GROK_API_KEY to seal it (never printed)}"
-    printf '%s' "$GROK_API_KEY" | adb shell "run-as com.vos.session sh -c 'umask 077 && mkdir -p files/key-import && cat > files/key-import/xai'"
-fi
+vos_install_apps
+vos_grant_mic
+vos_clear_debug_overrides
+vos_seal_key_if_missing
 
 fails=0
 pass() { echo "PASS $*"; }
@@ -62,7 +55,7 @@ session_audit() { adb shell "run-as com.vos.session cat files/audit/audit.jsonl"
 wait_notice() { for _ in $(seq 25); do [ "$(notice)" -eq "$1" ] && return 0; sleep 0.2; done; return 1; }
 
 # Setup (Tier S, debug): the notice needs notification permission, a required setup step on a stock phone.
-adb shell pm grant com.vos.actuator android.permission.POST_NOTIFICATIONS
+vos_grant_notifications
 adb shell cmd role add-role-holder android.app.role.ASSISTANT com.vos.actuator 0
 sleep 2
 if [ "$(holder)" = com.vos.actuator ]; then pass "VOS holds the assistant role"; else fail "holder is '$(holder)'"; fi
