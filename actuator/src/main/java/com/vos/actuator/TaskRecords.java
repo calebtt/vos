@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -26,7 +27,9 @@ import org.json.JSONObject;
  * outcomes and veto reasons are closed sets here, so adding one is a code change that follows the
  * plan change §3.8 requires. Every text value is scrubbed of key-like strings before it is written.
  * The owner can list, read, export and delete records; records older than {@link #RETENTION_MS}
- * are pruned (§9 Q24). Frames (failure screenshots, masking) come with the observation pipeline.
+ * are pruned (§9 Q24). An owner-pinned record never expires. A torn last line, from a write that
+ * did not finish, is dropped when the store restarts. Frames (failure screenshots, masking) come
+ * with the observation pipeline.
  */
 final class TaskRecords {
     static final String SCHEMA = "vos.task_record/0";
@@ -62,6 +65,7 @@ final class TaskRecords {
         this.dir = dir;
         this.clock = clock;
         for (String id : taskIds()) {
+            dropTornTail(id);
             if (!closed(id)) {
                 open.add(id);
                 close(id, "cancelled", "the actuator restarted before the task ended", null);
@@ -87,7 +91,7 @@ final class TaskRecords {
         h.put("schema", SCHEMA);
         h.put("task_id", taskId);
         h.put("parent_task_id", parentTaskId);
-        h.put("turn_id", turnId);
+        h.put("turnId", turnId); // §3.8 header field
         h.put("source", source);
         h.put("request", request);
         String why = append(taskId, "header", h, true);
@@ -95,6 +99,33 @@ final class TaskRecords {
             open.add(taskId);
         }
         return why;
+    }
+
+    /**
+     * Pins or unpins a record (§9 Q24: an owner-pinned task never expires). Works on an open or a
+     * closed record. Returns null, or why not.
+     */
+    synchronized String pin(String taskId, boolean pinned) {
+        if (!validId(taskId) || !file(taskId).isFile()) {
+            return "no such record";
+        }
+        try {
+            byte[] raw = Files.readAllBytes(file(taskId).toPath());
+            int nl = 0;
+            while (nl < raw.length && raw[nl] != '\n') {
+                nl++;
+            }
+            JSONObject header = new JSONObject(new String(raw, 0, nl, StandardCharsets.UTF_8));
+            header.put("pinned", pinned);
+            byte[] head = (header + "\n").getBytes(StandardCharsets.UTF_8);
+            int restAt = nl < raw.length ? nl + 1 : raw.length;
+            byte[] out = Arrays.copyOf(head, head.length + (raw.length - restAt));
+            System.arraycopy(raw, restAt, out, head.length, raw.length - restAt);
+            Files.write(file(taskId).toPath(), out, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException | JSONException e) {
+            return "not saved";
+        }
+        return null;
     }
 
     /** The Conductor's plan, or a replan with its trigger (veto, oracle failure, owner correction). */
@@ -164,12 +195,15 @@ final class TaskRecords {
         return why;
     }
 
-    /** Every record's task id, oldest file first. */
+    /** Every record's task id, oldest first: the header's {@code ts} (when the record was opened), not the file mtime. */
     synchronized List<String> taskIds() {
         List<String> ids = new ArrayList<>();
         File[] fs = dir.listFiles((d, n) -> n.endsWith(".jsonl"));
         if (fs != null) {
-            java.util.Arrays.sort(fs, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+            Arrays.sort(fs, (a, b) -> {
+                int c = Long.compare(created(a), created(b));
+                return c != 0 ? c : a.getName().compareTo(b.getName());
+            });
             for (File f : fs) {
                 ids.add(f.getName().substring(0, f.getName().length() - ".jsonl".length()));
             }
@@ -216,7 +250,7 @@ final class TaskRecords {
         return n;
     }
 
-    /** Deletes closed records whose header is older than {@link #RETENTION_MS}; returns how many. */
+    /** Deletes closed, unpinned records whose header is older than {@link #RETENTION_MS}; returns how many. */
     synchronized int prune() {
         long cutoff = clock.getAsLong() - RETENTION_MS;
         int n = 0;
@@ -226,12 +260,17 @@ final class TaskRecords {
             }
             String r = read(id);
             long ts = Long.MAX_VALUE;
+            boolean pinned = false;
             try {
-                ts = r == null ? Long.MAX_VALUE : new JSONObject(r.substring(0, r.indexOf('\n'))).getLong("ts");
+                JSONObject header = r == null ? null : new JSONObject(r.substring(0, r.indexOf('\n')));
+                if (header != null) {
+                    ts = header.getLong("ts");
+                    pinned = header.optBoolean("pinned"); // Q24: an owner-pinned task never expires
+                }
             } catch (JSONException | IndexOutOfBoundsException ignored) {
                 // unreadable header: kept for the owner to look at or delete
             }
-            if (ts < cutoff && delete(id)) {
+            if (!pinned && ts < cutoff && delete(id)) {
                 n++;
             }
         }
@@ -300,6 +339,74 @@ final class TaskRecords {
             return v;
         }
         throw new JSONException("unsupported value " + v.getClass().getSimpleName());
+    }
+
+    /** When the record was opened, from the header {@code ts}. Unreadable headers sort last. */
+    private static long created(File f) {
+        try {
+            byte[] raw = Files.readAllBytes(f.toPath());
+            int nl = 0;
+            while (nl < raw.length && raw[nl] != '\n') {
+                nl++;
+            }
+            return new JSONObject(new String(raw, 0, nl, StandardCharsets.UTF_8)).getLong("ts");
+        } catch (IOException | JSONException e) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    /**
+     * Drops a last line that a crash cut short, so recovery does not treat a half-written line as
+     * the record. A line counts as torn when the file does not end on a newline, or the last line
+     * is not JSON. An empty file is removed.
+     */
+    private void dropTornTail(String taskId) {
+        File f = file(taskId);
+        byte[] raw;
+        try {
+            raw = Files.readAllBytes(f.toPath());
+        } catch (IOException e) {
+            return;
+        }
+        int end = raw.length;
+        if (end == 0) {
+            f.delete();
+            return;
+        }
+        if (raw[end - 1] != '\n') {
+            end = lastNewline(raw, end - 1) + 1;
+        }
+        while (end > 0) {
+            int start = lastNewline(raw, end - 2) + 1;
+            try {
+                new JSONObject(new String(raw, start, end - 1 - start, StandardCharsets.UTF_8));
+                break;
+            } catch (JSONException e) {
+                end = start;
+            }
+        }
+        if (end == raw.length) {
+            return;
+        }
+        try {
+            if (end == 0) {
+                Files.deleteIfExists(f.toPath());
+            } else {
+                Files.write(f.toPath(), Arrays.copyOf(raw, end), StandardOpenOption.CREATE,
+                        StandardOpenOption.TRUNCATE_EXISTING);
+            }
+        } catch (IOException ignored) {
+            // the next read still sees the torn line; closed() then leaves the record for the owner
+        }
+    }
+
+    private static int lastNewline(byte[] raw, int from) {
+        for (int i = from; i >= 0; i--) {
+            if (raw[i] == '\n') {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private boolean closed(String taskId) {
