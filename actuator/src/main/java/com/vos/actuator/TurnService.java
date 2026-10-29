@@ -60,6 +60,15 @@ public final class TurnService extends Service {
         return s != null && s.turn != null;
     }
 
+    /**
+     * A summon may start the microphone service only when it holds the owner-turn slot.
+     * {@link OwnerTurnSlot.Claim#BLOCKED} is an open typed turn: starting here would take the
+     * indicator (Shell Contract row 13) and write the shared conversation beside that turn.
+     */
+    static boolean summonMayStartMicrophone(OwnerTurnSlot.Claim claim) {
+        return OwnerTurnSlot.opensMicrophone(claim);
+    }
+
     /** Has the microphone service reached the foreground (the assist session hides after this)? */
     static boolean inForeground() {
         return inForeground;
@@ -195,6 +204,17 @@ public final class TurnService extends Service {
 
     private void summon(String source, long tEvent, VoiceTurn.Mic mic, boolean rawMic, boolean speakerToFile) {
         tStartCommand = android.os.SystemClock.uptimeMillis();
+        TypedChat chat = ((ActuatorApp) getApplication()).typedChat();
+        // startSummon already holds the slot when it started this service. Claiming again is
+        // HELD. BLOCKED means a typed turn is open: do not take the microphone foreground type.
+        OwnerTurnSlot.Claim claim = chat.claimVoice();
+        if (!summonMayStartMicrophone(claim)) {
+            Log.i(VoiceTurn.TAG, "summon refused: a typed turn is open");
+            if (turn == null) {
+                stopSelf();
+            }
+            return;
+        }
         try {
             // The current state, not IDLE: a second summon during a turn must not reset the title.
             startForeground(NOTIFICATION_ID, notification(((ActuatorApp) getApplication()).indicator().state()),
@@ -203,6 +223,9 @@ public final class TurnService extends Service {
             tForeground = android.os.SystemClock.uptimeMillis();
         } catch (RuntimeException e) { // ForegroundServiceStartNotAllowedException, SecurityException
             Log.w(VoiceTurn.TAG, "summon refused: cannot start the microphone service (" + e.getClass().getSimpleName() + ")");
+            if (turn == null) {
+                chat.releaseVoice();
+            }
             stopSelf();
             return;
         }
@@ -213,6 +236,7 @@ public final class TurnService extends Service {
         String id = ((ActuatorApp) getApplication()).audioPlane().summon(source);
         tPlane = android.os.SystemClock.uptimeMillis();
         if (id == null) {
+            chat.releaseVoice();
             stopTurnService();
             return;
         }
@@ -265,6 +289,10 @@ public final class TurnService extends Service {
             } catch (RuntimeException e) { // end() reaches IDLE on its own; this only keeps the main thread alive
                 Log.w(VoiceTurn.TAG, "restore failed: " + e.getClass().getSimpleName());
             } finally {
+                if (t != null) {
+                    // After RESTORE, so a typed turn cannot start while this voice turn is still closing.
+                    app.typedChat().releaseVoice();
+                }
                 stopTurnService();
                 TileService.requestListeningState(this, new ComponentName(this, SummonTile.class));
             }
@@ -319,7 +347,29 @@ public final class TurnService extends Service {
         if (turnOpen()) {
             context.startService(i.setAction(ACTION_STOP));
         } else {
-            context.startForegroundService(i.setAction(ACTION_SUMMON));
+            startSummon(context, i.setAction(ACTION_SUMMON));
+        }
+    }
+
+    /**
+     * Starts a voice summon, or does nothing when a typed turn holds the slot. The microphone
+     * service is not started in that case, so this process never has to call {@code startForeground}
+     * for a summon it will refuse.
+     */
+    static void startSummon(Context context, Intent summon) {
+        TypedChat chat = ((ActuatorApp) context.getApplicationContext()).typedChat();
+        OwnerTurnSlot.Claim claim = chat.claimVoice();
+        if (!summonMayStartMicrophone(claim)) {
+            Log.i(VoiceTurn.TAG, "summon refused: a typed turn is open");
+            return;
+        }
+        try {
+            context.startForegroundService(summon.setAction(ACTION_SUMMON));
+        } catch (RuntimeException e) {
+            if (claim == OwnerTurnSlot.Claim.NEW) {
+                chat.releaseVoice();
+            }
+            throw e;
         }
     }
 }

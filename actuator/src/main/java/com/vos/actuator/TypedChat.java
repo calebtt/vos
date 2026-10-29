@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Typed chat (decision 21, Shell Contract row 25). The actuator mints every typed owner turn, from
@@ -31,25 +32,17 @@ final class TypedChat {
     static final long TURN_TIMEOUT_MS = 60_000;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
-    /** One line of the chat thread as the window shows it. */
-    static final class Line {
-        final String role; // "owner", "vos", or "note" (the actuator's own status text)
-        final String text;
-
-        Line(String role, String text) {
-            this.role = role;
-            this.text = text;
-        }
-    }
-
     /** The chat window, while it is showing; it re-reads {@link #lines} on each change. */
     interface Listener {
         void changed();
     }
 
     private final ActuatorApp app;
-    private final List<Line> lines = new ArrayList<>();
+    private final List<ChatThread.Line> lines = new ArrayList<>();
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
+    /** Shared with voice summons so the two cannot be open together (Shell Contract row 13). */
+    private final OwnerTurnSlot slot = new OwnerTurnSlot();
+    private final AtomicInteger loadGen = new AtomicInteger();
     private String openTurn; // the typed turn waiting for its reply, or null
     private PeerLink link;
     private final Runnable timeout = () -> end(null, "typed turn timed out");
@@ -58,8 +51,21 @@ final class TypedChat {
         this.app = app;
     }
 
-    synchronized List<Line> lines() {
+    synchronized List<ChatThread.Line> lines() {
         return new ArrayList<>(lines);
+    }
+
+    /**
+     * Claims the owner-turn slot for a voice summon. {@link OwnerTurnSlot.Claim#BLOCKED} means a
+     * typed turn is open: the summon must not start the microphone service.
+     */
+    synchronized OwnerTurnSlot.Claim claimVoice() {
+        return slot.claimVoice();
+    }
+
+    /** Drops the voice claim. A typed holder is left alone. */
+    synchronized void releaseVoice() {
+        slot.release(OwnerTurnSlot.Holder.VOICE);
     }
 
     void listen(Listener l) {
@@ -95,12 +101,14 @@ final class TypedChat {
             if (openTurn != null) {
                 return "VOS is still answering the last message.";
             }
-            if (TurnService.voiceTurnOpen()) {
+            // voiceTurnOpen covers a turn already assigned; the slot covers a summon that has
+            // claimed it but not yet assigned the turn. Either one refuses, before a second writer.
+            if (TurnService.voiceTurnOpen() || !slot.claimTyped()) {
                 return "A voice turn is open; send this when it ends.";
             }
             turnId = UUID.randomUUID().toString();
             openTurn = turnId;
-            lines.add(new Line("owner", t));
+            lines.add(new ChatThread.Line("owner", t));
         }
         Map<String, Object> line = new LinkedHashMap<>();
         line.put("event", "typed.turn_opened");
@@ -160,7 +168,7 @@ final class TypedChat {
                 Log.w(TAG, "typed reply refused: no such open typed turn");
                 return;
             }
-            lines.add(new Line("vos", t));
+            lines.add(new ChatThread.Line("vos", t));
         }
         Log.i(TAG, "typed reply turnId=" + turnId + " chars=" + t.length());
         changed();
@@ -224,8 +232,9 @@ final class TypedChat {
             openTurn = null;
             l = link;
             link = null;
+            slot.release(OwnerTurnSlot.Holder.TYPED);
             if (!"session: typed reply".equals(reason)) {
-                lines.add(new Line("note", "VOS couldn't answer (" + reason + ")."));
+                lines.add(new ChatThread.Line("note", "VOS couldn't answer (" + reason + ")."));
             }
         }
         MAIN.removeCallbacks(timeout);
@@ -242,8 +251,12 @@ final class TypedChat {
         changed();
     }
 
-    /** The thread's earlier lines from the shared conversation (voice turns included), once per window. */
+    /**
+     * Reloads the thread from the shared conversation ({@code recentThread}), voice turns included.
+     * Every reopen calls this (decision 21); a newer reload supersedes one still in flight.
+     */
     void loadThread(Context context) {
+        int gen = loadGen.incrementAndGet();
         MAIN.post(() -> {
             PeerLink[] holder = new PeerLink[1];
             holder[0] = new PeerLink(context.getApplicationContext(), Ipc.sessionIntent(), Ipc.sessionHandshake(),
@@ -259,7 +272,9 @@ final class TypedChat {
                             String got = json;
                             MAIN.post(() -> {
                                 holder[0].unbind();
-                                adoptThread(got);
+                                if (gen == loadGen.get()) {
+                                    adoptThread(got);
+                                }
                             });
                         }
 
@@ -273,27 +288,27 @@ final class TypedChat {
         });
     }
 
-    /** Session text shown as data: earlier owner and VOS lines, before anything typed in this window. */
+    /** Session text shown as data. Replaces the window's thread; keeps an in-flight typed line. */
     private void adoptThread(String json) {
         if (json == null) {
             return;
         }
-        List<Line> earlier = new ArrayList<>();
+        List<ChatThread.Line> fresh = new ArrayList<>();
         try {
             org.json.JSONArray a = new org.json.JSONArray(json);
             for (int i = 0; i < a.length() && i < 200; i++) {
                 org.json.JSONObject o = a.getJSONObject(i);
                 String role = "owner".equals(o.optString("role")) ? "owner" : "vos"; // never "note": that is the actuator's own
                 String text = o.optString("text", "");
-                earlier.add(new Line(role, text.length() > 4000 ? text.substring(0, 4000) + "…" : text));
+                fresh.add(new ChatThread.Line(role, text.length() > 4000 ? text.substring(0, 4000) + "…" : text));
             }
         } catch (org.json.JSONException e) {
             return;
         }
         synchronized (this) {
-            if (lines.isEmpty()) {
-                lines.addAll(earlier);
-            }
+            List<ChatThread.Line> merged = ChatThread.merge(lines, fresh, openTurn != null);
+            lines.clear();
+            lines.addAll(merged);
         }
         changed();
     }
