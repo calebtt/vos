@@ -19,8 +19,9 @@ import org.json.JSONObject;
  * an unknown tool, an unknown argument or a value out of range is FAILED without acting.
  *
  * <p>v0: {@code time_get}, {@code volume_set} (a percentage), {@code volume_step} (up or down),
- * {@code media_control}, {@code shell_nav} (home, back, recents, notifications, quick settings). Tool names use underscores (the vendor's function-name rule); they are the
- * plan's {@code time.get}, {@code volume.set}, {@code media.control}, {@code shell.nav}. Setting and stepping are two
+ * {@code media_control}, {@code shell_nav} (home, back, recents, notifications, quick settings),
+ * {@code app_open} (by launcher name). Tool names use underscores (the vendor's function-name rule); they are the
+ * plan's {@code time.get}, {@code volume.set}, {@code media.control}, {@code shell.nav}, {@code app.open}. Setting and stepping are two
  * tools because a model given one tool with both forms filled in both (seen on Phone B).
  */
 public final class FastTools {
@@ -71,6 +72,12 @@ public final class FastTools {
 
         /** The default home app's package, or null if there is none. */
         String homePackage();
+
+        /** Every launcher entry, as {label, package, activity}; VOS's own apps are left out. */
+        java.util.List<String[]> launchableApps();
+
+        /** Starts that launcher entry in a new task; false if the start was refused. */
+        boolean launch(String pkg, String activity);
     }
 
     /** Tells the AudioPlane what the owner asked of media during the turn (RESTORE honours it). */
@@ -121,6 +128,9 @@ public final class FastTools {
             "back", 1, "home", 2, "recents", 3, "notifications", 4, "quick_settings", 5);
     static final String SYSTEM_UI = "com.android.systemui";
     static final long NAV_ORACLE_MS = 1500;
+    static final long APP_ORACLE_MS = 2000;
+    /** At most this many matching names go back to the model when a name is ambiguous. */
+    static final int MAX_CANDIDATES = 5;
     private static final long POLL_MS = 100;
 
     private final Platform platform;
@@ -150,7 +160,8 @@ public final class FastTools {
             "volume_set", new Tool(true, (t, args, media) -> t.volumeSet(args, false)),
             "volume_step", new Tool(true, (t, args, media) -> t.volumeSet(args, true)),
             "media_control", new Tool(true, (t, args, media) -> t.mediaControl(args, media)),
-            "shell_nav", new Tool(true, (t, args, media) -> t.shellNav(args)));
+            "shell_nav", new Tool(true, (t, args, media) -> t.shellNav(args)),
+            "app_open", new Tool(true, (t, args, media) -> t.appOpen(args)));
     static final Set<String> NAMES = TOOLS.keySet();
 
     static boolean knows(String name) {
@@ -231,6 +242,69 @@ public final class FastTools {
             }
             platform.sleep(POLL_MS);
         }
+    }
+
+    /**
+     * app_open {name}: the app whose launcher label matches {@code name} (case, accents and punctuation
+     * ignored; an exact label first, else the only label that starts with or contains it as a word),
+     * started from its launcher entry, then the oracle: VERIFIED when that app's window is active.
+     * No match, or several, is FAILED without starting anything; several come back as candidates so
+     * the model can ask which one. Started but not seen in front is UNVERIFIED.
+     */
+    private Result appOpen(JSONObject args) throws BadArgs, InterruptedException {
+        allowOnly(args, "name");
+        String want = normalize(args.optString("name", ""));
+        if (want.isEmpty() || want.length() > 80) {
+            throw new BadArgs("name must be an app's name");
+        }
+        // Keyed by launcher entry (package/activity), so two entries of one app are two candidates.
+        java.util.Map<String, String[]> exact = new java.util.LinkedHashMap<>();
+        java.util.Map<String, String[]> partial = new java.util.LinkedHashMap<>();
+        for (String[] app : platform.launchableApps()) {
+            String label = normalize(app[0]);
+            String entry = app[1] + "/" + app[2];
+            if (label.equals(want)) {
+                exact.putIfAbsent(entry, app);
+            } else if ((" " + label + " ").contains(" " + want + " ")) {
+                partial.putIfAbsent(entry, app);
+            }
+        }
+        java.util.Map<String, String[]> found = exact.isEmpty() ? partial : exact;
+        if (found.isEmpty()) {
+            return Result.of(Status.FAILED, "detail", "no app with that name is installed");
+        }
+        if (found.size() > 1) {
+            org.json.JSONArray names = new org.json.JSONArray();
+            for (String[] app : found.values()) {
+                if (names.length() < MAX_CANDIDATES) {
+                    names.put(app[0]);
+                }
+            }
+            return Result.of(Status.FAILED, "detail", "several apps match; ask which one", "candidates", names);
+        }
+        String[] app = found.values().iterator().next();
+        String label = app[0];
+        String pkg = app[1];
+        if (!platform.launch(pkg, app[2])) {
+            return Result.of(Status.FAILED, "app", label, "detail", "the app could not be started");
+        }
+        for (long waited = 0; ; waited += POLL_MS) {
+            if (pkg.equals(platform.foregroundPackage())) {
+                return Result.of(Status.VERIFIED, "app", label);
+            }
+            if (waited >= APP_ORACLE_MS) {
+                return Result.of(Status.UNVERIFIED, "app", label,
+                        "detail", "the app was started but its window was not seen in front");
+            }
+            platform.sleep(POLL_MS);
+        }
+    }
+
+    /** Lower case, accents dropped, anything but letters and digits as single spaces. */
+    static String normalize(String s) {
+        String n = java.text.Normalizer.normalize(s == null ? "" : s, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "").toLowerCase(Locale.ROOT);
+        return n.replaceAll("[^\\p{L}\\p{N}]+", " ").trim();
     }
 
     private Result timeGet(JSONObject args) throws BadArgs {

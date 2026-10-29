@@ -53,6 +53,16 @@
   },
   {
     "type": "function",
+    "name": "app_open",
+    "description": "Open an app on the phone by the name shown in its launcher (for example Maps, Camera, Settings). If several apps match, the result lists them: ask the owner which one.",
+    "parameters": {
+      "type": "object",
+      "properties": {"name": {"type": "string"}},
+      "required": ["name"]
+    }
+  },
+  {
+    "type": "function",
     "name": "end_turn",
     "description": "End the conversation when the owner is done (they say thanks, that's all, bye, or similar). Say goodbye briefly first if it fits.",
     "parameters": {"type": "object", "properties": {}}
