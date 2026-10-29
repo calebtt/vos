@@ -1,6 +1,7 @@
 package com.vos.actuator;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -47,10 +48,10 @@ final class OwnerSettings {
     }
 
     static final Map<String, Key> KEYS = keys(
-            new Key("wake_after_unlock", "decision 17: wake-word listening starts after a human unlock", ON, OFF),
+            new Key("wake_word_after_unlock", "decision 17: wake-word listening starts after a human unlock", ON, OFF),
             new Key("wake_locked", "decision 43: listening continues while locked, allowlist only", ON, OFF),
-            new Key("wake_aec", "decision 18: playback cancelled from the wake-word stream", ON, OFF),
-            new Key("long_press_fallback", "decision 17: an optional fallback, not the primary summon", OFF, ON),
+            new Key("wake_stream_aec", "decision 18: playback cancelled from the wake-word stream", ON, OFF),
+            new Key("long_press_summon_fallback", "decision 17: an optional fallback, not the primary summon", OFF, ON),
             new Key("agent_mode", "decision 20: Full by default", "full", "quiet", "paused"),
             new Key("quiet_headset_speech", "decision 20: earbuds-only speech in Quiet, off by default", OFF, ON),
             new Key("patience", "decision 31, §9 Q33: standard end-of-turn by default", "standard", "long", "extra_long"));
@@ -161,7 +162,12 @@ final class OwnerSettings {
             throw new IOException("cannot create " + dir);
         }
         File tmp = new File(dir, file.getName() + ".tmp");
-        Files.write(tmp.toPath(), new JSONObject(next).toString().getBytes(StandardCharsets.UTF_8));
+        // fsync before the rename. A power loss after the rename but before the bytes are durable
+        // leaves a torn file, and a torn file loads as the defaults, which puts agent_mode back to full.
+        try (FileOutputStream out = new FileOutputStream(tmp)) {
+            out.write(new JSONObject(next).toString().getBytes(StandardCharsets.UTF_8));
+            out.getFD().sync();
+        }
         Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 

@@ -33,10 +33,10 @@ public class OwnerSettingsTest {
     @Test
     public void theDefaultsMatchTheDecisions() {
         OwnerSettings s = open();
-        assertTrue("decision 17", s.on("wake_after_unlock"));
+        assertTrue("decision 17", s.on("wake_word_after_unlock"));
         assertTrue("decision 43", s.on("wake_locked"));
-        assertTrue("decision 18", s.on("wake_aec"));
-        assertFalse("decision 17: optional", s.on("long_press_fallback"));
+        assertTrue("decision 18", s.on("wake_stream_aec"));
+        assertFalse("decision 17: optional", s.on("long_press_summon_fallback"));
         assertEquals("decision 20", "full", s.get("agent_mode"));
         assertFalse("decision 20", s.on("quiet_headset_speech"));
         assertEquals("Q33", "standard", s.get("patience"));
@@ -88,10 +88,10 @@ public class OwnerSettingsTest {
     public void aValueOutsideTheKeysListIsRefused() {
         OwnerSettings s = open();
         assertEquals("allowed: full, quiet, paused", s.set("agent_mode", "asleep", "chat"));
-        assertNotNull(s.set("wake_aec", "true", "settings"));
+        assertNotNull(s.set("wake_stream_aec", "true", "settings"));
         assertNotNull(s.set("patience", null, "settings"));
         assertEquals("full", s.get("agent_mode"));
-        assertTrue(s.on("wake_aec"));
+        assertTrue(s.on("wake_stream_aec"));
         assertEquals(3, audit.size());
         assertEquals("asleep", audit.get(0).get("value"));
     }
@@ -119,11 +119,11 @@ public class OwnerSettingsTest {
     @Test
     public void aStoredValueThatIsNotAllowedFallsBackToTheDefault() throws Exception {
         file().getParentFile().mkdirs();
-        Files.write(file().toPath(), ("{\"agent_mode\":\"asleep\",\"wake_aec\":\"off\",\"uid_split\":\"off\","
+        Files.write(file().toPath(), ("{\"agent_mode\":\"asleep\",\"wake_stream_aec\":\"off\",\"uid_split\":\"off\","
                 + "\"patience\":true}").getBytes(StandardCharsets.UTF_8));
         OwnerSettings s = open();
         assertEquals("full", s.get("agent_mode"));
-        assertFalse("a valid stored value is kept", s.on("wake_aec"));
+        assertFalse("a valid stored value is kept", s.on("wake_stream_aec"));
         assertEquals("standard", s.get("patience"));
         assertFalse("an invariant in the file is not a setting", s.all().containsKey("uid_split"));
     }
