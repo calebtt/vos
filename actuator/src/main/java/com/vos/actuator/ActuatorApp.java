@@ -16,6 +16,7 @@ public final class ActuatorApp extends Application {
     private JsonlAudit audit;
     private AndroidAudioPlatform audioPlatform;
     private RoleWatch roleWatch;
+    private OwnerSettings ownerSettings;
     private final Indicator indicator = new Indicator(new IndicatorView());
 
     @Override
@@ -30,6 +31,14 @@ public final class ActuatorApp extends Application {
         fastTools = new FastTools(new AndroidFastToolsPlatform(this));
         roleWatch = new RoleWatch(new AndroidRolePlatform(this), line -> audit.record(line));
         roleWatch.check("actuator start");
+        // Device-protected storage: the agent mode is honored before the first unlock (decision 20).
+        ownerSettings = new OwnerSettings(new java.io.File(createDeviceProtectedStorageContext().getFilesDir(),
+                "settings/owner.json"), line -> audit.record(line));
+    }
+
+    /** The owner's settings (decision 19, M1-CFG-01). */
+    OwnerSettings ownerSettings() {
+        return ownerSettings;
     }
 
     /** The generating / acting indicator (Shell Contract row 13). */

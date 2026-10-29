@@ -11,6 +11,7 @@ Usage: python3 -I ci/policy_check.py --root . [--gitleaks auto|required|off]
 """
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -412,6 +413,29 @@ def check_deps(module, coords, group_prefixes):
 # Retired names
 # ---------------------------------------------------------------------------------------------
 
+ON_DEVICE_ACTUATOR = "on_device_actuator"
+
+
+def check_model_policy(text, actuator_classes):
+    """The session's model policy (§3.2.1): an actuator task class names only on-device actuator models."""
+    try:
+        root = json.loads(text)
+        registry = {e["id"]: e for e in root["registry"]}
+        policy = root["policy"]
+    except (ValueError, KeyError, TypeError) as e:
+        return [f"model policy: unreadable ({e})"]
+    fails = []
+    for task_class, ids in policy.items():
+        for model_id in ids:
+            entry = registry.get(model_id)
+            if entry is None:
+                fails.append(f"model policy: {task_class} names unknown model {model_id}")
+            elif task_class in actuator_classes and entry.get("where") != ON_DEVICE_ACTUATOR:
+                fails.append(f"model policy: {task_class} runs in the actuator, but {model_id} is "
+                             f"{entry.get('where')!r}, not {ON_DEVICE_ACTUATOR!r}")
+    return fails
+
+
 def retired_patterns(names):
     pats = []
     for n in names:
@@ -654,6 +678,11 @@ def main(argv=None):
         coords = [c for c in deps_file.read_text().splitlines() if c.strip() and not c.startswith("#")]
         fails += check_deps(module, coords, groups)
         print(f"checked {module} dependency graph: {len(coords)} external modules")
+
+    model_policy = root / "session" / "src" / "main" / "res" / "raw" / "model_policy.json"
+    fails += check_model_policy(model_policy.read_text(encoding="utf-8"),
+                                set(read_list(ci / "actuator-model-classes.txt")))
+    print(f"checked {model_policy.relative_to(root)}: actuator task classes bind on-device actuator models only")
 
     files = repo_files(root)
     texts = retired_scan_texts(root, files)

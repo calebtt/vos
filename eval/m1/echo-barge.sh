@@ -23,6 +23,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/eval/m1/lib.sh"
 build=1 replies=10 raw=false
 while (( $# )); do
     case "$1" in
@@ -34,26 +35,19 @@ while (( $# )); do
     shift
 done
 : "${GROK_API_KEY:?set GROK_API_KEY (used for the fixture; never printed)}"
-h=$((10#$(date +%H)))
-(( h >= 8 && h < 22 )) || { echo "plays VOS's replies on the speaker: daytime only (08:00-22:00)" >&2; exit 2; }
+vos_daytime_only "plays VOS's replies on the speaker"
 
-stamp="$(date +%Y-%m-%d)/echo-barge$([ "$raw" = true ] && echo -raw)-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
-mkdir -p "$out"
-exec > >(tee -a "$out/run.log") 2>&1
+vos_run_dir "echo-barge$([ "$raw" = true ] && echo -raw)"
 echo "echo-barge$([ "$raw" = true ] && echo " (control: MIC, no AEC or NS)") on $(adb get-serialno) ($(adb shell getprop ro.build.fingerprint)); results in $out"
 
 if (( build )); then
     "$ROOT/gradlew" -p "$ROOT" -q --console=plain :actuator:assembleDebug :session:assembleDebug
 fi
-adb install -r -t "$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk" >/dev/null
-adb install -r -t "$ROOT/session/build/outputs/apk/debug/session-debug.apk" >/dev/null
-adb shell pm grant com.vos.actuator android.permission.RECORD_AUDIO
-adb shell "run-as com.vos.session rm -f files/debug/chat_voice"
-if ! adb shell "run-as com.vos.session test -f files/keys/xai.bin"; then
-    printf '%s' "$GROK_API_KEY" | adb shell "run-as com.vos.session sh -c 'umask 077 && mkdir -p files/key-import && cat > files/key-import/xai'"
-fi
-volume() { adb shell cmd media_session volume --stream "$1" --get | tr -d '\r' | sed -n 's/.*volume is \([0-9]*\) in range \[[0-9]*\.\.\([0-9]*\)\].*/\1 of \2/p'; }
+vos_install_apps
+vos_grant_mic
+vos_clear_debug_overrides
+vos_seal_key_if_missing
+volume() { vos_volume "$1" | sed 's/ / of /'; }
 echo "volumes: media $(volume 3), voice call $(volume 0), assistant playback uses USAGE_ASSISTANT"
 
 python3 -I "$ROOT/eval/m1/make_fixture.py" "Please tell me a calm story about a lighthouse keeper. Make it about twenty seconds long." "$out/ask.pcm"
