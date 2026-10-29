@@ -51,12 +51,24 @@ final class XaiRealtime {
 
     /** As above, with the function tools the model may call (vendor format: type, name, description, parameters). */
     static String sessionUpdate(String instructions, String voice, int rate, JSONArray tools) {
+        return sessionUpdate(instructions, voice, rate, tools, TurnDetection.VENDOR_DEFAULT);
+    }
+
+    /** As above, with the server VAD's end-of-turn settings; a null value is left to the vendor. */
+    static String sessionUpdate(String instructions, String voice, int rate, JSONArray tools, TurnDetection td) {
         try {
             JSONObject format = new JSONObject().put("type", "audio/pcm").put("rate", rate);
+            JSONObject vad = new JSONObject().put("type", "server_vad");
+            if (td.silenceMs != null) {
+                vad.put("silence_duration_ms", td.silenceMs.intValue());
+            }
+            if (td.prefixPaddingMs != null) {
+                vad.put("prefix_padding_ms", td.prefixPaddingMs.intValue());
+            }
             JSONObject session = new JSONObject()
                     .put("instructions", instructions)
                     .put("voice", voice)
-                    .put("turn_detection", new JSONObject().put("type", "server_vad"))
+                    .put("turn_detection", vad)
                     .put("audio", new JSONObject()
                             .put("input", new JSONObject().put("format", format))
                             .put("output", new JSONObject().put("format", new JSONObject(format.toString()))));

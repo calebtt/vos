@@ -5,6 +5,7 @@ time. Retired names and secrets are never written into this file: they are read 
 ci/retired-names.txt or generated at runtime.
 """
 
+import json
 import os
 import secrets
 import string
@@ -368,6 +369,50 @@ class GoogleArtifactRules(unittest.TestCase):
         dex = ["Lcom/vos/session/MainActivity;", "Landroid/app/Activity;"]
         self.assertEqual([], pc.check_forbidden_in_apk("session", dex, ["VOS"], ["classes.dex"],
                                                        facts(**SESSION_OK), self.classes))
+
+
+class ModelPolicyRules(unittest.TestCase):
+    """M1-MODEL-02: an actuator task class (offline_grammar, ocr_commit, ...) never binds a cloud model."""
+
+    def setUp(self):
+        self.classes = set(pc.read_list(CI / "actuator-model-classes.txt"))
+        self.shipped = json.loads((CI.parent / "session/src/main/res/raw/model_policy.json").read_text())
+
+    def bound(self, task_class, model_id):
+        policy = json.loads(json.dumps(self.shipped))
+        policy["policy"][task_class] = [model_id]
+        return json.dumps(policy)
+
+    def test_shipped_policy_passes(self):
+        self.assertEqual(pc.check_model_policy(json.dumps(self.shipped), self.classes), [])
+
+    def test_offline_grammar_or_ocr_commit_on_a_cloud_model_fails(self):
+        self.assertIn("offline_grammar", self.classes)
+        self.assertIn("ocr_commit", self.classes)
+        cloud = [e["id"] for e in self.shipped["registry"] if e.get("where", "").startswith("cloud:")]
+        self.assertTrue(cloud)
+        for task_class in self.classes:
+            for model_id in cloud:
+                fails = pc.check_model_policy(self.bound(task_class, model_id), self.classes)
+                self.assertEqual(len(fails), 1, (task_class, model_id))
+                self.assertIn(task_class, fails[0])
+
+    def test_session_local_or_unplaced_model_fails_for_an_actuator_class(self):
+        policy = json.loads(self.bound("offline_grammar", "s"))
+        policy["registry"] += [{"id": "s", "kind": "grammar", "where": "on_device_session"}]
+        self.assertEqual(len(pc.check_model_policy(json.dumps(policy), self.classes)), 1)
+        policy["registry"][-1].pop("where")
+        self.assertEqual(len(pc.check_model_policy(json.dumps(policy), self.classes)), 1)
+
+    def test_on_device_actuator_model_passes(self):
+        policy = json.loads(self.bound("ocr_commit", "a"))
+        policy["registry"] += [{"id": "a", "kind": "ocr", "where": "on_device_actuator"}]
+        self.assertEqual(pc.check_model_policy(json.dumps(policy), self.classes), [])
+
+    def test_unknown_model_or_unreadable_policy_fails(self):
+        self.assertEqual(len(pc.check_model_policy(self.bound("chat_voice", "ghost"), self.classes)), 1)
+        self.assertEqual(len(pc.check_model_policy("{", self.classes)), 1)
+        self.assertEqual(len(pc.check_model_policy("{}", self.classes)), 1)
 
 
 class RetiredNames(unittest.TestCase):

@@ -17,7 +17,8 @@ import android.view.accessibility.AccessibilityEvent;
 import android.widget.ImageView;
 
 /**
- * Hands (§3.1): global actions, gestures, set-text and screenshots arrive in M1/M3. It also draws the
+ * Hands (§3.1): global actions for shell_nav (FastTools), and the active window its oracle reads;
+ * gestures, set-text and screenshots arrive in M3. It also draws the
  * generating / acting indicator (Shell Contract row 13) as an accessibility overlay, a window type
  * only an enabled accessibility service can add, so an app cannot remove it or draw over it as that
  * type. Main thread only.
@@ -86,6 +87,12 @@ public final class HandsService extends AccessibilityService {
 
     static HandsService connected() {
         return connected;
+    }
+
+    /** The active (focused) window's package, or null (shell_nav's oracle); a heads-up never has focus. */
+    String activePackage() {
+        android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
+        return root == null || root.getPackageName() == null ? null : root.getPackageName().toString();
     }
 
     @Override

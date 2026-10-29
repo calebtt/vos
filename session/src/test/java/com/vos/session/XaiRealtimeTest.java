@@ -44,6 +44,19 @@ public class XaiRealtimeTest {
     }
 
     @Test
+    public void endOfTurnSettingsAreSentOnlyWhenSet() throws Exception {
+        org.json.JSONArray none = new org.json.JSONArray();
+        JSONObject vendor = new JSONObject(XaiRealtime.sessionUpdate("x", "ara", 16000, none,
+                TurnDetection.VENDOR_DEFAULT)).getJSONObject("session").getJSONObject("turn_detection");
+        assertEquals("only the type: the vendor's own end-of-turn", 1, vendor.length());
+        JSONObject set = new JSONObject(XaiRealtime.sessionUpdate("x", "ara", 16000, none,
+                new TurnDetection("long", 1500, null))).getJSONObject("session").getJSONObject("turn_detection");
+        assertEquals("server_vad", set.getString("type"));
+        assertEquals(1500, set.getInt("silence_duration_ms"));
+        assertEquals(false, set.has("prefix_padding_ms"));
+    }
+
+    @Test
     public void toolsAreSentOnlyWhenThereAreSome() throws Exception {
         org.json.JSONArray tools = new org.json.JSONArray(
                 "[{\"type\":\"function\",\"name\":\"time_get\",\"parameters\":{\"type\":\"object\"}}]");

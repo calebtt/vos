@@ -65,6 +65,49 @@ public class FastToolsTest {
         @Override public String mediaId() { return state == null ? null : id; }
         @Override public String mediaTitle() { return state == null ? null : title; }
         @Override public void sleep(long ms) { }
+
+        boolean hands = true; // VOS's accessibility service is connected
+        boolean navReacts = true;
+        String front = "com.example.mail";
+        String home = "com.android.launcher3";
+        String afterBack = "com.example.other"; // the app a back lands in
+        int nullReads; // the next reads of the active window miss (a transient null)
+
+        @Override
+        public boolean globalAction(int action) {
+            acts.add("nav " + action);
+            if (!hands) {
+                return false;
+            }
+            if (navReacts) {
+                front = action == 2 || action == 3 ? home : action == 4 || action == 5 ? FastTools.SYSTEM_UI : afterBack;
+            }
+            return true;
+        }
+
+        @Override public String foregroundPackage() { return !hands || nullReads-- > 0 ? null : front; }
+        @Override public String homePackage() { return home; }
+
+        final List<String[]> apps = new ArrayList<>(List.of(
+                new String[] {"Maps", "com.google.android.apps.maps", "com.google.android.maps.MapsActivity"},
+                new String[] {"Camera", "com.android.camera", "com.android.camera.Camera"},
+                new String[] {"Google Camera", "com.google.android.GoogleCamera", "com.android.camera.CameraLauncher"},
+                new String[] {"Clock", "com.android.deskclock", "com.android.deskclock.DeskClock"},
+                new String[] {"Café Finder", "com.example.cafe", "com.example.cafe.Main"},
+                new String[] {"Settings", "com.android.settings", "com.android.settings.Settings"}));
+        boolean launchWorks = true;
+        boolean launchShows = true;
+
+        @Override public List<String[]> launchableApps() { return apps; }
+
+        @Override
+        public boolean launch(String pkg, String activity) {
+            acts.add("launch " + pkg);
+            if (launchWorks && launchShows) {
+                front = pkg;
+            }
+            return launchWorks;
+        }
     }
 
     private final FakePlatform platform = new FakePlatform();
@@ -88,7 +131,8 @@ public class FastToolsTest {
 
     @Test
     public void knowsExactlyTheToolsItRuns() throws Exception {
-        assertEquals(java.util.Set.of("time_get", "volume_set", "volume_step", "media_control"), FastTools.NAMES);
+        assertEquals(java.util.Set.of("time_get", "volume_set", "volume_step", "media_control", "shell_nav", "app_open"),
+                FastTools.NAMES);
         for (String n : FastTools.NAMES) {
             assertTrue(n, FastTools.knows(n));
             String detail = run(n, "{}").optString("detail");
@@ -263,5 +307,168 @@ public class FastToolsTest {
         platform.state = null; // unobservable: the attempt stands
         assertEquals("UNVERIFIED", run("media_control", "{\"action\":\"pause\"}").getString("status"));
         assertEquals(List.of("paused"), intents);
+    }
+
+    private FastTools.Result nav(String args) {
+        return tools.run("shell_nav", args, media);
+    }
+
+    @Test
+    public void shellNavHomeIsVerifiedWhenTheHomeAppIsInFront() throws Exception {
+        FastTools.Result r = nav("{\"action\":\"home\"}");
+        assertEquals("VERIFIED", r.json.getString("status"));
+        assertEquals("com.android.launcher3", r.json.getString("foreground"));
+        assertEquals(List.of("nav 2"), platform.acts);
+        assertTrue(FastTools.changesState("shell_nav"));
+    }
+
+    @Test
+    public void shellNavBackAndRecentsNeedAnotherAppActive() throws Exception {
+        assertEquals("VERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+        assertEquals("VERIFIED", nav("{\"action\":\"recents\"}").json.getString("status"));
+        assertEquals(List.of("nav 1", "nav 3"), platform.acts);
+    }
+
+    @Test
+    public void anInAppBackOrAHeadsUpIsNotAVerifiedBack() throws Exception {
+        platform.afterBack = platform.front; // the back stayed in the same app
+        assertEquals("UNVERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+        platform.afterBack = FastTools.SYSTEM_UI; // System UI became active (a shade), not the app behind
+        assertEquals("UNVERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+    }
+
+    @Test
+    public void aMissedFirstReadIsNotAMove() throws Exception {
+        platform.navReacts = false;
+        platform.nullReads = 1; // the read before the action misses; the app stays in front
+        assertEquals("UNVERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+        platform.front = platform.home;
+        platform.nullReads = 1;
+        assertEquals("UNVERIFIED", nav("{\"action\":\"recents\"}").json.getString("status"));
+    }
+
+    @Test
+    public void recentsFromHomeIsNotVerifiedByStayingHome() throws Exception {
+        platform.front = platform.home;
+        assertEquals("UNVERIFIED", nav("{\"action\":\"recents\"}").json.getString("status"));
+    }
+
+    @Test
+    public void shellNavShadesAreVerifiedWhenSystemUiBecomesActive() throws Exception {
+        assertEquals("VERIFIED", nav("{\"action\":\"notifications\"}").json.getString("status"));
+        platform.front = "com.example.mail"; // the shade closed; quick settings has to open it again
+        assertEquals("VERIFIED", nav("{\"action\":\"quick_settings\"}").json.getString("status"));
+    }
+
+    @Test
+    public void aLockScreenOrAnAlreadyOpenShadeIsNotAVerifiedShade() throws Exception {
+        platform.front = FastTools.SYSTEM_UI; // lock screen, or the shade was already open
+        assertEquals("UNVERIFIED", nav("{\"action\":\"notifications\"}").json.getString("status"));
+        assertEquals("UNVERIFIED", nav("{\"action\":\"quick_settings\"}").json.getString("status"));
+    }
+
+    @Test
+    public void shellNavWithNothingSeenIsUnverified() throws Exception {
+        platform.navReacts = false;
+        FastTools.Result r = nav("{\"action\":\"home\"}");
+        assertEquals("UNVERIFIED", r.json.getString("status"));
+        assertEquals("sent once, not retried", List.of("nav 2"), platform.acts);
+        platform.front = "com.android.launcher3"; // already home: a home press is VERIFIED
+        assertEquals("VERIFIED", nav("{\"action\":\"home\"}").json.getString("status"));
+        assertEquals("but back with no new window is not", "UNVERIFIED", nav("{\"action\":\"back\"}").json.getString("status"));
+    }
+
+    @Test
+    public void shellNavFailsWhenTheAccessibilityServiceIsOff() throws Exception {
+        platform.hands = false;
+        FastTools.Result r = nav("{\"action\":\"home\"}");
+        assertEquals("FAILED", r.json.getString("status"));
+        assertTrue(r.json.getString("detail").contains("accessibility service is off"));
+    }
+
+    @Test
+    public void shellNavRefusesBadArgumentsWithoutActing() throws Exception {
+        assertEquals("FAILED", nav("{\"action\":\"power_off\"}").json.getString("status"));
+        assertEquals("FAILED", nav("{\"action\":\"home\",\"times\":3}").json.getString("status"));
+        assertEquals("FAILED", nav("{}").json.getString("status"));
+        assertTrue(platform.acts.isEmpty());
+    }
+
+    private FastTools.Result open(String name) throws Exception {
+        return tools.run("app_open", new JSONObject().put("name", name).toString(), media);
+    }
+
+    @Test
+    public void appOpenStartsTheAppNamedAndSeesItInFront() throws Exception {
+        FastTools.Result r = open("maps");
+        assertEquals("VERIFIED", r.json.getString("status"));
+        assertEquals("Maps", r.json.getString("app"));
+        assertEquals(List.of("launch com.google.android.apps.maps"), platform.acts);
+        assertTrue(FastTools.changesState("app_open"));
+        assertEquals("an exact label wins over one that contains it", "VERIFIED", open("Camera").json.getString("status"));
+        assertEquals("launch com.android.camera", platform.acts.get(1));
+        assertEquals("accents and punctuation are ignored", "VERIFIED", open("cafe finder!").json.getString("status"));
+        assertEquals("a word of the label is enough when only one has it", "VERIFIED", open("finder").json.getString("status"));
+    }
+
+    @Test
+    public void anAmbiguousNameStartsNothingAndListsTheCandidates() throws Exception {
+        platform.apps.add(new String[] {"Camera", "com.example.othercam", "com.example.othercam.Main"});
+        FastTools.Result r = open("camera");
+        assertEquals("FAILED", r.json.getString("status"));
+        assertEquals(2, r.json.getJSONArray("candidates").length());
+        assertTrue(platform.acts.isEmpty());
+        platform.apps.remove(platform.apps.size() - 1);
+        for (int i = 0; i < 8; i++) {
+            platform.apps.add(new String[] {"Notes " + i, "com.example.notes" + i, "com.example.Main"});
+        }
+        FastTools.Result many = open("notes");
+        assertEquals(FastTools.MAX_CANDIDATES, many.json.getJSONArray("candidates").length());
+        assertTrue(platform.acts.isEmpty());
+    }
+
+    @Test
+    public void twoMatchingEntriesOfOneAppAreTwoCandidates() throws Exception {
+        platform.apps.add(new String[] {"My Notes", "com.example.notes", "com.example.notes.Mine"});
+        platform.apps.add(new String[] {"Work Notes", "com.example.notes", "com.example.notes.Work"});
+        FastTools.Result r = open("notes");
+        assertEquals("FAILED", r.json.getString("status"));
+        assertEquals(2, r.json.getJSONArray("candidates").length());
+        assertTrue("nothing started", platform.acts.isEmpty());
+        assertEquals("the exact label starts that entry", "VERIFIED", open("work notes").json.getString("status"));
+    }
+
+    @Test
+    public void noMatchOrAFailedStartIsFailed() throws Exception {
+        assertEquals("FAILED", open("Spreadsheets").json.getString("status"));
+        assertEquals("a part of a word is not a match", "FAILED", open("clo").json.getString("status"));
+        assertTrue(platform.acts.isEmpty());
+        platform.launchWorks = false;
+        FastTools.Result r = open("clock");
+        assertEquals("FAILED", r.json.getString("status"));
+        assertEquals("the app could not be started", r.json.getString("detail"));
+    }
+
+    @Test
+    public void startedButNotSeenInFrontIsUnverified() throws Exception {
+        platform.launchShows = false; // e.g. the system blocked the start, or the screen cannot be read
+        FastTools.Result r = open("settings");
+        assertEquals("UNVERIFIED", r.json.getString("status"));
+        assertEquals(List.of("launch com.android.settings"), platform.acts);
+    }
+
+    @Test
+    public void appOpenRefusesBadArguments() throws Exception {
+        assertEquals("FAILED", tools.run("app_open", "{}", media).json.getString("status"));
+        assertEquals("FAILED", tools.run("app_open", "{\"name\":\"Maps\",\"as_admin\":true}", media).json.getString("status"));
+        assertEquals("FAILED", open("x".repeat(200)).json.getString("status"));
+        assertEquals("FAILED", open("  !! ").json.getString("status"));
+        assertTrue(platform.acts.isEmpty());
+    }
+
+    @Test
+    public void normalizeIgnoresCaseAccentsAndPunctuation() {
+        assertEquals("cafe finder", FastTools.normalize("  Café—Finder! "));
+        assertEquals("", FastTools.normalize(null));
     }
 }
