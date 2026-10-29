@@ -16,7 +16,8 @@ import android.widget.TextView;
 /**
  * VOS's chat window (decision 21, Shell Contract row 25), owned by the actuator so that only the owner's
  * typing here (or in the chat notification's direct reply) opens a typed turn. The thread shows the
- * shared conversation's recent owner and VOS lines (voice turns included) and the replies to typed
+ * shared conversation's recent owner and VOS lines (voice turns included; reloaded from
+ * {@code recentThread} every time the window resumes) and the replies to typed
  * turns. VOS's text is model output, shown as plain data under its own label, never styled like the
  * actuator's trusted cards. FLAG_SECURE: VOS's own windows are never captured or uploaded (§5.8).
  * It is exported as a launcher entry and reads no intent extras: launching it sends nothing.
@@ -68,9 +69,6 @@ public final class ChatActivity extends Activity implements TypedChat.Listener {
         input.setFilterTouchesWhenObscured(true);
         sendButton.setFilterTouchesWhenObscured(true);
         setContentView(root);
-        if (chat.lines().isEmpty()) {
-            chat.loadThread(this);
-        }
     }
 
     @Override
@@ -78,6 +76,8 @@ public final class ChatActivity extends Activity implements TypedChat.Listener {
         super.onResume();
         chat.listen(this);
         ChatNotification.cancel(this);
+        // Voice turns land in the shared conversation while this window is closed (decision 21).
+        chat.loadThread(this);
         changed();
     }
 
@@ -99,7 +99,7 @@ public final class ChatActivity extends Activity implements TypedChat.Listener {
     public void changed() {
         thread.removeAllViews();
         int pad = Math.round(8 * getResources().getDisplayMetrics().density);
-        for (TypedChat.Line l : chat.lines()) {
+        for (ChatThread.Line l : chat.lines()) {
             TextView label = new TextView(this);
             label.setTextSize(12);
             label.setTextColor(Color.GRAY);

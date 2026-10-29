@@ -46,7 +46,7 @@ public final class DebugSummonActivity extends Activity {
         } else if ("stop".equals(in.getStringExtra("op"))) {
             startService(i.setAction(TurnService.ACTION_STOP));
         } else {
-            startForegroundService(i.setAction(TurnService.ACTION_SUMMON)
+            TurnService.startSummon(this, i.setAction(TurnService.ACTION_SUMMON)
                     .putExtra(TurnService.EXTRA_DEBUG_MIC_FILE, in.getBooleanExtra("mic_file", false))
                     .putExtra(TurnService.EXTRA_DEBUG_MIC_FILE_THEN_LIVE, in.getBooleanExtra("mic_file_then_live", false))
                     .putExtra(TurnService.EXTRA_DEBUG_RAW_MIC, in.getBooleanExtra("raw_mic", false))
