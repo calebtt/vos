@@ -43,6 +43,16 @@
   },
   {
     "type": "function",
+    "name": "shell_nav",
+    "description": "Go to the phone's home screen, go back, show recent apps, or open the notification shade or quick settings. Needs VOS's accessibility service; if the result is FAILED, say it is off.",
+    "parameters": {
+      "type": "object",
+      "properties": {"action": {"type": "string", "enum": ["home", "back", "recents", "notifications", "quick_settings"]}},
+      "required": ["action"]
+    }
+  },
+  {
+    "type": "function",
     "name": "end_turn",
     "description": "End the conversation when the owner is done (they say thanks, that's all, bye, or similar). Say goodbye briefly first if it fits.",
     "parameters": {"type": "object", "properties": {}}

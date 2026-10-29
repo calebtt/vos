@@ -24,9 +24,14 @@
         android:name="android.permission.INTERNET"
         tools:node="remove" />
 
-    <!-- Package visibility for the Binder guard and the peer binding (§5.3). -->
+    <!-- Package visibility for the Binder guard and the peer binding (§5.3), and the default home app
+         (shell_nav's oracle: "home" is verified when that app is in front). -->
     <queries>
         <package android:name="com.vos.session" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
     </queries>
 
     <application
