@@ -76,6 +76,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         long idleMs = 8_000;
         long maxTurnMs = 180_000;
         long leadMs = 300;
+        /** The vendor's end-of-turn settings for this turn (patience, #247). */
+        TurnDetection turnDetection = TurnDetection.VENDOR_DEFAULT;
     }
 
     private final Egress egress;
@@ -194,7 +196,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 @Override
                 public void onOpen(WebSocket w, Response response) {
                     w.send(XaiRealtime.sessionUpdate(instructions.get(), model.get("voice"), Ipc.TURN_SAMPLE_RATE,
-                            toolSchemas));
+                            toolSchemas, timing.turnDetection));
+                    Log.i(TAG, "turn " + turnId + " turn detection " + timing.turnDetection);
                 }
 
                 @Override
