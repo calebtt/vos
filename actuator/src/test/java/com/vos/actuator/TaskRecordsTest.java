@@ -60,7 +60,7 @@ public class TaskRecordsTest {
                         l.get(3).getString("entry"), l.get(4).getString("entry")));
         assertEquals(TaskRecords.SCHEMA, l.get(0).getString("schema"));
         assertEquals("owner_voice", l.get(0).getString("source"));
-        assertEquals("turn-1", l.get(0).getString("turn_id"));
+        assertEquals("turn-1", l.get(0).getString("turnId"));
         assertTrue(l.get(0).isNull("parent_task_id"));
         assertEquals("t1", l.get(2).getString("task_id"));
         assertEquals(412, l.get(2).getInt("latency_ms"));
@@ -167,5 +167,49 @@ public class TaskRecordsTest {
         assertEquals(1, r.prune());
         assertEquals(java.util.Set.of("running", "new"), new java.util.HashSet<>(r.taskIds()));
         assertNull("an open record is never pruned", r.step("running", step("oracle", "VERIFIED")));
+    }
+
+    @Test
+    public void oldestFirstFollowsWhenTheRecordWasOpenedNotTheFileMtime() throws Exception {
+        TaskRecords r = records();
+        assertNull(r.open("a", null, null, "eval", "first"));
+        now.addAndGet(10);
+        assertNull(r.open("b", null, null, "eval", "second"));
+        assertNull(r.close("a", "pass", null, null)); // appending would make a's mtime the newer one
+        File fa = new File(dir(), "a.jsonl");
+        File fb = new File(dir(), "b.jsonl");
+        fb.setLastModified(1_000L);
+        fa.setLastModified(fb.lastModified() + 60_000L);
+        assertEquals(List.of("a", "b"), r.taskIds());
+    }
+
+    @Test
+    public void aTornLastLineIsDroppedWhenTheStoreRestarts() throws Exception {
+        TaskRecords r = records();
+        assertNull(r.open("t1", null, "turn-1", "owner_voice", "what time is it"));
+        java.nio.file.Files.write(new File(dir(), "t1.jsonl").toPath(), "{\"entry\":\"step\",\"plan\":\"cut".getBytes(),
+                java.nio.file.StandardOpenOption.APPEND);
+        TaskRecords again = records();
+        String text = again.read("t1");
+        assertFalse(text.contains("cut"));
+        List<JSONObject> l = lines(text);
+        assertEquals("header", l.get(0).getString("entry"));
+        assertEquals("turn-1", l.get(0).getString("turnId"));
+        assertEquals("outcome", l.get(l.size() - 1).getString("entry"));
+        assertEquals("cancelled", l.get(l.size() - 1).getString("outcome"));
+    }
+
+    @Test
+    public void aPinnedRecordNeverExpires() {
+        TaskRecords r = records();
+        assertNull(r.open("keep", null, null, "eval", "pinned"));
+        assertNull(r.close("keep", "pass", null, null));
+        assertNull(r.pin("keep", true));
+        assertNull(r.open("drop", null, null, "eval", "old"));
+        assertNull(r.close("drop", "pass", null, null));
+        now.addAndGet(TaskRecords.RETENTION_MS + 1);
+        assertEquals(1, r.prune());
+        assertEquals(List.of("keep"), r.taskIds());
+        assertEquals("no such record", r.pin("missing", true));
     }
 }
