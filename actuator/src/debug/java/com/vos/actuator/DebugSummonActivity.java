@@ -12,9 +12,11 @@ import android.os.Bundle;
  * am start -n com.vos.actuator/.DebugSummonActivity --es op start [--ez mic_file true | --ez mic_file_then_live true] [--ez raw_mic true] [--ez speaker_file true]
  * am start -n com.vos.actuator/.DebugSummonActivity --es op stop
  * am start -n com.vos.actuator/.DebugSummonActivity --es op volume --ei stream 3 --ei index 7
+ * am start -n com.vos.actuator/.DebugSummonActivity --es op setting [--es key agent_mode --es value quiet]
  * </pre>
  * {@code op volume} restores a stream volume after an eval (the shell's own volume command does not
- * apply on Phone B's Android 17).
+ * apply on Phone B's Android 17). {@code op setting} sets one owner setting as the source
+ * {@code debug_shell} (audited like any change), then logs every key and value (tag VOS_SETTINGS).
  */
 public final class DebugSummonActivity extends Activity {
     @Override
@@ -25,6 +27,13 @@ public final class DebugSummonActivity extends Activity {
         if ("volume".equals(in.getStringExtra("op"))) {
             getSystemService(android.media.AudioManager.class).setStreamVolume(
                     in.getIntExtra("stream", android.media.AudioManager.STREAM_MUSIC), in.getIntExtra("index", 0), 0);
+        } else if ("setting".equals(in.getStringExtra("op"))) {
+            OwnerSettings s = ((ActuatorApp) getApplication()).ownerSettings();
+            if (in.getStringExtra("key") != null) {
+                String why = s.set(in.getStringExtra("key"), in.getStringExtra("value"), "debug_shell");
+                android.util.Log.i("VOS_SETTINGS", "set " + in.getStringExtra("key") + ": " + (why == null ? "ok" : why));
+            }
+            android.util.Log.i("VOS_SETTINGS", "settings " + new org.json.JSONObject(s.all()));
         } else if ("stop".equals(in.getStringExtra("op"))) {
             startService(i.setAction(TurnService.ACTION_STOP));
         } else {
