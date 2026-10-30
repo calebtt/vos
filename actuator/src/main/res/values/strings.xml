@@ -21,5 +21,7 @@
     <string name="chat_reply">Reply</string>
     <string name="chat_you">You</string>
     <string name="chat_model_label">VOS (model reply, data)</string>
+    <string name="typed_channel">VOS answering</string>
+    <string name="typed_answering">VOS is answering your message</string>
     <string name="role_notice_text">The assist gesture and the headset button go to another app or to nothing. Tap, then choose VOS under Digital assistant app.</string>
 </resources>

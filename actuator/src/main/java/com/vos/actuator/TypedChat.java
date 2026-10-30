@@ -26,6 +26,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * anything else is refused and audited. Tools run for the open typed turn like for a voice turn;
  * every M1 fast tool is read-only or reversible (M1 scope: no irreversible act before M2's trusted path).
  *
+ * <p>While the turn is open, {@link TypedTurnService} keeps the actuator in the foreground, so the
+ * session it binds keeps its network.
+ *
  * <p>The session ends a typed turn itself by {@link Ipc#TYPED_TURN_DEADLINE_MS}, after its last write,
  * and the owner-turn slot is freed on that endTurn. {@link #BACKSTOP_MS} is longer: it ends the turn
  * only if that endTurn never comes (the session died or hung).
@@ -92,7 +95,8 @@ final class TypedChat {
 
     /**
      * The owner typed {@code text} ({@code source}: "window" or "notification"). Returns null if a
-     * turn opened, else why not (shown to the owner).
+     * turn opened, else why not (shown to the owner). Main thread, at a moment that may start a
+     * foreground service ({@link TypedTurnService}).
      */
     String send(String text, String source) {
         String t = text == null ? "" : text.strip();
@@ -123,6 +127,8 @@ final class TypedChat {
         line.put("chars", t.length());
         app.audit().record(line);
         app.indicator().turnOpened(turnId);
+        // Keeps the session's network up for the turn (Android cuts a cached app's network within seconds).
+        TypedTurnService.hold(app);
         changed();
         // Tokened by this turn's id: it can only end this turn, and end() drops it.
         MAIN.postAtTime(() -> end(turnId, "typed turn timed out: no end from the session"), turnId,
@@ -247,6 +253,7 @@ final class TypedChat {
         }
         MAIN.removeCallbacksAndMessages(ended); // this turn's backstop
         app.indicator().turnEnded(ended);
+        TypedTurnService.release();
         if (l != null) {
             l.unbind();
         }

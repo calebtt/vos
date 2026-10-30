@@ -12,7 +12,9 @@
 #   5. a voice summon while a typed turn is open: the session holds "What day is it?" 8 s before its
 #      model call (debug: files/debug/typed_hold_ms), and the shell summons as the tile would. The
 #      summon is a live-mic one, so a summon let through would show as an AudioRecord start; its
-#      speaker is a file, and it is stopped at once if it opened.
+#      speaker is a file, and it is stopped at once if it opened. The hold outlasts the few seconds
+#      Android leaves a cached app its network, so this turn is answered only if the typed turn's
+#      foreground service (TypedTurnService) keeps the session's network up.
 # Checks: every typed turn is answered; the time reply has a time; "pause the music" ran media_control
 # for the typed turn; the follow-up names Dana from the shared conversation; the direct-reply turn
 # is answered; no AudioRecord was started for the actuator during the typed legs (the audio
@@ -172,13 +174,16 @@ if (( summon_started || ! summon_refused )); then
 fi
 echo "summon during the typed turn: $( (( summon_refused )) && echo refused || echo 'not refused')"
 typed_wait typed
-rec_after="$(adb shell dumpsys audio | tr -d '\r' | sed -n '/### Recording Activity/,/^$/p' \
-    | grep -E 'rec (start|update) .*pack:com.vos.actuator' | awk -v from="$typed_from" '($1 " " substr($2, 1, 8)) >= from' | wc -l)"
+# awk, not grep: an empty recording log is a pass, and a grep with no match would end the script (pipefail).
 rec_dump="$(adb shell dumpsys audio | tr -d '\r' | sed -n '/### Recording Activity/,/^$/p')"
 rec_seen=0
 [[ "$rec_dump" == *"### Recording Activity"* ]] && rec_seen=1
-rec_summon="$(printf '%s\n' "$rec_dump" | awk -v from="$summon_from" \
-    '/rec (start|update) .*pack:com.vos.actuator/ && ($1 " " substr($2, 1, 8)) >= from' | wc -l | tr -d ' ')"
+rec_since() { # the actuator's AudioRecord starts in the recording log from $1 on
+    printf '%s\n' "$rec_dump" | awk -v from="$1" \
+        '/rec (start|update) .*pack:com.vos.actuator/ && ($1 " " substr($2, 1, 8)) >= from' | wc -l | tr -d ' '
+}
+rec_after="$(rec_since "$typed_from")"
+rec_summon="$(rec_since "$summon_from")"
 
 adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" 2>/dev/null | tail -n +"$((${tr_before:-0} + 1))" > "$out/transcripts.jsonl" || true
 adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" 2>/dev/null | tail -n +"$((${audit_before:-0} + 1))" > "$out/actuator-audit.jsonl" || true

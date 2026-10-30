@@ -115,7 +115,7 @@ final class XaiTextBackend {
                 }
                 JSONArray toolCalls = msg.optJSONArray("tool_calls");
                 if (toolCalls == null || toolCalls.length() == 0 || round >= MAX_TOOL_ROUNDS) {
-                    String text = msg.optString("content", "").strip();
+                    String text = msg.isNull("content") ? "" : msg.optString("content", "").strip();
                     return text.isEmpty() ? "(no reply)" : text;
                 }
                 messages.put(new JSONObject().put("role", "assistant").put("content", msg.isNull("content")
@@ -124,7 +124,7 @@ final class XaiTextBackend {
                     JSONObject tc = toolCalls.getJSONObject(i);
                     JSONObject fn = tc.getJSONObject("function");
                     String name = fn.getString("name");
-                    String result = toolCaller.call(turnId, name, fn.optString("arguments", "{}"));
+                    String result = toolCaller.call(turnId, name, fn.isNull("arguments") ? "{}" : fn.optString("arguments", "{}"));
                     toolLog.tool(turnId, name, result);
                     messages.put(new JSONObject().put("role", "tool").put("tool_call_id", tc.getString("id"))
                             .put("content", result));

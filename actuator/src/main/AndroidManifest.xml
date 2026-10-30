@@ -130,6 +130,13 @@
             android:name=".ChatNotification$Reply"
             android:exported="false" />
 
+        <!-- The open typed turn, as a short foreground service: no microphone. It keeps the session,
+             which the actuator binds for the turn, out of Android's background network block. -->
+        <service
+            android:name=".TypedTurnService"
+            android:exported="false"
+            android:foregroundServiceType="shortService" />
+
         <receiver
             android:name=".BootCheck"
             android:exported="false">

@@ -123,6 +123,21 @@ public class XaiTextBackendTest {
     }
 
     @Test
+    public void aNullContentIsNoReplyAndNullArgumentsAreEmpty() throws Exception {
+        // Android's org.json gives "null" for optString on a JSON null (the JVM's gives the fallback).
+        server.enqueue(new MockResponse().setBody("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,"
+                + "\"tool_calls\":[{\"id\":\"c\",\"type\":\"function\",\"function\":{\"name\":\"time_get\",\"arguments\":null}}]}}]}"));
+        server.enqueue(new MockResponse().setBody("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null}}]}"));
+        List<String> args = new ArrayList<>();
+        String reply = backend.reply("t-7", List.of(), "hi", (turn, name, a) -> {
+            args.add(a);
+            return "{}";
+        }, calls, (turn, name, result) -> { }, new TurnGate());
+        assertEquals("(no reply)", reply);
+        assertEquals(List.of("{}"), args);
+    }
+
+    @Test
     public void aVendorErrorThrowsAndTheModelCallStillEnds() throws Exception {
         server.enqueue(new MockResponse().setResponseCode(500));
         boolean threw = false;
