@@ -41,7 +41,6 @@ public final class TurnService extends Service {
 
     /** No turn keeps the mic longer than this, whatever the session does. */
     static final long MAX_TURN_MS = 10 * 60_000L;
-    private static final int NOTIFICATION_ID = 1;
     private static final String CHANNEL = "turn";
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
@@ -217,7 +216,7 @@ public final class TurnService extends Service {
         }
         try {
             // The current state, not IDLE: a second summon during a turn must not reset the title.
-            startForeground(NOTIFICATION_ID, notification(((ActuatorApp) getApplication()).indicator().state()),
+            startForeground(NotificationIds.TURN,notification(((ActuatorApp) getApplication()).indicator().state()),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
             inForeground = true;
             tForeground = android.os.SystemClock.uptimeMillis();
@@ -317,7 +316,7 @@ public final class TurnService extends Service {
     private static void postTitle(Indicator.State state) {
         TurnService s = live;
         if (s != null && s.turn != null && inForeground) {
-            s.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, s.notification(state));
+            s.getSystemService(NotificationManager.class).notify(NotificationIds.TURN,s.notification(state));
         }
     }
 
