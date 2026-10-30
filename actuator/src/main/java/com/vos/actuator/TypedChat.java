@@ -25,11 +25,18 @@ import java.util.concurrent.atomic.AtomicInteger;
  * text with IVosSession.onTypedTurn, and accepts the session's typedReply only for a turn it has open;
  * anything else is refused and audited. Tools run for the open typed turn like for a voice turn;
  * every M1 fast tool is read-only or reversible (M1 scope: no irreversible act before M2's trusted path).
+ *
+ * <p>The session ends a typed turn itself by {@link Ipc#TYPED_TURN_DEADLINE_MS}, after its last write,
+ * and the owner-turn slot is freed on that endTurn. {@link #BACKSTOP_MS} is longer: it ends the turn
+ * only if that endTurn never comes (the session died or hung).
  */
 final class TypedChat {
     static final String TAG = "VOS_TYPED";
-    /** A typed turn the session has not ended by then is closed. */
-    static final long TURN_TIMEOUT_MS = 60_000;
+    /**
+     * Backstop for a session that never sends endTurn. It must outlast the session's deadline plus
+     * that close: a tool call in flight finishes first, and endTurn is then delivered.
+     */
+    static final long BACKSTOP_MS = Ipc.TYPED_TURN_DEADLINE_MS + 15_000;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     /** The chat window, while it is showing; it re-reads {@link #lines} on each change. */
@@ -45,7 +52,6 @@ final class TypedChat {
     private final AtomicInteger loadGen = new AtomicInteger();
     private String openTurn; // the typed turn waiting for its reply, or null
     private PeerLink link;
-    private final Runnable timeout = () -> end(null, "typed turn timed out");
 
     TypedChat(ActuatorApp app) {
         this.app = app;
@@ -118,7 +124,9 @@ final class TypedChat {
         app.audit().record(line);
         app.indicator().turnOpened(turnId);
         changed();
-        MAIN.postDelayed(timeout, TURN_TIMEOUT_MS);
+        // Tokened by this turn's id: it can only end this turn, and end() drops it.
+        MAIN.postAtTime(() -> end(turnId, "typed turn timed out: no end from the session"), turnId,
+                android.os.SystemClock.uptimeMillis() + BACKSTOP_MS);
         String typed = t;
         MAIN.post(() -> openInSession(turnId, typed));
         return null;
@@ -220,12 +228,12 @@ final class TypedChat {
         return r.json.toString();
     }
 
-    /** Ends the open typed turn ({@code turnId} null: whichever is open). Main thread. */
+    /** Ends the open typed turn if it is {@code turnId}. Main thread. */
     private void end(String turnId, String reason) {
         String ended;
         PeerLink l;
         synchronized (this) {
-            if (openTurn == null || (turnId != null && !turnId.equals(openTurn))) {
+            if (openTurn == null || !openTurn.equals(turnId)) {
                 return;
             }
             ended = openTurn;
@@ -237,7 +245,7 @@ final class TypedChat {
                 lines.add(new ChatThread.Line("note", "VOS couldn't answer (" + reason + ")."));
             }
         }
-        MAIN.removeCallbacks(timeout);
+        MAIN.removeCallbacksAndMessages(ended); // this turn's backstop
         app.indicator().turnEnded(ended);
         if (l != null) {
             l.unbind();

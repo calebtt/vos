@@ -82,7 +82,7 @@ public final class SessionApp extends Application {
             }
 
             @Override
-            public ActuatorLink actuator() {
+            public TypedTurns.Actuator actuator() {
                 return actuatorLink();
             }
 
@@ -97,7 +97,8 @@ public final class SessionApp extends Application {
     /**
      * A typed turn the actuator opened (decision 21). A debug build can make the session also post a
      * reply for a turn the actuator never opened (files/debug/forge_typed), so eval/m1/chat.sh can
-     * check that the actuator refuses it; the file is deleted on use.
+     * check that the actuator refuses it, and can hold the turn before its model call
+     * (files/debug/typed_hold_ms), so chat.sh can summon while it is open. Each file is deleted on use.
      */
     void typedTurn(String turnId, String text) {
         importPushedKeys();
@@ -106,7 +107,17 @@ public final class SessionApp extends Application {
             new File(getFilesDir(), "debug/forge_typed").delete();
             actuatorLink().typedReply("forged-" + java.util.UUID.randomUUID(), "owner: " + forge);
         }
-        typedTurns.open(turnId, text);
+        String hold = debugFile("typed_hold_ms");
+        long holdMs = 0;
+        if (hold != null) {
+            new File(getFilesDir(), "debug/typed_hold_ms").delete();
+            try {
+                holdMs = Long.parseLong(hold);
+            } catch (NumberFormatException ignored) {
+                // no hold
+            }
+        }
+        typedTurns.open(turnId, text, holdMs);
     }
 
     String recentThread(int max) {

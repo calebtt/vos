@@ -3,6 +3,7 @@ package com.vos.session;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -13,6 +14,7 @@ import javax.crypto.SecretKey;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import okhttp3.mockwebserver.SocketPolicy;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.After;
@@ -87,7 +89,7 @@ public class XaiTextBackendTest {
                 new JSONObject("{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"My sister's name is Dana.\"}]}"),
                 new JSONObject("{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Got it.\"}]}"));
         String reply = backend.reply("t-1", seed, "What's my sister's name?", (turn, name, args) -> "{}", calls,
-                (turn, name, result) -> events.add("tool " + name));
+                (turn, name, result) -> events.add("tool " + name), new TurnGate());
         assertEquals("Your sister is Dana.", reply);
         RecordedRequest r = server.takeRequest();
         assertEquals("Bearer xai-test-key", r.getHeader("Authorization"));
@@ -108,7 +110,7 @@ public class XaiTextBackendTest {
         String reply = backend.reply("t-2", List.of(), "what time is it", (turn, name, args) -> {
             ran.add(turn + " " + name + " " + args);
             return "{\"status\":\"VERIFIED\",\"spoken\":\"9:00 AM\"}";
-        }, calls, (turn, name, result) -> events.add("tool " + name));
+        }, calls, (turn, name, result) -> events.add("tool " + name), new TurnGate());
         assertEquals("It's 9:00 AM.", reply);
         assertEquals(List.of("t-2 time_get {}"), ran);
         assertEquals(List.of("started t-2 t1", "ended t-2 t1", "tool time_get", "started t-2 t2", "ended t-2 t2"), events);
@@ -125,7 +127,7 @@ public class XaiTextBackendTest {
         server.enqueue(new MockResponse().setResponseCode(500));
         boolean threw = false;
         try {
-            backend.reply("t-3", List.of(), "hi", (turn, name, args) -> "{}", calls, (turn, name, result) -> { });
+            backend.reply("t-3", List.of(), "hi", (turn, name, args) -> "{}", calls, (turn, name, result) -> { }, new TurnGate());
         } catch (java.io.IOException e) {
             threw = true;
         }
@@ -141,10 +143,51 @@ public class XaiTextBackendTest {
             server.enqueue(new MockResponse().setBody(toolCall));
         }
         server.enqueue(new MockResponse().setBody(content("done")));
-        backend.reply("t-4", List.of(), "loop", (turn, name, args) -> "{}", calls, (turn, name, result) -> { });
+        backend.reply("t-4", List.of(), "loop", (turn, name, args) -> "{}", calls, (turn, name, result) -> { }, new TurnGate());
         for (int i = 0; i < XaiTextBackend.MAX_TOOL_ROUNDS; i++) {
             server.takeRequest();
         }
         assertFalse("the last request offers no tools", new JSONObject(server.takeRequest().getBody().readUtf8()).has("tools"));
+    }
+
+    @Test
+    public void closingTheGateCancelsTheCallInFlightAndSendsNoOther() throws Exception {
+        server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)); // a model that never answers
+        TurnGate gate = new TurnGate();
+        Thread deadline = new Thread(() -> {
+            try {
+                server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                return;
+            }
+            gate.close(() -> { });
+        });
+        deadline.start();
+        long t0 = System.nanoTime();
+        try {
+            backend.reply("t-5", List.of(), "hi", (turn, name, args) -> "{}", calls, (turn, name, result) -> { }, gate);
+            fail("a closed gate's call returned");
+        } catch (java.io.IOException expected) {
+            // cancelled
+        }
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertTrue("cancelled, not left to its " + XaiTextBackend.CALL_TIMEOUT_S + " s timeout: " + ms + " ms", ms < 5_000);
+        assertEquals(List.of("started t-5 t1", "ended t-5 t1"), events);
+        assertEquals(1, server.getRequestCount());
+        deadline.join();
+    }
+
+    @Test
+    public void aClosedGateSendsNothing() throws Exception {
+        TurnGate gate = new TurnGate();
+        gate.close(() -> { });
+        try {
+            backend.reply("t-6", List.of(), "hi", (turn, name, args) -> "{}", calls, (turn, name, result) -> { }, gate);
+            fail("a closed gate's call returned");
+        } catch (java.io.IOException expected) {
+            // no call
+        }
+        assertEquals(0, server.getRequestCount());
+        assertEquals("no model call reported to the indicator", List.of(), events);
     }
 }
