@@ -46,6 +46,18 @@ public final class SessionService extends Service {
             guard.require(Binder.getCallingUid(), Grant.ACTUATOR_CORE);
             ((SessionApp) getApplication()).turns().closed(turnId);
         }
+
+        @Override
+        public void onTypedTurn(String turnId, String text) {
+            guard.require(Binder.getCallingUid(), Grant.ACTUATOR_CORE);
+            ((SessionApp) getApplication()).typedTurn(turnId, text);
+        }
+
+        @Override
+        public String recentThread(int max) {
+            guard.require(Binder.getCallingUid(), Grant.ACTUATOR_CORE);
+            return ((SessionApp) getApplication()).recentThread(Math.max(0, Math.min(max, 200)));
+        }
     };
 
     @Override

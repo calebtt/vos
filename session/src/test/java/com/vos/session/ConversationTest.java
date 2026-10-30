@@ -208,6 +208,20 @@ public class ConversationTest {
     }
 
     @Test
+    public void theChatThreadIsOwnerAndVosLinesOnly() throws Exception {
+        Conversation c = conversation(tmp.getRoot());
+        c.add(Conversation.Role.OWNER, "t1", "what time is it");
+        c.add(Conversation.Role.TOOL, "t1", "time_get -> {}");
+        c.add(Conversation.Role.VOS, "t1", "Nine.");
+        c.add(Conversation.Role.OWNER, "t2", "thanks");
+        org.json.JSONArray a = new org.json.JSONArray(c.recentThread(2));
+        assertEquals(2, a.length());
+        assertEquals("vos", a.getJSONObject(0).getString("role"));
+        assertEquals("Nine.", a.getJSONObject(0).getString("text"));
+        assertEquals("owner", a.getJSONObject(1).getString("role"));
+    }
+
+    @Test
     public void aDamagedFileStartsFresh() throws Exception {
         File dir = tmp.newFolder();
         Files.write(new File(dir, "conversation.json").toPath(), "{not json".getBytes(java.nio.charset.StandardCharsets.UTF_8));

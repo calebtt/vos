@@ -34,4 +34,11 @@ interface IVosActuator {
 
     /** The model call {@code callId} of turn {@code turnId} no longer produces output (done, cancelled or failed). */
     oneway void modelCallEnded(String turnId, String callId);
+
+    /**
+     * The reply to a typed turn the actuator opened (decision 21). The actuator shows it as model text
+     * (data, never a trusted card) only for a typed turn it has open; anything else is refused and
+     * audited, so the session cannot post into the owner's thread on its own.
+     */
+    oneway void typedReply(String turnId, String text);
 }
