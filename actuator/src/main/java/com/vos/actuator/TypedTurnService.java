@@ -26,7 +26,6 @@ import android.util.Log;
  * Main thread only.
  */
 public final class TypedTurnService extends Service {
-    private static final int NOTIFICATION_ID = 3;
     private static final String CHANNEL = "typed";
 
     private static TypedTurnService live;
@@ -78,7 +77,7 @@ public final class TypedTurnService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         started = true;
         try {
-            startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE);
+            startForeground(NotificationIds.TYPED_TURN,notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE);
         } catch (RuntimeException e) { // ForegroundServiceStartNotAllowedException
             Log.w(TypedChat.TAG, "typed turn has no foreground service (" + e.getClass().getSimpleName() + ")");
         }

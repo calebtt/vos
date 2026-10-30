@@ -19,7 +19,6 @@ import android.os.Bundle;
  */
 final class ChatNotification {
     static final String CHANNEL = "chat";
-    static final int ID = 2;
     static final String KEY_TEXT = "reply";
 
     private ChatNotification() {
@@ -62,7 +61,7 @@ final class ChatNotification {
                 .addAction(reply)
                 .setOnlyAlertOnce(true)
                 .build();
-        nm.notify(ID, n);
+        nm.notify(NotificationIds.CHAT, n);
     }
 
     /** The owner's line after a direct reply: the text, and why it was not sent; an empty reply shows only why. */
@@ -75,7 +74,7 @@ final class ChatNotification {
     }
 
     static void cancel(Context context) {
-        context.getSystemService(NotificationManager.class).cancel(ID);
+        context.getSystemService(NotificationManager.class).cancel(NotificationIds.CHAT);
     }
 
     /** The direct reply: a typed owner turn from the notification (not exported; only our PendingIntent reaches it). */
