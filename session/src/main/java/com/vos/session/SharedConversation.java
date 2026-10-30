@@ -61,6 +61,11 @@ final class SharedConversation implements ContextKeeper {
         return ok ? null : "context over budget";
     }
 
+    /** The chat window's thread: recent owner and VOS lines (IVosSession.recentThread). */
+    String recentThread(int max) {
+        return conversation.recentThread(max);
+    }
+
     @Override
     public List<JSONObject> seed() {
         return conversation.seed();

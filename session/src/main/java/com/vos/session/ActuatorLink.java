@@ -17,7 +17,7 @@ import java.util.function.Consumer;
  * The session's link to ActuatorService, bound while turns need it (§5.3: protocol handshake and
  * death watch through PeerLink). Calls made before the link is up are queued and sent in order.
  */
-final class ActuatorLink implements ModelCalls {
+final class ActuatorLink implements TypedTurns.Actuator {
     private final PeerLink link;
     private final Queue<Consumer<IVosActuator>> pending = new ArrayDeque<>();
     private IVosActuator actuator;
@@ -41,7 +41,13 @@ final class ActuatorLink implements ModelCalls {
         oneway("turnReady", a -> a.turnReady(turnId));
     }
 
-    void endTurn(String turnId, String reason) {
+    @Override
+    public void typedReply(String turnId, String text) {
+        oneway("typedReply", a -> a.typedReply(turnId, text));
+    }
+
+    @Override
+    public void endTurn(String turnId, String reason) {
         oneway("endTurn", a -> a.endTurn(turnId, reason));
     }
 
@@ -80,7 +86,8 @@ final class ActuatorLink implements ModelCalls {
      * Runs a fast tool in the actuator (a two-way Binder call; not on the WebSocket thread). Waits up
      * to 2 s for the link; any failure comes back as a FAILED result, never an exception.
      */
-    String callTool(String turnId, String name, String argsJson) {
+    @Override
+    public String callTool(String turnId, String name, String argsJson) {
         CompletableFuture<IVosActuator> ready = new CompletableFuture<>();
         send(ready::complete);
         try {

@@ -9,8 +9,8 @@
 # "context tokens~ budget=" line); the sister question gets Dana; the ring volume is unchanged after
 # the last turn, no volume tool touched the ring stream, and VOS cites the restriction; no raw tool
 # output is left in the summary; each
-# compaction has an audit line with counts only. Typed turns join when typed chat lands (#69), and
-# the OwnerMemory check when OwnerMemory does (M2); this build has neither.
+# compaction has an audit line with counts only. `--typed` runs the odd fillers and both questions
+# as typed turns. The OwnerMemory check waits for OwnerMemory (M2).
 #
 # The conversation and the debug budget are reset before and after the run; the phone's media,
 # voice-call and assistant volumes are set low first and left there unless --restore-volumes is given.
@@ -21,19 +21,22 @@
 # so ten turns compact at least twice; much smaller and the summary's own framing crowds out what it
 # must keep.
 #
-# Usage: eval/m1/context-budget.sh [--no-build] [--budget TOKENS] [--restore-volumes]
+# --typed mixes in typed turns (debug op typed): odd fillers and both questions, the rest voice.
+#
+# Usage: eval/m1/context-budget.sh [--no-build] [--budget TOKENS] [--restore-volumes] [--typed]
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/eval/m1/lib.sh"
-build=1 budget=450 restore=0
+build=1 budget=450 restore=0 typed=0
 while (( $# )); do
     case "$1" in
         --no-build) build=0 ;;
         --budget) budget="$2"; shift ;;
         --restore-volumes) restore=1 ;;
-        *) echo "usage: $0 [--no-build] [--budget TOKENS] [--restore-volumes]" >&2; exit 2 ;;
+        --typed) typed=1 ;;
+        *) echo "usage: $0 [--no-build] [--budget TOKENS] [--restore-volumes] [--typed]" >&2; exit 2 ;;
     esac
     shift
 done
@@ -129,6 +132,30 @@ compactions_so_far() {
 }
 # One voice turn; then waits for that turn's own post-turn work ("after turn <id> done", logged
 # whether it compacted or not; up to 45 s, three compact call timeouts). Sets turn_done.
+# A typed turn (debug: the same TypedChat.send the chat window calls). Typed texts avoid apostrophes.
+typed_turn() {
+    n=$((n + 1))
+    adb logcat -c
+    local text="${1//\'/}" # the shell's quoting cannot carry an apostrophe; "Whats" reads the same
+    adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op typed --es text "'$text'" >/dev/null
+    local id="" ended=0
+    for _ in $(seq 1 120); do
+        adb logcat -d -s VOS_TYPED | grep -q "typed turn ended" && { ended=1; break; }
+        sleep 0.5
+    done
+    id="$(adb logcat -d -s VOS_TYPED | tr -d '\r' | grep -o 'typed turn ended turnId=[0-9a-f-]\{36\}' | head -1 | cut -d= -f2)"
+    turn_done=0
+    for _ in $(seq 1 90); do
+        [ -n "$id" ] && adb logcat -d -s VOS_CONTEXT | grep -q "after turn $id done:" && { turn_done=1; break; }
+        sleep 0.5
+    done
+    adb logcat -d -s VOS_TYPED VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed "s/^/turn$n /" >> "$out/session.txt"
+    echo "turn $n: $( (( ended )) && echo ended || echo 'did not end') (typed) $(grep "^turn$n " "$out/session.txt" | grep -o 'context tokens~[0-9]* budget=[0-9]*[a-z ]*' | head -1)"
+}
+# --typed: odd fillers and both questions are typed, the rest voice (M1-CTX-01's typed half).
+any_turn() {
+    if (( typed )) && { [ "$2" = q ] || (( $3 % 2 == 1 )); }; then typed_turn "$1"; else run_turn "$1"; fi
+}
 run_turn() {
     n=$((n + 1))
     python3 -I "$ROOT/eval/m1/make_fixture.py" "$1" "$out/ask$n.pcm"
@@ -157,13 +184,13 @@ PY
 for a in "${head[@]}"; do run_turn "$a"; done
 f=0
 while (( f < ${#fillers[@]} )); do
-    run_turn "${fillers[$f]}"
+    any_turn "${fillers[$f]}" f "$f"
     f=$((f + 1))
     (( f >= 6 && $(compactions_so_far) >= 2 )) && break
 done
 # The recall questions only count after two compactions; their own compactions do not.
 before_questions="$(compactions_so_far)"
-for q in "${questions[@]}"; do run_turn "$q"; done
+for q in "${questions[@]}"; do any_turn "$q" q 0; done
 post_done=$turn_done
 adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/session.txt"
 ring_after="$(vol 2)"

@@ -84,6 +84,25 @@ final class Conversation {
         return Collections.unmodifiableList(new ArrayList<>(items));
     }
 
+    /** The last {@code max} owner and VOS lines, oldest first, as JSON for the chat window (no tool lines, no summary). */
+    synchronized String recentThread(int max) {
+        JSONArray a = new JSONArray();
+        List<Item> lines = new ArrayList<>();
+        for (Item i : items) {
+            if (i.role != Role.TOOL) {
+                lines.add(i);
+            }
+        }
+        try {
+            for (Item i : lines.subList(Math.max(0, lines.size() - max), lines.size())) {
+                a.put(new JSONObject().put("role", i.role == Role.OWNER ? "owner" : "vos").put("text", i.text));
+            }
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+        return a.toString();
+    }
+
     synchronized String summary() {
         return summary;
     }

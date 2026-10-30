@@ -12,7 +12,6 @@ import android.provider.Settings;
 /** {@link RoleWatch.Platform} on RoleManager and a persistent setup notice. */
 final class AndroidRolePlatform implements RoleWatch.Platform {
     private static final String CHANNEL = "setup";
-    private static final int NOTICE_ID = 2;
     private final Context context;
 
     AndroidRolePlatform(Context context) {
@@ -33,7 +32,7 @@ final class AndroidRolePlatform implements RoleWatch.Platform {
         PendingIntent open = PendingIntent.getActivity(context, 0,
                 new Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE);
-        nm.notify(NOTICE_ID, new Notification.Builder(context, CHANNEL)
+        nm.notify(NotificationIds.ROLE_NOTICE,new Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_vos)
                 .setContentTitle(context.getString(R.string.role_notice_title))
                 .setContentText(context.getString(R.string.role_notice_text))
@@ -45,6 +44,6 @@ final class AndroidRolePlatform implements RoleWatch.Platform {
 
     @Override
     public void clearNotice() {
-        context.getSystemService(NotificationManager.class).cancel(NOTICE_ID);
+        context.getSystemService(NotificationManager.class).cancel(NotificationIds.ROLE_NOTICE);
     }
 }

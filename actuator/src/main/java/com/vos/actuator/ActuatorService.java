@@ -43,13 +43,16 @@ public final class ActuatorService extends Service {
         @Override
         public void endTurn(String turnId, String reason) {
             guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
-            TurnService.sessionEnded(turnId, clip(reason));
+            if (!((ActuatorApp) getApplication()).typedChat().sessionEnded(turnId, clip(reason))) {
+                TurnService.sessionEnded(turnId, clip(reason));
+            }
         }
 
         @Override
         public String callTool(String turnId, String name, String argsJson) {
             guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
-            return TurnService.callTool(ActuatorService.this, turnId, clip(name), argsJson);
+            String typed = ((ActuatorApp) getApplication()).typedChat().callTool(turnId, clip(name), argsJson);
+            return typed != null ? typed : TurnService.callTool(ActuatorService.this, turnId, clip(name), argsJson);
         }
 
         @Override
@@ -62,6 +65,12 @@ public final class ActuatorService extends Service {
         public void modelCallEnded(String turnId, String callId) {
             guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
             ((ActuatorApp) getApplication()).indicator().callEnded(turnId, callId);
+        }
+
+        @Override
+        public void typedReply(String turnId, String text) {
+            guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
+            ((ActuatorApp) getApplication()).typedChat().reply(turnId, text);
         }
     };
 

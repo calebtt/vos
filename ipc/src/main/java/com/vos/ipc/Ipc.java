@@ -7,14 +7,23 @@ import android.content.Intent;
 public final class Ipc {
     /**
      * Bumped on any incompatible change to IVosActuator or IVosSession. 2: voice turns. 3: callTool.
-     * 4: modelCallStarted/modelCallEnded (the generating indicator).
+     * 4: modelCallStarted/modelCallEnded (the generating indicator). 5: typed turns
+     * (onTypedTurn, recentThread, typedReply).
      */
-    public static final int PROTOCOL_VERSION = 4;
+    public static final int PROTOCOL_VERSION = 5;
 
     /** Turn audio on both pipes: mono, signed 16-bit little-endian, at this rate (§3.2). */
     public static final int TURN_SAMPLE_RATE = 16000;
     /** One 20 ms frame of turn audio, in bytes. */
     public static final int TURN_FRAME_BYTES = TURN_SAMPLE_RATE / 50 * 2;
+
+    /**
+     * A typed turn's deadline, from IVosSession.onTypedTurn (decision 21). The session ends a typed
+     * turn it has not answered by then itself: its model call is cancelled, nothing more of the turn
+     * is written, and only then does it send endTurn. The actuator's own timer is a longer backstop
+     * for a session that never sends endTurn.
+     */
+    public static final long TYPED_TURN_DEADLINE_MS = 45_000;
 
     public static final String ACTUATOR_PACKAGE = "com.vos.actuator";
     public static final String SESSION_PACKAGE = "com.vos.session";
