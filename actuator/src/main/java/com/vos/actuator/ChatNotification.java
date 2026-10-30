@@ -65,6 +65,15 @@ final class ChatNotification {
         nm.notify(ID, n);
     }
 
+    /** The owner's line after a direct reply: the text, and why it was not sent; an empty reply shows only why. */
+    static String ownerLine(String text, String why) {
+        String t = text == null ? "" : text.strip();
+        if (why == null) {
+            return t;
+        }
+        return t.isEmpty() ? "(" + why + ")" : t + "\n(" + why + ")";
+    }
+
     static void cancel(Context context) {
         context.getSystemService(NotificationManager.class).cancel(ID);
     }
@@ -82,7 +91,7 @@ final class ChatNotification {
         static void handle(Context context, String text, String source) {
             ActuatorApp app = (ActuatorApp) context.getApplicationContext();
             String why = app.typedChat().send(text, source);
-            post(context, null, why == null ? text : text + "\n(" + why + ")");
+            post(context, null, ownerLine(text, why));
         }
     }
 }
