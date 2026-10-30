@@ -17,7 +17,8 @@ import org.json.JSONObject;
  * vendor as {@code chat_voice}. A typed turn sees the shared conversation (decision 46) as messages,
  * then the owner's text; tool calls run in the actuator for this turn ({@link XaiRealtimeBackend.ToolCaller})
  * and their results go back to the model, for at most {@link #MAX_TOOL_ROUNDS} rounds. Each request
- * is one model call for the actuator's indicator ({@link ModelCalls}). The key comes from the
+ * is one model call for the actuator's indicator ({@link ModelCalls}); once the turn's {@link TurnGate}
+ * closes (its deadline), the call in flight is cancelled and no further one is sent. The key comes from the
  * {@link KeyVault} per call and goes only into the Authorization header; requests go through
  * {@link Egress}. Nothing here logs text.
  */
@@ -78,10 +79,10 @@ final class XaiTextBackend {
 
     /**
      * Answers {@code typed} for {@code turnId}; {@code toolLog} hears each tool name and result for the
-     * shared conversation. Returns the reply text.
+     * shared conversation. Returns the reply text. Throws once {@code gate} has closed.
      */
     String reply(String turnId, List<JSONObject> seed, String typed, XaiRealtimeBackend.ToolCaller toolCaller,
-            ModelCalls calls, ToolLog toolLog) throws IOException {
+            ModelCalls calls, ToolLog toolLog, TurnGate gate) throws IOException {
         String key;
         try {
             key = vault.get(KeyVault.XAI);
@@ -100,11 +101,16 @@ final class XaiTextBackend {
                     body.put("tools", tools);
                 }
                 String callId = "t" + (round + 1);
+                okhttp3.Call call = newCall(key, body.toString());
+                if (!gate.track(call)) {
+                    throw new IOException("typed turn over");
+                }
                 calls.started(turnId, callId);
                 JSONObject msg;
                 try {
-                    msg = post(key, body.toString()).getJSONArray("choices").getJSONObject(0).getJSONObject("message");
+                    msg = execute(call).getJSONArray("choices").getJSONObject(0).getJSONObject("message");
                 } finally {
+                    gate.untrack(call);
                     calls.ended(turnId, callId);
                 }
                 JSONArray toolCalls = msg.optJSONArray("tool_calls");
@@ -134,13 +140,17 @@ final class XaiTextBackend {
         void tool(String turnId, String name, String result);
     }
 
-    private JSONObject post(String key, String body) throws IOException, JSONException {
+    private okhttp3.Call newCall(String key, String body) {
         Request req = new Request.Builder().url(model.get("url"))
                 .header("Authorization", "Bearer " + key)
                 .post(RequestBody.create(body, JSON))
                 .build();
         okhttp3.Call call = egress.client().newCall(req);
         call.timeout().timeout(CALL_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS);
+        return call;
+    }
+
+    private static JSONObject execute(okhttp3.Call call) throws IOException, JSONException {
         try (Response r = call.execute()) {
             ResponseBody rb = r.body();
             if (!r.isSuccessful() || rb == null) {

@@ -17,6 +17,14 @@ public final class Ipc {
     /** One 20 ms frame of turn audio, in bytes. */
     public static final int TURN_FRAME_BYTES = TURN_SAMPLE_RATE / 50 * 2;
 
+    /**
+     * A typed turn's deadline, from IVosSession.onTypedTurn (decision 21). The session ends a typed
+     * turn it has not answered by then itself: its model call is cancelled, nothing more of the turn
+     * is written, and only then does it send endTurn. The actuator's own timer is a longer backstop
+     * for a session that never sends endTurn.
+     */
+    public static final long TYPED_TURN_DEADLINE_MS = 45_000;
+
     public static final String ACTUATOR_PACKAGE = "com.vos.actuator";
     public static final String SESSION_PACKAGE = "com.vos.session";
 
