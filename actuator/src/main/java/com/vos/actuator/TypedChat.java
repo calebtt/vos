@@ -15,7 +15,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * Typed chat (decision 21, Shell Contract row 25). The actuator mints every typed owner turn, from
@@ -41,6 +42,8 @@ final class TypedChat {
      */
     static final long BACKSTOP_MS = Ipc.TYPED_TURN_DEADLINE_MS + 15_000;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    /** Runs recentThread, a blocking call into the session, off the main thread (#298). */
+    private static final Executor LOADS = Executors.newSingleThreadExecutor(r -> new Thread(r, "vos-chat-load"));
 
     /** The chat window, while it is showing; it re-reads {@link #lines} on each change. */
     interface Listener {
@@ -52,7 +55,7 @@ final class TypedChat {
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     /** Shared with voice summons so the two cannot be open together (Shell Contract row 13). */
     private final OwnerTurnSlot slot = new OwnerTurnSlot();
-    private final AtomicInteger loadGen = new AtomicInteger();
+    private final ChatThreadLoader loader = new ChatThreadLoader(LOADS, MAIN::post, this::adoptThread);
     private String openTurn; // the typed turn waiting for its reply, or null
     private PeerLink link;
 
@@ -269,33 +272,31 @@ final class TypedChat {
 
     /**
      * Reloads the thread from the shared conversation ({@code recentThread}), voice turns included.
-     * Every reopen calls this (decision 21); a newer reload supersedes one still in flight.
+     * Every reopen calls this (decision 21); a newer reload, or the session going down, drops one
+     * still in flight. The call runs off the main thread ({@link ChatThreadLoader}).
      */
     void loadThread(Context context) {
-        int gen = loadGen.incrementAndGet();
+        int load = loader.begin();
         MAIN.post(() -> {
             PeerLink[] holder = new PeerLink[1];
             holder[0] = new PeerLink(context.getApplicationContext(), Ipc.sessionIntent(), Ipc.sessionHandshake(),
                     new PeerLink.Listener() {
                         @Override
                         public void onPeerUp(IBinder binder) {
-                            String json;
-                            try {
-                                json = IVosSession.Stub.asInterface(binder).recentThread(50);
-                            } catch (RemoteException e) {
-                                json = null;
-                            }
-                            String got = json;
-                            MAIN.post(() -> {
-                                holder[0].unbind();
-                                if (gen == loadGen.get()) {
-                                    adoptThread(got);
+                            IVosSession session = IVosSession.Stub.asInterface(binder);
+                            loader.fetch(load, () -> {
+                                try {
+                                    return session.recentThread(50);
+                                } catch (RemoteException | RuntimeException e) {
+                                    return null; // a throw from the session must not crash the actuator or skip the unbind
                                 }
-                            });
+                            }, holder[0]::unbind);
                         }
 
                         @Override
                         public void onPeerDown(String why) {
+                            loader.drop(load);
+                            holder[0].unbind();
                         }
                     });
             String failed = SessionBind.start(holder[0]);
