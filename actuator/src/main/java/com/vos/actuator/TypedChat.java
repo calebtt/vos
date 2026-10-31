@@ -161,8 +161,9 @@ final class TypedChat {
             }
             link = l;
         }
-        if (!l.bind()) {
-            end(turnId, "session service not found");
+        String failed = SessionBind.start(l);
+        if (failed != null) {
+            end(turnId, failed);
         }
     }
 
@@ -297,8 +298,9 @@ final class TypedChat {
                         public void onPeerDown(String why) {
                         }
                     });
-            if (!holder[0].bind()) {
-                Log.w(TAG, "thread not loaded: session service not found");
+            String failed = SessionBind.start(holder[0]);
+            if (failed != null) {
+                Log.w(TAG, "thread not loaded: " + failed);
             }
         });
     }
