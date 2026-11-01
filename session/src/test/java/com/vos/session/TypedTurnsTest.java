@@ -1,6 +1,7 @@
 package com.vos.session;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -10,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import javax.crypto.KeyGenerator;
@@ -26,10 +28,14 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 /**
- * A typed turn's deadline (decision 21): the session ends the turn itself, and nothing of it reaches
- * the shared conversation or the actuator after its endTurn, which is when the actuator frees the
- * owner-turn slot for a voice summon. Against the real chat_text backend and a scripted fake of xAI
- * chat completions (MockWebServer).
+ * A typed turn's deadline (decision 21) and the owner's stop (P5, #300, onTurnClosed): the session ends
+ * the turn, and nothing of it reaches the shared conversation or the actuator after its endTurn, which
+ * is when the actuator frees the owner-turn slot for a voice summon. Against the real chat_text
+ * backend and a scripted fake of xAI chat completions (MockWebServer).
+ *
+ * <p>No test races the clock. A step the test needs in flight is held on a latch (a tool call, the
+ * budget check), a deadline is made to pass at a chosen step ({@link TypedTurns#expireNow}, the
+ * timer's own code), and "nothing more happens" is waited for as {@link TypedTurns#idle}.
  */
 public class TypedTurnsTest {
     private static final String HOST = "vendor.test";
@@ -41,7 +47,10 @@ public class TypedTurnsTest {
     /** Everything the turn did to the conversation and the actuator, in order. */
     private final List<String> log = new ArrayList<>();
     private final BlockingQueue<String> endTurns = new LinkedBlockingQueue<>();
-    private volatile long toolMs;
+    /** If set, a tool call stays in flight until it is counted down. */
+    private volatile CountDownLatch toolRelease;
+    /** If set, the budget check (beforeTurn) is held until it is counted down. */
+    private volatile CountDownLatch beforeTurnRelease;
     private XaiTextBackend backend;
     private TranscriptLog transcripts;
 
@@ -57,6 +66,7 @@ public class TypedTurnsTest {
         @Override
         public String beforeTurn(String turnId) {
             log("beforeTurn " + turnId);
+            hold(beforeTurnRelease);
             return null;
         }
 
@@ -90,11 +100,7 @@ public class TypedTurnsTest {
         @Override
         public String callTool(String turnId, String name, String argsJson) {
             log("callTool " + turnId + " " + name);
-            try {
-                Thread.sleep(toolMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            hold(toolRelease);
             log("callTool done " + turnId);
             return "{\"status\":\"VERIFIED\",\"spoken\":\"9:00 AM\"}";
         }
@@ -118,6 +124,17 @@ public class TypedTurnsTest {
         public void ended(String turnId, String callId) {
         }
     };
+
+    private static void hold(CountDownLatch release) {
+        if (release == null) {
+            return;
+        }
+        try {
+            assertTrue("never released", release.await(10, TimeUnit.SECONDS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
     @Before
     public void setUp() throws Exception {
@@ -200,24 +217,48 @@ public class TypedTurnsTest {
     @Test
     public void aTurnAnsweredInTimeEndsOnceAndItsDeadlineDoesNothing() throws Exception {
         server.enqueue(content("It's 9:00 AM."));
-        TypedTurns turns = turns(300);
+        TypedTurns turns = turns(30_000);
         turns.open("a", "what time is it", 0);
         assertEquals("a typed reply", endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(600); // past the deadline
+        awaitIdle(turns); // the worker has finished, and its deadline timer is no longer queued
+        assertFalse("an answered turn has no deadline left", turns.expireNow("a"));
         assertNull("no second end", endTurns.poll());
         assertEquals(List.of("beforeTurn a", "owner a", "vos a It's 9:00 AM.", "typedReply a It's 9:00 AM.",
                 "afterTurn a", "endTurn a typed reply"), log());
     }
 
     @Test
-    public void theSessionEndsATurnAtItsDeadlineAndItsModelCallIsCancelled() throws Exception {
-        server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)); // a model that never answers
-        TypedTurns turns = turns(300);
+    public void theDeadlineTimerEndsATurnAtItsDeadlineWhateverItIsDoing() throws Exception {
+        server.enqueue(content("never asked for"));
+        beforeTurnRelease = new CountDownLatch(1); // the worker is held in the budget check
+        TypedTurns turns = turns(200);
         long t0 = System.nanoTime();
         turns.open("a", "hello", 0);
+        assertEquals("the timer ended it while the worker was held", "a " + TypedTurns.DEADLINE,
+                endTurns.poll(5, TimeUnit.SECONDS));
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertTrue("not before the deadline: " + ms + " ms", ms >= 200);
+        beforeTurnRelease.countDown();
+        awaitIdle(turns);
+        // The worker may not have reached the budget check before the timer; either way nothing follows.
+        List<String> after = new ArrayList<>(log());
+        after.remove("beforeTurn a");
+        assertEquals(List.of("afterTurn a", "endTurn a " + TypedTurns.DEADLINE), after);
+        assertEquals("no model call", 0, server.getRequestCount());
+        assertEquals("no line in the transcripts", List.of(), transcriptRoles("a"));
+    }
+
+    @Test
+    public void theSessionEndsATurnAtItsDeadlineAndItsModelCallIsCancelled() throws Exception {
+        server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)); // a model that never answers
+        TypedTurns turns = turns(30_000);
+        turns.open("a", "hello", 0);
+        server.takeRequest(5, TimeUnit.SECONDS); // the model call is in flight
+        long t0 = System.nanoTime();
+        assertTrue(turns.expireNow("a"));
         assertEquals("a " + TypedTurns.DEADLINE, endTurns.poll(5, TimeUnit.SECONDS));
         long ms = (System.nanoTime() - t0) / 1_000_000;
-        assertTrue("ended at the deadline, not by the call's own timeout: " + ms + " ms", ms >= 300 && ms < 3_000);
+        assertTrue("ended at the deadline, not by the call's own timeout: " + ms + " ms", ms < 2_000);
         // The worker is free at once: the next typed turn does not wait behind the stale call (30 s).
         server.enqueue(content("Hi."));
         turns.open("b", "hi", 0);
@@ -231,24 +272,143 @@ public class TypedTurnsTest {
     public void aToolCallInFlightAtTheDeadlineFinishesBeforeEndTurnAndNothingFollowsIt() throws Exception {
         server.enqueue(toolCalls(2));
         server.enqueue(content("never asked for"));
-        toolMs = 1_500; // the first tool is still running at the deadline
-        TypedTurns turns = turns(200);
+        toolRelease = new CountDownLatch(1); // the first tool stays in flight
+        TypedTurns turns = turns(30_000);
         turns.open("a", "what time is it", 0);
+        awaitLog("callTool a time_get");
+        assertTrue(turns.expireNow("a")); // the deadline passes while the tool is in flight
+        await("the deadline never started closing the gate", () -> turns.closing("a"));
+        assertNull("endTurn waits for the tool in flight", endTurns.poll());
+        toolRelease.countDown();
         assertEquals("a " + TypedTurns.DEADLINE, endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(500); // anything the worker would still do after the end
+        awaitIdle(turns); // anything the worker would still do after the end
         // endTurn waits for the tool in flight; its result, the second tool and the next round are dropped.
         assertEquals(List.of("beforeTurn a", "owner a", "callTool a time_get", "callTool done a", "afterTurn a",
                 "endTurn a " + TypedTurns.DEADLINE), log());
         assertEquals("no model call after the deadline", 1, server.getRequestCount());
     }
 
+    /** Polls every 10 ms, for up to 5 s, until {@code done}; fails with {@code what} if it never is. */
+    private static void await(String what, java.util.function.BooleanSupplier done) throws InterruptedException {
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!done.getAsBoolean()) {
+            assertTrue(what, System.nanoTime() < until);
+            Thread.sleep(10);
+        }
+    }
+
+    /** Waits until {@code event} is in the log. */
+    private void awaitLog(String event) throws InterruptedException {
+        await("never logged: " + event + " in " + log(), () -> log().contains(event));
+    }
+
+    /** Waits until nothing of any turn is left to run: every worker run is over, no deadline or close queued. */
+    private static void awaitIdle(TypedTurns turns) throws InterruptedException {
+        await("the typed turns never went idle", turns::idle);
+    }
+
+    @Test
+    public void theOwnersStopMidModelCallCancelsItEndsTheTurnAtOnceAndNothingOfItLands() throws Exception {
+        server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)); // a slow model
+        TypedTurns turns = turns(30_000); // the deadline is far off: only the stop ends it
+        turns.open("a", "tell me a long story", 0);
+        server.takeRequest(5, TimeUnit.SECONDS); // the model call is in flight
+        long t0 = System.nanoTime();
+        assertTrue(turns.close("a"));
+        assertEquals("a " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertTrue("ended at the stop, not by the call's own timeout: " + ms + " ms", ms < 2_000);
+        awaitIdle(turns); // anything the worker would still do after the end
+        // No reply and no apology: the owner stopped it. The owner's line stays, as at the deadline.
+        assertEquals(List.of("beforeTurn a", "owner a", "afterTurn a", "endTurn a " + TypedTurns.CLOSED), log());
+        assertEquals("the stopped turn wrote no reply", List.of("owner"), transcriptRoles("a"));
+        assertNull("one end only", endTurns.poll());
+        // The worker is free at once: the next typed turn does not wait behind the cancelled call.
+        server.enqueue(content("Hi."));
+        turns.open("b", "hi", 0);
+        assertEquals("b typed reply", endTurns.poll(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    public void aToolCallInFlightAtTheStopFinishesBeforeEndTurnAndNoOtherToolOrModelCallFollows() throws Exception {
+        server.enqueue(toolCalls(2));
+        server.enqueue(content("never asked for"));
+        toolRelease = new CountDownLatch(1); // the first tool stays in flight
+        TypedTurns turns = turns(30_000);
+        turns.open("a", "what time is it", 0);
+        awaitLog("callTool a time_get");
+        assertTrue(turns.close("a"));
+        await("the stop never started closing the gate", () -> turns.closing("a"));
+        assertNull("endTurn waits for the tool in flight", endTurns.poll());
+        toolRelease.countDown();
+        assertEquals("a " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
+        awaitIdle(turns);
+        // endTurn waits for the tool in flight; its result, the second tool and the next round are dropped.
+        assertEquals(List.of("beforeTurn a", "owner a", "callTool a time_get", "callTool done a", "afterTurn a",
+                "endTurn a " + TypedTurns.CLOSED), log());
+        assertEquals("no model call after the stop", 1, server.getRequestCount());
+    }
+
+    @Test
+    public void aTurnStoppedDuringTheDebugHoldSendsNoModelCall() throws Exception {
+        server.enqueue(content("never asked for"));
+        TypedTurns turns = turns(30_000);
+        turns.open("a", "what day is it", 2_000); // eval/m1/chat.sh stops it during this hold
+        awaitLog("owner a");
+        assertTrue(turns.close("a"));
+        assertEquals("a " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
+        awaitIdle(turns); // the worker is past the hold
+        assertEquals(List.of("beforeTurn a", "owner a", "afterTurn a", "endTurn a " + TypedTurns.CLOSED), log());
+        assertEquals(0, server.getRequestCount());
+        assertFalse("ended turns are forgotten", turns.close("a"));
+    }
+
+    @Test
+    public void aStopForATurnQueuedBehindAnotherEndsItBeforeItRuns() throws Exception {
+        server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE));
+        TypedTurns turns = turns(30_000);
+        turns.open("a", "first", 0);
+        server.takeRequest(5, TimeUnit.SECONDS);
+        turns.open("b", "second", 0); // waits behind a on the worker
+        assertTrue(turns.close("b"));
+        assertEquals("b " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
+        assertTrue(turns.close("a"));
+        assertEquals("a " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
+        awaitIdle(turns); // the worker has taken b too, and dropped it
+        assertFalse("b never ran", log().contains("beforeTurn b"));
+        assertEquals("only a's model call", 1, server.getRequestCount());
+    }
+
+    @Test
+    public void aStopAfterTheReplyOrTwiceSendsNoSecondEndTurn() throws Exception {
+        server.enqueue(content("It's 9:00 AM."));
+        TypedTurns turns = turns(30_000);
+        turns.open("a", "what time is it", 0);
+        assertEquals("a typed reply", endTurns.poll(5, TimeUnit.SECONDS));
+        awaitIdle(turns); // the worker forgets the turn after its end
+        assertFalse("a voice turn's id, or one already over, is not a typed turn here", turns.close("a"));
+        assertFalse(turns.close("voice-1"));
+        assertFalse(turns.close(null));
+
+        server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE));
+        turns.open("b", "hello", 0);
+        server.takeRequest(5, TimeUnit.SECONDS);
+        turns.close("b");
+        turns.close("b");
+        assertEquals("b " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
+        awaitIdle(turns); // both closes have run
+        assertNull("one end only", endTurns.poll());
+    }
+
     @Test
     public void aTurnHeldPastItsDeadlineSendsNoModelCall() throws Exception {
         server.enqueue(content("never asked for"));
-        TypedTurns turns = turns(200);
-        turns.open("a", "hello", 1_000); // the debug hold (eval/m1/chat.sh), as a slow model
+        TypedTurns turns = turns(30_000);
+        turns.open("a", "hello", 2_000); // the debug hold (eval/m1/chat.sh), as a slow model
+        awaitLog("owner a");
+        assertTrue(turns.expireNow("a")); // the deadline passes during the hold
         assertEquals("a " + TypedTurns.DEADLINE, endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(1_200); // past the hold
+        awaitIdle(turns); // the worker is past the hold
         assertEquals(List.of("beforeTurn a", "owner a", "afterTurn a", "endTurn a " + TypedTurns.DEADLINE), log());
         assertEquals(0, server.getRequestCount());
     }

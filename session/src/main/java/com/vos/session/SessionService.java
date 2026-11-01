@@ -44,7 +44,7 @@ public final class SessionService extends Service {
         @Override
         public void onTurnClosed(String turnId, String reason) {
             guard.require(Binder.getCallingUid(), Grant.ACTUATOR_CORE);
-            ((SessionApp) getApplication()).turns().closed(turnId);
+            ((SessionApp) getApplication()).turnClosed(turnId); // voice or typed (the owner's stop)
         }
 
         @Override

@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
@@ -21,12 +22,14 @@ import android.widget.TextView;
  * turns. VOS's text is model output, shown as plain data under its own label, never styled like the
  * actuator's trusted cards. FLAG_SECURE: VOS's own windows are never captured or uploaded (§5.8).
  * It is exported as a launcher entry and reads no intent extras: launching it sends nothing.
+ * While a typed turn is open, a Stop button beside Send stops it (P5, {@link TypedChat#stop}).
  */
 public final class ChatActivity extends Activity implements TypedChat.Listener {
     private LinearLayout thread;
     private ScrollView scroll;
     private EditText input;
     private TextView status;
+    private Button stopButton;
     private TypedChat chat;
 
     @Override
@@ -62,7 +65,15 @@ public final class ChatActivity extends Activity implements TypedChat.Listener {
         Button sendButton = new Button(this);
         sendButton.setText(R.string.chat_send);
         sendButton.setOnClickListener(v -> send());
+        // Shown only while a typed turn is open. Its touches are not filtered when obscured, unlike
+        // Send's: a stop is harmless to trick, and an overlay must not be able to block it (P5).
+        stopButton = new Button(this);
+        stopButton.setText(R.string.chat_stop);
+        stopButton.setContentDescription(getString(R.string.chat_stop_description));
+        stopButton.setOnClickListener(v -> chat.stop("window"));
+        stopButton.setVisibility(View.GONE);
         row.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(stopButton);
         row.addView(sendButton);
         root.addView(row);
         // Another app's overlay must not be able to trick the owner into sending (tapjacking).
@@ -97,6 +108,7 @@ public final class ChatActivity extends Activity implements TypedChat.Listener {
 
     @Override
     public void changed() {
+        stopButton.setVisibility(chat.stoppable() ? View.VISIBLE : View.GONE);
         thread.removeAllViews();
         int pad = Math.round(8 * getResources().getDisplayMetrics().density);
         for (ChatThread.Line l : chat.lines()) {

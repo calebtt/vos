@@ -42,6 +42,18 @@ class ChatChecksTest(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(chat_checks.self_test(), 1)
 
+    def test_a_stopped_turn_with_no_transcript_line_at_all_passes(self):
+        # Stopped before the session wrote the owner's line: no VOS line either, which is what counts.
+        with tempfile.TemporaryDirectory() as d:
+            chat_checks.write_passing(d)
+            p = Path(d) / "transcripts.jsonl"
+            sid = chat_checks.IDS[chat_checks.STOP_TURN]
+            p.write_text("".join(line + "\n" for line in p.read_text().splitlines() if sid not in line))
+            _, results = chat_checks.evaluate(d)
+        got = {c: ok for c, ok, _ in results}
+        self.assertTrue(got["stop_no_vos"])
+        self.assertTrue(all(got.values()), [t for _, ok, t in results if not ok])
+
     def test_a_run_with_no_files_passes_no_check(self):
         with tempfile.TemporaryDirectory() as d:
             _, results = chat_checks.evaluate(d)

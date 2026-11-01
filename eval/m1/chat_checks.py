@@ -10,13 +10,17 @@ Usage: python3 -I eval/m1/chat_checks.py RUN_DIR    the summary and one PASS or 
 
 RUN_DIR holds what chat.sh pulled (a missing file reads as empty):
   facts.txt            key=value: typed_from and summon_from (device time, MM-DD HH:MM:SS), in_session
-                       (1 if the held typed turn was open in the session before the summon), actuator_uid,
-                       forge_audit_from and forge_audit_to (the forged-reply leg's lines in
+                       (1 if the held typed turn was open in the session before the summon),
+                       stop_in_session (the same, before the stop leg's tile press), stop_pressed (1 if
+                       the shell pressed the tile: it does not when the turn had already ended),
+                       actuator_uid, forge_audit_from and forge_audit_to (the forged-reply leg's lines in
                        actuator-audit.jsonl, 0-based, end exclusive)
   voice.txt            logcat of the voice leg (VOS_VOICE, VOS_TURN, VOS_CONTEXT)
   transcripts.jsonl    the session's transcript lines from this run
   actuator-audit.jsonl the actuator's audit lines from this run
   summon.txt           VOS_TURN logcat of the summon leg; summon-typed.txt: its VOS_TYPED logcat
+  stop.txt             logcat of the stop leg (VOS_TYPED, VOS_AUDIT, VOS_TURN), from its typed send to past
+                       the session's hold
   recording.txt        the "### Recording Activity" section of `dumpsys audio`
 """
 import json
@@ -26,7 +30,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-TYPED_TURNS = 6
+TYPED_TURNS = 8
 # VoiceTurn's VOS_TURN lines when a voice turn starts (the session opened it; the live mic started).
 VOICE_START = re.compile(r"capture turnId=|turn opened in session turnId=")
 STAMP = re.compile(r"\d\d-\d\d \d\d:\d\d:\d\d")
@@ -35,6 +39,13 @@ STAMP = re.compile(r"\d\d-\d\d \d\d:\d\d:\d\d")
 REC = re.compile(r"(\d\d-\d\d \d\d:\d\d:\d\d)[:.]\d{3} rec (?:start|update) (.*)")
 TIME = re.compile(r"\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)|\b\d{1,2}:\d{2}\b")
 ACTUATOR = "com.vos.actuator"
+# The stop leg's press: DebugSummonActivity op tile, a "Stop VOS" press from source debug_tile.
+STOP_REASON = "owner stop: debug_tile"
+# The end the stop must have: the session's endTurn for the actuator's close, not the stop backstop.
+STOP_ENDED_BY = "session: closed by the actuator"
+STOP_MAX_MS = 500
+# A logcat line (threadtime): its tag and message.
+LOGCAT = re.compile(r"\s[VDIWEF] ([^\s:]+)\s*: (.*)")
 
 
 def read(d, name):
@@ -85,6 +96,7 @@ def evaluate(d):
     audit, _ = parse(audit_lines)
     summon = read(d, "summon.txt")
     summon_typed = read(d, "summon-typed.txt")
+    stop_log = read(d, "stop.txt")
     rec_log = read(d, "recording.txt")
 
     def events(lines, name):
@@ -102,8 +114,8 @@ def evaluate(d):
 
     opened = events(audit, "typed.turn_opened")
     opened_ids = {o.get("turnId") for o in opened}
-    answered_ids = {a.get("turnId") for a in events(audit, "typed.turn_ended")
-                    if a.get("reason") == "session: typed reply"}
+    ended = events(audit, "typed.turn_ended")
+    answered_ids = {a.get("turnId") for a in ended if a.get("reason") == "session: typed reply"}
     tools = [a for a in events(audit, "tool.call") if a.get("typed")]
     sources = {o.get("turnId"): o.get("source") for o in opened}
     _, time_reply = owner_turn(["what time is it?"])
@@ -141,6 +153,27 @@ def evaluate(d):
                 n += 1
         return n
 
+    # The stop leg: the turn the tile press stopped, and everything of it after the stop.
+    stops = events(audit, "typed.turn_stop")
+    stopped = [a for a in ended if a.get("reason") == STOP_REASON]
+    sid = stopped[0].get("turnId") if stopped else None
+    stop_line = next((a for a in stops if a.get("turnId") == sid), None) if sid else None
+    late = [a for a in audit if sid and a.get("turnId") == sid
+            and a.get("event") in ("typed.reply_refused", "tool.call", "typed.model_call_refused")]
+    stop_roles = [t.get("role") for t in tr if sid and t.get("turn_id") == sid]
+    _, after_reply = owner_turn(["thanks, that is all"])
+
+    def t_up(pattern):
+        m = re.search(pattern, stop_log) if sid else None
+        return int(m.group(1)) if m else None
+
+    t_stop = t_up(r"typed turn stop turnId=" + re.escape(str(sid)) + r" .*?t_up=(\d+)")
+    t_end = t_up(r"typed turn ended turnId=" + re.escape(str(sid)) + r" t_up=(\d+) reason=")
+    stop_ms = t_end - t_stop if t_stop is not None and t_end is not None else None
+    stop_turn = "\n".join(m.group(2) for m in map(LOGCAT.search, stop_log.splitlines())
+                          if m and m.group(1) == "VOS_TURN")
+    stop_logged = sid is not None and t_stop is not None  # the press reached TypedChat.stop: in the same log
+
     rec_typed = rec_since(facts.get("typed_from"))
     rec_summon = rec_since(facts.get("summon_from"))
     rec_note = "recording log " + ("present" if rec_seen else "missing")
@@ -154,6 +187,10 @@ def evaluate(d):
         f"now_reply={now_reply!r}",
         f"forge_leg=lines {f_from}..{f_to} opened={len(leg_opened)} voice_transitions={len(leg_voice)} "
         f"foreign={len(foreign)} unreadable={leg_bad}",
+        f"stop: pressed={facts.get('stop_pressed')} turn={sid} stops={len(stops)} stopped={len(stopped)} "
+        f"ms={stop_ms} ended_by={stopped[0].get('ended_by') if stopped else None!r} late={len(late)} "
+        f"roles={','.join(map(str, stop_roles)) or 'none'}",
+        f"after_stop_reply={after_reply!r}",
     ]
     results = []
 
@@ -161,8 +198,8 @@ def evaluate(d):
         results.append((cid, bool(ok), text))
 
     check("voice_ended", " over after_ms=" in voice, "the voice turn ended")
-    check("typed_answered", len(opened) == TYPED_TURNS and answered_ids >= opened_ids,
-          f"all six typed turns were answered ({len(answered_ids & opened_ids)} of {len(opened)})")
+    check("typed_answered", len(opened) == TYPED_TURNS and answered_ids >= opened_ids - {sid},
+          f"every typed turn but the stopped one was answered ({len(answered_ids & opened_ids)} of {len(opened)})")
     check("time_reply", TIME.search(time_reply.lower()), "the time reply gives a time")
     check("media_control", pause_id and any(a.get("tool") == "media_control" and a.get("turnId") == pause_id
                                             for a in tools),
@@ -190,6 +227,29 @@ def evaluate(d):
           f"{'yes' if voice_control else 'no'})")
     check("rec_summon", rec_seen and rec_summon == 0,
           f"no AudioRecord started for the refused summon ({rec_summon}; {rec_note})")
+    check("stop_during", facts.get("stop_pressed") == "1" and facts.get("stop_in_session") == "1"
+          and stop_line is not None and stop_line.get("in_session") is True,
+          "the stop came while the typed turn was open in the session (pressed: "
+          f"{'yes' if facts.get('stop_pressed') == '1' else 'no'})")
+    check("stop_no_voice", facts.get("stop_pressed") == "1" and stop_logged and voice_control
+          and not VOICE_START.search(stop_turn),
+          "the tile press started no voice turn (its typed stop is in the same log: "
+          f"{'yes' if stop_logged else 'no'}; the same lines show the voice leg's turn: "
+          f"{'yes' if voice_control else 'no'})")
+    check("stop_owner", len(stops) == 1 and len(stopped) == 1 and stop_line is not None,
+          f"\"Stop VOS\" ended the typed turn as the owner's stop ({len(stopped)} of {len(stops)})")
+    check("stop_fast", stop_ms is not None and 0 <= stop_ms <= STOP_MAX_MS,
+          f"the stopped turn ended within {STOP_MAX_MS} ms ({stop_ms} ms)")
+    check("stop_session_end", stopped and stopped[0].get("ended_by") == STOP_ENDED_BY,
+          "the session closed its side first: the end was its endTurn, not the stop backstop "
+          f"({stopped[0].get('ended_by') if stopped else 'no stopped turn'})")
+    check("stop_no_late", sid is not None and not late,
+          "nothing of the stopped turn reached the actuator after the stop ("
+          + (f"{len(late)} lines" if sid else "no stopped turn") + ")")
+    check("stop_no_vos", sid is not None and set(stop_roles) <= {"owner"},
+          "the stopped turn wrote no VOS line ("
+          + ((",".join(map(str, stop_roles)) or "none") if sid else "no stopped turn") + ")")
+    check("after_stop", after_reply.strip(), "the typed turn after the stop was answered")
     return summary, results
 
 
@@ -214,8 +274,11 @@ TURNS = [  # (source, owner text, VOS reply, tool)
     ("debug_notification", "What time is it now?", "It's 9:06 AM.", "time_get"),
     ("debug_window", "Thanks.", "You're welcome.", None),
     ("debug_window", "What day is it?", "Saturday.", "time_get"),
+    ("debug_window", "Count slowly from one to ten.", None, None),
+    ("debug_window", "Thanks, that is all.", "Glad to help.", None),
 ]
 FORGE_TURN = 4  # "Thanks.": the session forges a reply during it
+STOP_TURN = 6  # "Count slowly ...": the shell stops it with a tile press during the session's hold
 UID = "10234"
 
 
@@ -235,14 +298,21 @@ def write_passing(d):
             audit.append({"event": "typed.reply_refused", "turnId": FORGED, "chars": 26})
         if tool:
             audit.append({"event": "tool.call", "turnId": tid, "typed": True, "tool": tool, "status": "VERIFIED"})
-        audit.append({"event": "typed.turn_ended", "turnId": tid, "reason": "session: typed reply"})
+        if i == STOP_TURN:
+            audit.append({"event": "typed.turn_stop", "turnId": tid, "source": "debug_tile", "in_session": True})
+            audit.append({"event": "typed.turn_ended", "turnId": tid, "reason": STOP_REASON, "ended_by": STOP_ENDED_BY})
+        else:
+            audit.append({"event": "typed.turn_ended", "turnId": tid, "reason": "session: typed reply"})
         if i == FORGE_TURN:
             forge_to = len(audit)
-        tr += [{"turn_id": tid, "role": "owner", "text": text}, {"turn_id": tid, "role": "vos", "text": reply}]
+        tr.append({"turn_id": tid, "role": "owner", "text": text})
+        if reply is not None:
+            tr.append({"turn_id": tid, "role": "vos", "text": reply})
     (d / "transcripts.jsonl").write_text("".join(json.dumps(t) + "\n" for t in tr))
     (d / "actuator-audit.jsonl").write_text("".join(json.dumps(a) + "\n" for a in audit))
     (d / "facts.txt").write_text(
-        f"typed_from=10-31 12:00:10\nsummon_from=10-31 12:01:00\nin_session=1\nactuator_uid={UID}\n"
+        f"typed_from=10-31 12:00:10\nsummon_from=10-31 12:01:00\nin_session=1\nstop_in_session=1\nstop_pressed=1\n"
+        f"actuator_uid={UID}\n"
         f"forge_audit_from={forge_from}\nforge_audit_to={forge_to}\n")
     (d / "voice.txt").write_text(
         f"10-31 12:00:01.000 100 101 I VOS_TURN: turn opened in session turnId={VOICE_ID} after_ms=120\n"
@@ -250,6 +320,12 @@ def write_passing(d):
     (d / "summon.txt").write_text("10-31 12:01:00.500 100 101 I VOS_TURN: summon refused: a typed turn is open\n")
     (d / "summon-typed.txt").write_text(f"10-31 12:00:59.000 100 102 I VOS_TYPED: typed turn opened in session "
                                         f"turnId={IDS[5]}\n")
+    sid = IDS[STOP_TURN]
+    (d / "stop.txt").write_text(
+        f"10-31 12:01:20.000 100 102 I VOS_TYPED: typed turn opened in session turnId={sid}\n"
+        f"10-31 12:01:21.000 100 100 I VOS_TYPED: typed turn stop turnId={sid} source=debug_tile t_up=500000\n"
+        f"10-31 12:01:21.010 300 301 I VOS_TYPED: typed turn {sid} closed by the actuator ms=4\n"
+        f"10-31 12:01:21.040 100 100 I VOS_TYPED: typed turn ended turnId={sid} t_up=500040 reason={STOP_REASON}\n")
     # Controls that must not count: the actuator recording before the typed legs, another app during them.
     (d / "recording.txt").write_text(
         "### Recording Activity\n"
@@ -332,11 +408,14 @@ def rec_line(stamp, pack=ACTUATOR, uid=UID):
 
 
 SUMMON_TURN = f"10-31 12:01:00.700 100 103 I VOS_TURN: turn opened in session turnId={VOICE_ID} after_ms=90\n"
+STOP_ID = IDS[STOP_TURN]
 BREAKS = [  # (check id, what is broken, how)
     ("voice_ended", "the voice turn never ended", edit("voice.txt", lambda t: t.replace(" over after_ms=", " open"))),
     ("typed_answered", "a typed turn ended at its deadline",
      set_field("typed.turn_ended", IDS[2], "reason", "session: typed turn deadline")),
-    ("typed_answered", "only five typed turns opened", drop_event("typed.turn_opened", IDS[5])),
+    ("typed_answered", "only seven typed turns opened", drop_event("typed.turn_opened", IDS[5])),
+    ("typed_answered", "the turn after the stop ended at its deadline",
+     set_field("typed.turn_ended", IDS[7], "reason", "session: typed turn deadline")),
     ("time_reply", "the time reply has no time", reply("What time is it?", "I can't tell.")),
     ("media_control", "media_control never ran", drop_event("tool.call", IDS[1])),
     ("media_control", "media_control ran for another turn", set_field("tool.call", IDS[1], "turnId", IDS[0])),
@@ -376,6 +455,45 @@ BREAKS = [  # (check id, what is broken, how)
     ("rec_summon", "the recording log is missing", remove("recording.txt")),
     ("rec_summon", "the actuator recorded at the summon", rec_line("10-31 12:01:01")),
     ("rec_summon", "no start time for the summon", fact("summon_from", "12:01")),
+    ("stop_during", "the shell did not press the tile (the turn had already ended)", fact("stop_pressed", "0")),
+    ("stop_during", "the typed turn was not yet open in the session at the press", fact("stop_in_session", "0")),
+    ("stop_during", "the actuator stopped the turn before the session had it",
+     set_field("typed.turn_stop", STOP_ID, "in_session", False)),
+    ("stop_no_voice", "the tile press opened a voice turn",
+     edit("stop.txt", lambda t: t + SUMMON_TURN.replace("12:01:00.700", "12:01:21.300"))),
+    ("stop_no_voice", "the tile press started the live mic",
+     edit("stop.txt", lambda t: t + "10-31 12:01:21.200 100 104 I VOS_TURN: capture turnId=x source=MIC\n")),
+    ("stop_no_voice", "the shell did not press the tile", fact("stop_pressed", "0")),
+    ("stop_no_voice", "the stop leg's log is missing (nothing shows the press)", remove("stop.txt")),
+    ("stop_no_voice", "the voice-start lines no longer match a voice turn (the voice leg shows none)",
+     edit("voice.txt", lambda t: VOICE_START.sub("turn bound", t))),
+    ("stop_owner", "the press did not stop the turn: it was answered",
+     set_field("typed.turn_ended", STOP_ID, "reason", "session: typed reply")),
+    ("stop_owner", "the stop came from another source than the tile",
+     set_field("typed.turn_ended", STOP_ID, "reason", "owner stop: window")),
+    ("stop_owner", "no typed.turn_stop line for the stopped turn", drop_event("typed.turn_stop")),
+    ("stop_owner", "two stops", audit_edit(lambda entries: entries.append(
+        [{"event": "typed.turn_stop", "turnId": IDS[7], "source": "debug_tile", "in_session": True}, False]))),
+    ("stop_fast", "the stopped turn ended 900 ms after the stop",
+     edit("stop.txt", lambda t: t.replace("t_up=500040", "t_up=500900"))),
+    ("stop_fast", "the stop's log lines are missing", edit("stop.txt", lambda t: "")),
+    ("stop_session_end", "the stop backstop ended it, not the session's endTurn",
+     set_field("typed.turn_ended", STOP_ID, "ended_by", "stop backstop: no endTurn from the session in 5000 ms")),
+    ("stop_session_end", "no stopped turn", set_field("typed.turn_ended", STOP_ID, "reason", "session: typed reply")),
+    ("stop_no_late", "the session's reply for the stopped turn reached the actuator (refused)",
+     audit_edit(lambda entries: entries.append(
+         [{"event": "typed.reply_refused", "turnId": STOP_ID, "chars": 40, "stopped": True}, False]))),
+    ("stop_no_late", "a tool call for the stopped turn reached the actuator",
+     audit_edit(lambda entries: entries.append(
+         [{"event": "tool.call", "turnId": STOP_ID, "typed": True, "stopped": True, "tool": "time_get",
+           "status": "FAILED"}, False]))),
+    ("stop_no_late", "the session reported a model call for the stopped turn",
+     audit_edit(lambda entries: entries.append([{"event": "typed.model_call_refused", "turnId": STOP_ID}, False]))),
+    ("stop_no_late", "no stopped turn to judge", set_field("typed.turn_ended", STOP_ID, "reason", "session: typed reply")),
+    ("stop_no_vos", "the stopped turn wrote a VOS line",
+     edit("transcripts.jsonl", lambda t: t + json.dumps({"turn_id": STOP_ID, "role": "vos", "text": "One, two"}) + "\n")),
+    ("stop_no_vos", "no stopped turn to judge", set_field("typed.turn_ended", STOP_ID, "reason", "session: typed reply")),
+    ("after_stop", "the turn after the stop got no reply", reply("Thanks, that is all.", "")),
 ]
 
 

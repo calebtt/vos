@@ -15,15 +15,25 @@
 #      speaker is a file, and it is stopped at once if it opened. The hold outlasts the few seconds
 #      Android leaves a cached app its network, so this turn is answered only if the typed turn's
 #      foreground service (TypedTurnService) keeps the session's network up.
+#   6. the owner stops a typed turn mid-way (P5, #300): the session holds "Count slowly from one to
+#      ten." 8 s before its model call, and the shell presses "Stop VOS" as the QS tile would
+#      (DebugSummonActivity op tile, the same TurnService.toggle) while the turn is open in the
+#      session; then it waits past the hold, and sends one more typed turn. The press is skipped if
+#      the turn has already ended (a press then would summon a live-mic voice turn), and a voice turn
+#      it opened anyway is stopped at once.
 # Checks (eval/m1/chat_checks.py, from the run's files only): the voice turn ended; every typed turn
-# is answered; the time reply has a time; "pause the music" ran media_control for that typed turn;
-# the follow-up names Dana from the shared conversation; the direct-reply turn came from the
-# notification path and is answered; no AudioRecord was started for the actuator during the typed
-# legs (the audio service's recording log, which must be there); the forged reply is refused and
-# audited, and its leg opens only the shell's own typed turn, no voice turn and nothing for another
-# turn; the summon during the typed turn is refused, starts no voice turn (the same log lines must
-# show the voice leg's turn) and no AudioRecord. Each check can fail: --self-test breaks a passing
-# run once for each way a check can fail, and that check must FAIL (#299).
+# but the stopped one is answered; the time reply has a time; "pause the music" ran media_control for
+# that typed turn; the follow-up names Dana from the shared conversation; the direct-reply turn came
+# from the notification path and is answered; no AudioRecord was started for the actuator during the
+# typed legs (the audio service's recording log, which must be there); the forged reply is refused
+# and audited, and its leg opens only the shell's own typed turn, no voice turn and nothing for
+# another turn; the summon during the typed turn is refused, starts no voice turn (the same log lines
+# must show the voice leg's turn) and no AudioRecord; the stop came while the turn was open in the
+# session and opened no voice turn; it ended the turn as the owner's stop, within 500 ms, on the
+# session's endTurn (not the actuator's 5 s stop backstop); nothing of the stopped turn reached the
+# actuator afterwards (no reply, refused or shown, and no tool call) and it wrote no VOS line; the
+# typed turn after it is answered. Each check can fail: --self-test breaks a passing run once for
+# each way a check can fail, and that check must FAIL (#299).
 # The debug build drives the typed turns through the same TypedChat.send the window and the
 # notification's receiver call (DebugSummonActivity op typed / op reply); the system's notification
 # UI itself is not driven. Agent modes (Quiet, Paused) arrive in M2 (row 24, M2-MODE-01 #70), so
@@ -183,12 +193,47 @@ if (( summon_started || ! summon_refused )); then
 fi
 echo "summon during the typed turn: $( (( summon_refused )) && echo refused || echo 'not refused')"
 typed_wait typed
+echo "== the owner stops a typed turn mid-way (\"Stop VOS\", as the QS tile)"
+adb shell "run-as com.vos.session sh -c 'mkdir -p files/debug && echo 8000 > files/debug/typed_hold_ms'"
+typed_send typed "Count slowly from one to ten."
+stop_in_session=0
+for _ in $(seq 1 40); do
+    adb logcat -d -s VOS_TYPED | grep -q "typed turn opened in session" && { stop_in_session=1; break; }
+    sleep 0.25
+done
+stop_pressed=0 stop_ended=0 stop_voice=0
+voice_start="capture turnId=|turn opened in session turnId="
+if adb logcat -d -s VOS_TYPED | grep -q "typed turn ended"; then
+    echo "the typed turn ended before the stop: no tile press (with no typed turn open it would summon)"
+else
+    adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op tile >/dev/null
+    stop_pressed=1
+    for _ in $(seq 1 40); do
+        adb logcat -d -s VOS_TYPED | grep -q "typed turn ended" && { stop_ended=1; break; }
+        adb logcat -d -s VOS_TURN | grep -qE "$voice_start" && break # the press summoned instead
+        sleep 0.25
+    done
+    sleep 1 # time for a summon let through to open its turn
+    # Only to stop a live mic let through; the checker judges the press from the saved logs.
+    adb logcat -d -s VOS_TURN | grep -qE "$voice_start" && stop_voice=1
+    if (( stop_voice )); then
+        adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op stop >/dev/null # no live mic left open
+        echo "the tile press opened a voice turn: stopped it"
+    fi
+fi
+sleep 9 # past the hold: anything the stopped turn would still do
+adb logcat -d -s VOS_TYPED VOS_AUDIT VOS_TURN | tr -d '\r' > "$out/stop.txt"
+echo "typed stop: $( (( ! stop_pressed )) && echo 'not pressed' || { (( stop_ended )) && echo ended || echo 'did not end'; }) $(grep -o 'typed turn ended.*reason=.*' "$out/stop.txt" | grep -o 'reason=.*' | head -1)"
+echo "== a typed turn after the stop"
+typed_turn typed "Thanks, that is all."
 # The audio service's recording log. If dumpsys has no such section, both AudioRecord checks fail.
 adb shell dumpsys audio | tr -d '\r' | sed -n '/### Recording Activity/,/^$/p' > "$out/recording.txt"
 cat > "$out/facts.txt" <<EOF
 typed_from=$typed_from
 summon_from=$summon_from
 in_session=$in_session
+stop_in_session=$stop_in_session
+stop_pressed=$stop_pressed
 actuator_uid=$actuator_uid
 forge_audit_from=$forge_audit_from
 forge_audit_to=$forge_audit_to

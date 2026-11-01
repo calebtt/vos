@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
@@ -24,6 +25,9 @@ import android.util.Log;
  * moments that may start a foreground service) and releases it when the turn ends. It always calls
  * {@code startForeground} before stopping, so a turn that ends before it starts cannot crash the app.
  * Main thread only.
+ *
+ * <p>Its notification has a Stop action (P5): the owner's stop for the typed turn
+ * ({@link TypedChat#stop}), through the actuator's own unexported {@link Stop} receiver.
  */
 public final class TypedTurnService extends Service {
     private static final String CHANNEL = "typed";
@@ -102,11 +106,27 @@ public final class TypedTurnService extends Service {
     private Notification notification() {
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, ChatActivity.class),
                 PendingIntent.FLAG_IMMUTABLE);
+        // Explicit, to the actuator's own unexported receiver; immutable: nothing is added to it.
+        PendingIntent stop = PendingIntent.getBroadcast(this, 0,
+                new Intent(this, Stop.class).setPackage(getPackageName()), PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_vos_generating)
                 .setContentTitle(getString(R.string.typed_answering))
                 .setContentIntent(open)
                 .setOngoing(true)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .addAction(new Notification.Action.Builder(null, getString(R.string.turn_stop), stop).build())
                 .build();
+    }
+
+    /** The notification's Stop: the owner stops the open typed turn (not exported; only our PendingIntent reaches it). */
+    public static final class Stop extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) { // main thread, as TypedChat.stop needs
+            boolean stopped = ((ActuatorApp) context.getApplicationContext()).typedChat().stop("notification");
+            if (!stopped) {
+                Log.i(TypedChat.TAG, "notification stop: no typed turn is open");
+            }
+        }
     }
 }

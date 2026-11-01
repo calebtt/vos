@@ -58,7 +58,10 @@ public final class ActuatorService extends Service {
         @Override
         public void modelCallStarted(String turnId, String callId) {
             guard.require(Binder.getCallingUid(), Grant.SESSION_CORE);
-            ((ActuatorApp) getApplication()).indicator().callStarted(turnId, callId); // ids are checked there, not clipped
+            ActuatorApp app = (ActuatorApp) getApplication();
+            if (!app.indicator().callStarted(turnId, callId)) { // ids are checked there, not clipped
+                app.typedChat().modelCallRefused(turnId); // audited if it is a stopped typed turn's
+            }
         }
 
         @Override
