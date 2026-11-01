@@ -266,6 +266,27 @@ final class TypedChat {
     }
 
     /**
+     * From ActuatorService: the indicator ignored a model call the session reported for {@code turnId}.
+     * Audited if it is a turn the owner stopped (stopping, or ended by the stop backstop): the session
+     * is still working on it. The indicator never shows it, so it cannot pass for a voice turn's.
+     */
+    void modelCallRefused(String turnId) {
+        synchronized (this) {
+            if (!turn.stopped(turnId)) {
+                return;
+            }
+            Map<String, Object> line = new LinkedHashMap<>();
+            line.put("event", "typed.model_call_refused");
+            line.put("turnId", turnId);
+            if (turn.unconfirmed(turnId)) {
+                line.put("after_stop_backstop", true);
+            }
+            app.audit().record(line);
+        }
+        Log.w(TAG, "model call refused: the owner stopped typed turn " + turnId);
+    }
+
+    /**
      * Runs a fast tool for the open typed turn (ActuatorService.callTool); null if {@code turnId} is not
      * a typed turn here. Once the owner has stopped the turn, a call is refused without running, also
      * after the stop backstop has ended it (so it never reaches a voice turn opened next). One that had
