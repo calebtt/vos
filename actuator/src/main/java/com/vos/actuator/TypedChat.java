@@ -39,15 +39,16 @@ import java.util.concurrent.Executors;
  * <p>The owner can stop the turn mid-way (P5, {@link #stop}): from the window's Stop, the typed
  * turn's notification, or "Stop VOS" (the QS tile, the assist gesture). The indicator clears at once
  * and nothing more of the turn is shown or run here; the session is told with onTurnClosed, closes its
- * side, and the slot is freed on its endTurn, as at the deadline ({@link TypedTurnState}).
+ * side, and the slot is freed on its endTurn, as at the deadline, or {@link #STOP_BACKSTOP_MS} after
+ * the stop if that endTurn has not come by then. After that backstop the stopped turn's late writes
+ * are still refused and audited ({@link TypedTurnState}).
  */
 final class TypedChat {
     static final String TAG = "VOS_TYPED";
-    /**
-     * Backstop for a session that never sends endTurn. It must outlast the session's deadline plus
-     * that close: a tool call in flight finishes first, and endTurn is then delivered.
-     */
-    static final long BACKSTOP_MS = Ipc.TYPED_TURN_DEADLINE_MS + 15_000;
+    /** Backstop for a session that never sends endTurn ({@link TypedTurnState#BACKSTOP_MS}). */
+    static final long BACKSTOP_MS = TypedTurnState.BACKSTOP_MS;
+    /** After the owner's stop, the slot is freed by this time even if the session has not confirmed. */
+    static final long STOP_BACKSTOP_MS = TypedTurnState.STOP_BACKSTOP_MS;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     /** Runs recentThread, a blocking call into the session, off the main thread (#298). */
     private static final Executor LOADS = Executors.newSingleThreadExecutor(r -> new Thread(r, "vos-chat-load"));
@@ -128,6 +129,7 @@ final class TypedChat {
             t = t.substring(0, 2000);
         }
         String turnId;
+        long backstopAt;
         synchronized (this) {
             if (turn.stopping()) {
                 return "VOS is still stopping the last message; send this in a moment.";
@@ -141,7 +143,8 @@ final class TypedChat {
                 return "A voice turn is open; send this when it ends.";
             }
             turnId = UUID.randomUUID().toString();
-            turn.open(turnId);
+            turn.open(turnId, android.os.SystemClock.uptimeMillis());
+            backstopAt = turn.backstopAt();
             lines.add(new ChatThread.Line("owner", t));
         }
         Map<String, Object> line = new LinkedHashMap<>();
@@ -155,9 +158,7 @@ final class TypedChat {
         TypedTurnService.hold(app);
         changed();
         refreshTile();
-        // Tokened by this turn's id: it can only end this turn, and end() drops it.
-        MAIN.postAtTime(() -> end(turnId, "typed turn timed out: no end from the session"), turnId,
-                android.os.SystemClock.uptimeMillis() + BACKSTOP_MS);
+        armBackstop(turnId, backstopAt);
         String typed = t;
         MAIN.post(() -> openInSession(turnId, typed));
         return null;
@@ -207,12 +208,16 @@ final class TypedChat {
         }
         synchronized (this) {
             if (!turn.acceptsReply(turnId)) {
-                boolean stopped = turn.isOpen(turnId); // a reply the session sent before it heard the owner's stop
+                // A reply the session sent before it heard the owner's stop, or after the stop backstop.
+                boolean stopped = turn.stopped(turnId);
                 Map<String, Object> line = new LinkedHashMap<>();
                 line.put("event", "typed.reply_refused");
                 line.put("turnId", turnId == null ? null : turnId.length() > 64 ? turnId.substring(0, 64) : turnId);
                 line.put("chars", t.length());
                 line.put("stopped", stopped);
+                if (turn.unconfirmed(turnId)) {
+                    line.put("after_stop_backstop", true);
+                }
                 app.audit().record(line);
                 Log.w(TAG, "typed reply refused: " + (stopped ? "the owner stopped the turn" : "no such open typed turn"));
                 return;
@@ -229,25 +234,50 @@ final class TypedChat {
         });
     }
 
-    /** From ActuatorService: the session ended a turn; true if it was the open typed turn. */
+    /**
+     * From ActuatorService: the session ended a turn. True if it was the open typed turn, or a stopped
+     * one the stop backstop already ended (its confirmation, late): either way not a voice turn's end.
+     */
     boolean sessionEnded(String turnId, String reason) {
-        if (!isOpen(turnId)) {
-            return false;
+        synchronized (this) {
+            if (!turn.isOpen(turnId) && !turn.unconfirmed(turnId)) {
+                return false;
+            }
         }
-        MAIN.post(() -> end(turnId, "session: " + reason));
+        MAIN.post(() -> sessionEnd(turnId, "session: " + reason)); // main thread, like the backstops
         return true;
+    }
+
+    private void sessionEnd(String turnId, String how) {
+        synchronized (this) {
+            if (!turn.isOpen(turnId)) {
+                if (turn.lateEnd(turnId)) {
+                    Map<String, Object> line = new LinkedHashMap<>();
+                    line.put("event", "typed.late_end");
+                    line.put("turnId", turnId);
+                    line.put("reason", how); // the session confirmed the stop after the stop backstop freed the slot
+                    app.audit().record(line);
+                    Log.i(TAG, "typed turn late end turnId=" + turnId + " t_up=" + android.os.SystemClock.uptimeMillis());
+                }
+                return;
+            }
+        }
+        end(turnId, how);
     }
 
     /**
      * Runs a fast tool for the open typed turn (ActuatorService.callTool); null if {@code turnId} is not
-     * it. Once the owner has stopped the turn, a call is refused without running. One that had already
-     * started when the stop came finishes (every M1 tool is short and reversible), and the session's
-     * close waits for it.
+     * a typed turn here. Once the owner has stopped the turn, a call is refused without running, also
+     * after the stop backstop has ended it (so it never reaches a voice turn opened next). One that had
+     * already started when the stop came finishes (every M1 tool is short and reversible), and the
+     * session's close waits for it.
      */
     String callTool(String turnId, String name, String argsJson) {
         TypedTurnState.Tool may;
+        boolean afterBackstop;
         synchronized (this) {
             may = turn.tool(turnId);
+            afterBackstop = turn.unconfirmed(turnId);
         }
         if (may == TypedTurnState.Tool.NOT_THIS_TURN) {
             return null;
@@ -274,6 +304,9 @@ final class TypedChat {
         if (may == TypedTurnState.Tool.STOPPED) {
             line.put("stopped", true);
         }
+        if (afterBackstop) {
+            line.put("after_stop_backstop", true);
+        }
         line.put("tool", name);
         line.put("args", argsJson == null || argsJson.length() > 200 ? "(omitted)" : argsJson);
         line.put("status", r.status.name());
@@ -288,16 +321,19 @@ final class TypedChat {
      * or a "Stop VOS" press: "qs_tile", "assist", ...). False if no typed turn is open, so the press is
      * not a typed stop. The indicator clears now (Shell Contract row 13: both states clear on stop),
      * and the reply and further tool calls are refused. The session is told to close its side and the
-     * turn ends on its endTurn; a turn the session was never sent ends now. Main thread.
+     * turn ends on its endTurn, or {@link #STOP_BACKSTOP_MS} after the stop if that comes first; a turn
+     * the session was never sent ends now. Main thread.
      */
     boolean stop(String source) {
         String reason = "owner stop: " + source;
         String turnId;
         IVosSession s;
         TypedTurnState.Stop how;
+        long backstopAt;
         synchronized (this) {
             turnId = turn.turnId();
-            how = turn.stop(reason);
+            how = turn.stop(reason, android.os.SystemClock.uptimeMillis());
+            backstopAt = turn.backstopAt();
             s = session;
             if (how == TypedTurnState.Stop.LOCAL || how == TypedTurnState.Stop.SESSION) {
                 lines.add(new ChatThread.Line("note", "Stopped."));
@@ -322,6 +358,7 @@ final class TypedChat {
             end(turnId, "stopped before the session had it"); // nothing of it reached the session
             return true;
         }
+        armBackstop(turnId, backstopAt); // now the stop backstop: the slot is freed by then
         try {
             // Oneway, after onTypedTurn on the same binder, so the session sees it after the turn.
             s.onTurnClosed(turnId, reason);
@@ -331,24 +368,53 @@ final class TypedChat {
         return true;
     }
 
+    /** (Re)arms {@code turnId}'s backstop for {@code atUptime}; tokened by the id, so it can only end that turn. */
+    private void armBackstop(String turnId, long atUptime) {
+        MAIN.removeCallbacksAndMessages(turnId);
+        MAIN.postAtTime(() -> backstop(turnId), turnId, atUptime);
+    }
+
+    /** {@code turnId}'s backstop came due: the general one, or the stop backstop. Main thread. */
+    private void backstop(String turnId) {
+        PeerLink l;
+        TypedTurnState.Ended e;
+        synchronized (this) {
+            e = turn.backstop(turnId, android.os.SystemClock.uptimeMillis());
+            l = e == null ? null : freeSlot(e);
+        }
+        if (e != null) {
+            ended(turnId, e, l);
+        }
+    }
+
     /** Ends the open typed turn if it is {@code turnId}. Main thread. */
     private void end(String turnId, String how) {
         PeerLink l;
         TypedTurnState.Ended e;
         synchronized (this) {
             e = turn.end(turnId, how);
-            if (e == null) {
-                return;
-            }
-            l = link;
-            link = null;
-            session = null;
-            slot.release(OwnerTurnSlot.Holder.TYPED);
-            if (!e.byOwner && !"session: typed reply".equals(how)) {
-                lines.add(new ChatThread.Line("note", "VOS couldn't answer (" + how + ")."));
-            }
+            l = e == null ? null : freeSlot(e);
         }
-        MAIN.removeCallbacksAndMessages(turnId); // this turn's backstop
+        if (e != null) {
+            ended(turnId, e, l);
+        }
+    }
+
+    /** The open typed turn has just ended {@code e}, under the lock: frees the slot, returns its link. */
+    private PeerLink freeSlot(TypedTurnState.Ended e) {
+        PeerLink l = link;
+        link = null;
+        session = null;
+        slot.release(OwnerTurnSlot.Holder.TYPED);
+        if (!e.byOwner && !"session: typed reply".equals(e.how)) {
+            lines.add(new ChatThread.Line("note", "VOS couldn't answer (" + e.how + ")."));
+        }
+        return l;
+    }
+
+    /** After {@link #freeSlot}, outside the lock: the rest of {@code turnId}'s end. Main thread. */
+    private void ended(String turnId, TypedTurnState.Ended e, PeerLink l) {
+        MAIN.removeCallbacksAndMessages(turnId); // this turn's backstop, if it did not end it
         app.indicator().turnEnded(turnId);
         TypedTurnService.release();
         if (l != null) {
@@ -359,7 +425,7 @@ final class TypedChat {
         line.put("turnId", turnId);
         line.put("reason", e.reason);
         if (e.byOwner) {
-            line.put("ended_by", how); // after the stop: the session's endTurn, or the backstop
+            line.put("ended_by", e.how); // after the stop: the session's endTurn, or the stop backstop
         }
         app.audit().record(line);
         Log.i(TAG, "typed turn ended turnId=" + turnId + " t_up=" + android.os.SystemClock.uptimeMillis()
