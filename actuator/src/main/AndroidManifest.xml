@@ -137,6 +137,11 @@
             android:exported="false"
             android:foregroundServiceType="shortService" />
 
+        <!-- The typed turn notification's Stop (P5); only that notification's PendingIntent reaches it. -->
+        <receiver
+            android:name=".TypedTurnService$Stop"
+            android:exported="false" />
+
         <receiver
             android:name=".BootCheck"
             android:exported="false">

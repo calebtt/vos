@@ -46,6 +46,16 @@ public class OwnerTurnSlotTest {
     }
 
     @Test
+    public void stopVosStopsAnOpenTypedTurnInsteadOfSummoning() {
+        // P5 (#300): the tile or the assist gesture during a typed turn stops it; it is not a refused summon.
+        assertEquals(OwnerTurnSlot.Press.STOP_TYPED, OwnerTurnSlot.press(false, true));
+        assertEquals(OwnerTurnSlot.Press.STOP_VOICE, OwnerTurnSlot.press(true, false));
+        assertEquals(OwnerTurnSlot.Press.SUMMON, OwnerTurnSlot.press(false, false));
+        // Never both at once (the slot); if so, the voice turn holding the microphone is stopped first.
+        assertEquals(OwnerTurnSlot.Press.STOP_VOICE, OwnerTurnSlot.press(true, true));
+    }
+
+    @Test
     public void releasingTheOtherHolderDoesNothing() {
         OwnerTurnSlot slot = new OwnerTurnSlot();
         slot.claimTyped();
