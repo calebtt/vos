@@ -11,13 +11,15 @@ import android.os.Bundle;
  * <pre>
  * am start -n com.vos.actuator/.DebugSummonActivity --es op start [--ez mic_file true | --ez mic_file_then_live true] [--ez raw_mic true] [--ez speaker_file true]
  * am start -n com.vos.actuator/.DebugSummonActivity --es op stop
+ * am start -n com.vos.actuator/.DebugSummonActivity --es op tile
  * am start -n com.vos.actuator/.DebugSummonActivity --es op typed --es text "what time is it"
  * am start -n com.vos.actuator/.DebugSummonActivity --es op reply --es text "and now?"
  * am start -n com.vos.actuator/.DebugSummonActivity --es op volume --ei stream 3 --ei index 7
  * am start -n com.vos.actuator/.DebugSummonActivity --es op setting [--es key agent_mode --es value quiet]
  * </pre>
  * {@code op volume} restores a stream volume after an eval (the shell's own volume command does not
- * apply on Phone B's Android 17). {@code op setting} sets one owner setting as the source
+ * apply on Phone B's Android 17). {@code op tile} is a press of the QS tile ("Stop VOS", source
+ * {@code debug_tile}): it stops the open voice or typed turn, else summons. {@code op setting} sets one owner setting as the source
  * {@code debug_shell} (audited like any change), then logs every key and value (tag VOS_SETTINGS).
  */
 public final class DebugSummonActivity extends Activity {
@@ -45,6 +47,9 @@ public final class DebugSummonActivity extends Activity {
             ChatNotification.Reply.handle(this, in.getStringExtra("text"), "debug_notification");
         } else if ("stop".equals(in.getStringExtra("op"))) {
             startService(i.setAction(TurnService.ACTION_STOP));
+        } else if ("tile".equals(in.getStringExtra("op"))) {
+            // As if the QS tile were tapped: the same toggle SummonTile.onClick calls (eval/m1/chat.sh).
+            TurnService.toggle(this, "debug_tile");
         } else {
             TurnService.startSummon(this, i.setAction(TurnService.ACTION_SUMMON)
                     .putExtra(TurnService.EXTRA_DEBUG_MIC_FILE, in.getBooleanExtra("mic_file", false))

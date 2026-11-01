@@ -8,9 +8,10 @@ public final class Ipc {
     /**
      * Bumped on any incompatible change to IVosActuator or IVosSession. 2: voice turns. 3: callTool.
      * 4: modelCallStarted/modelCallEnded (the generating indicator). 5: typed turns
-     * (onTypedTurn, recentThread, typedReply).
+     * (onTypedTurn, recentThread, typedReply). 6: onTurnClosed ends a typed turn (the owner's stop),
+     * and the session answers it with endTurn.
      */
-    public static final int PROTOCOL_VERSION = 5;
+    public static final int PROTOCOL_VERSION = 6;
 
     /** Turn audio on both pipes: mono, signed 16-bit little-endian, at this rate (§3.2). */
     public static final int TURN_SAMPLE_RATE = 16000;

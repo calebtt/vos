@@ -73,7 +73,7 @@ public final class TurnService extends Service {
         return inForeground;
     }
 
-    /** Is a turn open now (for the tile)? */
+    /** Is a voice turn open now (for the tile)? */
     static boolean turnOpen() {
         TurnService s = live;
         return s != null && s.turn != null;
@@ -335,19 +335,33 @@ public final class TurnService extends Service {
                 .build();
     }
 
-    /** Summon or stop from any actuator component that has a foreground moment. */
-    static void toggle(Context context, String source) {
-        toggle(context, source, android.os.SystemClock.uptimeMillis());
+    /**
+     * Summon or stop from any actuator component that has a foreground moment. A press stops the open
+     * turn, voice or typed (P5, {@link OwnerTurnSlot#press}), and summons only when none is open. True
+     * if it stopped a turn. Main thread.
+     */
+    static boolean toggle(Context context, String source) {
+        return toggle(context, source, android.os.SystemClock.uptimeMillis());
     }
 
     /** As {@link #toggle(Context, String)}, with the {@code uptimeMillis} at which VOS got the summon, for S-07. */
-    static void toggle(Context context, String source, long tEvent) {
+    static boolean toggle(Context context, String source, long tEvent) {
         Intent i = new Intent(context, TurnService.class).putExtra(EXTRA_SOURCE, source).putExtra(EXTRA_T_EVENT, tEvent);
-        if (turnOpen()) {
-            context.startService(i.setAction(ACTION_STOP));
-        } else {
-            startSummon(context, i.setAction(ACTION_SUMMON));
+        TypedChat chat = ((ActuatorApp) context.getApplicationContext()).typedChat();
+        switch (OwnerTurnSlot.press(turnOpen(), chat.turnOpen())) {
+            case STOP_VOICE:
+                context.startService(i.setAction(ACTION_STOP));
+                return true;
+            case STOP_TYPED:
+                if (chat.stop(source)) {
+                    return true;
+                }
+                break; // it ended in between: this press summons
+            default:
+                break;
         }
+        startSummon(context, i.setAction(ACTION_SUMMON));
+        return false;
     }
 
     /**

@@ -7,6 +7,7 @@
     <string name="tile_label">VOS</string>
     <string name="tile_idle">Tap to talk</string>
     <string name="tile_listening">Listening</string>
+    <string name="tile_answering">Answering</string>
     <string name="turn_channel">VOS listening</string>
     <string name="turn_listening">VOS is listening</string>
     <string name="turn_stop">Stop</string>
@@ -18,6 +19,8 @@
     <string name="chat_channel">VOS chat</string>
     <string name="chat_hint">Message VOS</string>
     <string name="chat_send">Send</string>
+    <string name="chat_stop">Stop</string>
+    <string name="chat_stop_description">Stop VOS answering</string>
     <string name="chat_reply">Reply</string>
     <string name="chat_you">You</string>
     <string name="chat_model_label">VOS (model reply, data)</string>

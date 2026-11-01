@@ -21,7 +21,13 @@ interface IVosSession {
      */
     oneway void onTurnOpened(String turnId, in ParcelFileDescriptor mic, in ParcelFileDescriptor speaker);
 
-    /** The actuator ended the turn (stop, timeout, error); the session closes its side. */
+    /**
+     * The actuator ended the turn (stop, timeout, error); the session closes its side. For a voice
+     * turn that is all. For a typed turn (the owner's stop, P5) the session closes the turn's gate:
+     * its model call is cancelled, a tool call in flight finishes, no reply is sent and nothing more
+     * of the turn is written. It then answers with IVosActuator.endTurn, on which the actuator frees
+     * the owner-turn slot.
+     */
     oneway void onTurnClosed(String turnId, String reason);
 
     /**
