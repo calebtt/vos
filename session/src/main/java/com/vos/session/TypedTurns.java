@@ -27,7 +27,8 @@ import org.json.JSONObject;
  *
  * <p>The actuator can end a typed turn first: the owner's stop (P5) arrives as onTurnClosed, and
  * {@link #close} ends the turn the same way, without a reply, then sends endTurn. The actuator holds
- * the owner-turn slot until that endTurn, so the same guarantee holds.
+ * the owner-turn slot until that endTurn, or 5 s after the stop if it has not come; past that, it still
+ * refuses the stopped turn's late reply and tool calls, so the same guarantee holds for the actuator.
  */
 final class TypedTurns {
     static final String TAG = "VOS_TYPED";
@@ -136,6 +137,15 @@ final class TypedTurns {
             }
         });
         return true;
+    }
+
+    /**
+     * Nothing of any turn is left to run here: every turn's worker run has finished (its gate is
+     * closed and it was forgotten), and no deadline or close is queued. For tests, which wait for this
+     * instead of sleeping.
+     */
+    boolean idle() {
+        return open.isEmpty() && deadlines.getQueue().isEmpty();
     }
 
     private void run(Wiring w, String turnId, String text, TurnGate gate, long holdMs, long t0) {

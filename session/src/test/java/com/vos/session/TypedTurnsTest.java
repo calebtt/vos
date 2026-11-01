@@ -204,7 +204,7 @@ public class TypedTurnsTest {
         TypedTurns turns = turns(300);
         turns.open("a", "what time is it", 0);
         assertEquals("a typed reply", endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(600); // past the deadline
+        awaitIdle(turns); // the worker has finished and the deadline is no longer queued
         assertNull("no second end", endTurns.poll());
         assertEquals(List.of("beforeTurn a", "owner a", "vos a It's 9:00 AM.", "typedReply a It's 9:00 AM.",
                 "afterTurn a", "endTurn a typed reply"), log());
@@ -236,20 +236,30 @@ public class TypedTurnsTest {
         TypedTurns turns = turns(200);
         turns.open("a", "what time is it", 0);
         assertEquals("a " + TypedTurns.DEADLINE, endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(500); // anything the worker would still do after the end
+        awaitIdle(turns); // anything the worker would still do after the end
         // endTurn waits for the tool in flight; its result, the second tool and the next round are dropped.
         assertEquals(List.of("beforeTurn a", "owner a", "callTool a time_get", "callTool done a", "afterTurn a",
                 "endTurn a " + TypedTurns.DEADLINE), log());
         assertEquals("no model call after the deadline", 1, server.getRequestCount());
     }
 
-    /** Waits until {@code event} is in the log. */
-    private void awaitLog(String event) throws InterruptedException {
+    /** Polls every 10 ms, for up to 5 s, until {@code done}; fails with {@code what} if it never is. */
+    private static void await(String what, java.util.function.BooleanSupplier done) throws InterruptedException {
         long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (!log().contains(event)) {
-            assertTrue("never logged: " + event + " in " + log(), System.nanoTime() < until);
+        while (!done.getAsBoolean()) {
+            assertTrue(what, System.nanoTime() < until);
             Thread.sleep(10);
         }
+    }
+
+    /** Waits until {@code event} is in the log. */
+    private void awaitLog(String event) throws InterruptedException {
+        await("never logged: " + event + " in " + log(), () -> log().contains(event));
+    }
+
+    /** Waits until nothing of any turn is left to run: every worker run is over, no deadline or close queued. */
+    private static void awaitIdle(TypedTurns turns) throws InterruptedException {
+        await("the typed turns never went idle", turns::idle);
     }
 
     @Test
@@ -263,7 +273,7 @@ public class TypedTurnsTest {
         assertEquals("a " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
         long ms = (System.nanoTime() - t0) / 1_000_000;
         assertTrue("ended at the stop, not by the call's own timeout: " + ms + " ms", ms < 2_000);
-        Thread.sleep(300); // anything the worker would still do after the end
+        awaitIdle(turns); // anything the worker would still do after the end
         // No reply and no apology: the owner stopped it. The owner's line stays, as at the deadline.
         assertEquals(List.of("beforeTurn a", "owner a", "afterTurn a", "endTurn a " + TypedTurns.CLOSED), log());
         assertEquals("the stopped turn wrote no reply", List.of("owner"), transcriptRoles("a"));
@@ -284,7 +294,7 @@ public class TypedTurnsTest {
         awaitLog("callTool a time_get");
         assertTrue(turns.close("a"));
         assertEquals("a " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(500);
+        awaitIdle(turns);
         // endTurn waits for the tool in flight; its result, the second tool and the next round are dropped.
         assertEquals(List.of("beforeTurn a", "owner a", "callTool a time_get", "callTool done a", "afterTurn a",
                 "endTurn a " + TypedTurns.CLOSED), log());
@@ -299,7 +309,7 @@ public class TypedTurnsTest {
         awaitLog("owner a");
         assertTrue(turns.close("a"));
         assertEquals("a " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(1_200); // past the hold
+        awaitIdle(turns); // the worker is past the hold
         assertEquals(List.of("beforeTurn a", "owner a", "afterTurn a", "endTurn a " + TypedTurns.CLOSED), log());
         assertEquals(0, server.getRequestCount());
         assertFalse("ended turns are forgotten", turns.close("a"));
@@ -316,7 +326,7 @@ public class TypedTurnsTest {
         assertEquals("b " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
         assertTrue(turns.close("a"));
         assertEquals("a " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(300);
+        awaitIdle(turns); // the worker has taken b too, and dropped it
         assertFalse("b never ran", log().contains("beforeTurn b"));
         assertEquals("only a's model call", 1, server.getRequestCount());
     }
@@ -327,7 +337,7 @@ public class TypedTurnsTest {
         TypedTurns turns = turns(30_000);
         turns.open("a", "what time is it", 0);
         assertEquals("a typed reply", endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(100); // the worker forgets the turn after its end
+        awaitIdle(turns); // the worker forgets the turn after its end
         assertFalse("a voice turn's id, or one already over, is not a typed turn here", turns.close("a"));
         assertFalse(turns.close("voice-1"));
         assertFalse(turns.close(null));
@@ -338,7 +348,7 @@ public class TypedTurnsTest {
         turns.close("b");
         turns.close("b");
         assertEquals("b " + TypedTurns.CLOSED, endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(300);
+        awaitIdle(turns); // both closes have run
         assertNull("one end only", endTurns.poll());
     }
 
@@ -348,7 +358,7 @@ public class TypedTurnsTest {
         TypedTurns turns = turns(200);
         turns.open("a", "hello", 1_000); // the debug hold (eval/m1/chat.sh), as a slow model
         assertEquals("a " + TypedTurns.DEADLINE, endTurns.poll(5, TimeUnit.SECONDS));
-        Thread.sleep(1_200); // past the hold
+        awaitIdle(turns); // the worker is past the hold
         assertEquals(List.of("beforeTurn a", "owner a", "afterTurn a", "endTurn a " + TypedTurns.DEADLINE), log());
         assertEquals(0, server.getRequestCount());
     }
