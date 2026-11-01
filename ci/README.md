@@ -26,4 +26,4 @@
 
 **gitleaks.** `fetch-gitleaks.sh` installs a pinned, SHA-256-verified release into `.tools/` (gitignored). `--gitleaks auto` (the Gradle default) skips with a NOTE if it is missing; CI sets `VOS_GITLEAKS=required`.
 
-**Negative tests.** `tests/test_policy_check.py` feeds violating fixtures (synthetic xmltree dumps, dex files, APK zips, files with retired names, a runtime-generated token) to each rule and asserts it fails. Run: `python3 -I -m unittest discover -s ci/tests -t ci -v` or `./gradlew policyCheckTests`.
+**Negative tests.** `tests/test_policy_check.py` feeds violating fixtures (synthetic xmltree dumps, dex files, APK zips, files with retired names, a runtime-generated token) to each rule and asserts it fails. Run: `python3 -I -m unittest discover -s ci/tests -t ci -v` or `./gradlew policyCheckTests`. The same task runs `tests/test_chat_checks.py`: each M1-CHAT-01 check in `eval/m1/chat_checks.py` must FAIL on a broken copy of a passing run (#299).
