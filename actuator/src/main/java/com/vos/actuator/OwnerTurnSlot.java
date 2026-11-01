@@ -20,6 +20,20 @@ final class OwnerTurnSlot {
         return claim != Claim.BLOCKED;
     }
 
+    /** What a press of "Stop VOS" (the QS tile, the assist gesture) does. */
+    enum Press { STOP_VOICE, STOP_TYPED, SUMMON }
+
+    /**
+     * The press stops whichever owner turn is open, voice or typed (P5: the owner can always stop
+     * it), and summons only when neither is. A press during a typed turn never starts the microphone.
+     */
+    static Press press(boolean voiceTurnOpen, boolean typedTurnOpen) {
+        if (voiceTurnOpen) {
+            return Press.STOP_VOICE;
+        }
+        return typedTurnOpen ? Press.STOP_TYPED : Press.SUMMON;
+    }
+
     private Holder holder = Holder.NONE;
 
     Holder holder() {

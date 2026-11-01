@@ -3,6 +3,8 @@ package com.vos.session;
 import android.util.Log;
 import com.vos.ipc.Ipc;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
@@ -22,11 +24,17 @@ import org.json.JSONObject;
  * flight finishes first, and its compaction is queued; only then does endTurn go out. The actuator
  * frees the owner-turn slot on that endTurn, so nothing this turn sends later (a tool result, a reply,
  * a compaction) can land in a voice turn that starts next.
+ *
+ * <p>The actuator can end a typed turn first: the owner's stop (P5) arrives as onTurnClosed, and
+ * {@link #close} ends the turn the same way, without a reply, then sends endTurn. The actuator holds
+ * the owner-turn slot until that endTurn, so the same guarantee holds.
  */
 final class TypedTurns {
     static final String TAG = "VOS_TYPED";
     /** The endTurn reason for a turn the deadline ended. */
     static final String DEADLINE = "typed turn deadline";
+    /** The endTurn reason for a turn the actuator closed (onTurnClosed: the owner's stop). */
+    static final String CLOSED = "closed by the actuator";
     /** What a tool call gets once the turn has ended: it does not reach the actuator. */
     static final String TURN_OVER = "{\"status\":\"FAILED\",\"detail\":\"the typed turn is over\"}";
 
@@ -52,6 +60,7 @@ final class TypedTurns {
     }
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> new Thread(r, "vos-typed"));
+    /** Ends turns from outside the worker: at their deadline, or on the actuator's close. */
     private final ScheduledThreadPoolExecutor deadlines = new ScheduledThreadPoolExecutor(1, r -> {
         Thread t = new Thread(r, "vos-typed-deadline");
         t.setDaemon(true);
@@ -59,6 +68,19 @@ final class TypedTurns {
     });
     private final Supplier<Wiring> wiring;
     private final long deadlineMs;
+    /** Turns opened and not yet run to the end, so the actuator can close them (queued ones included). */
+    private final Map<String, Open> open = new ConcurrentHashMap<>();
+
+    /** A typed turn {@link #close} can end: its gate, and the wiring it was opened with. */
+    private static final class Open {
+        final Wiring wiring;
+        final TurnGate gate;
+
+        Open(Wiring wiring, TurnGate gate) {
+            this.wiring = wiring;
+            this.gate = gate;
+        }
+    }
 
     TypedTurns(Supplier<Wiring> wiring) {
         this(wiring, Ipc.TYPED_TURN_DEADLINE_MS);
@@ -77,6 +99,8 @@ final class TypedTurns {
     void open(String turnId, String text, long holdMs) {
         Wiring w = wiring.get();
         TurnGate gate = new TurnGate();
+        Open o = new Open(w, gate);
+        open.put(turnId, o);
         long t0 = System.nanoTime();
         ScheduledFuture<?> deadline = deadlines.schedule(() -> {
             if (end(w, turnId, gate, null, DEADLINE)) {
@@ -88,8 +112,30 @@ final class TypedTurns {
                 run(w, turnId, text, gate, holdMs, t0);
             } finally {
                 deadline.cancel(false);
+                open.remove(turnId, o); // its gate has closed: whoever closed it sent endTurn
             }
         });
+    }
+
+    /**
+     * The actuator closed {@code turnId} (IVosSession.onTurnClosed, the owner's stop). Ends it as its
+     * deadline would, with no reply: its gate closes, its model call is cancelled, a tool call in
+     * flight finishes first, then afterTurn and endTurn ({@link #CLOSED}). The close runs off the
+     * caller's thread (a Binder thread). False if {@code turnId} is not a typed turn still running
+     * here; one that has already ended has sent its endTurn.
+     */
+    boolean close(String turnId) {
+        Open o = turnId == null ? null : open.get(turnId);
+        if (o == null) {
+            return false;
+        }
+        long t0 = System.nanoTime();
+        deadlines.execute(() -> {
+            if (end(o.wiring, turnId, o.gate, null, CLOSED)) {
+                Log.i(TAG, "typed turn " + turnId + " closed by the actuator ms=" + (System.nanoTime() - t0) / 1_000_000);
+            }
+        });
+        return true;
     }
 
     private void run(Wiring w, String turnId, String text, TurnGate gate, long holdMs, long t0) {
@@ -136,14 +182,14 @@ final class TypedTurns {
         } else if (failed != null && end(w, turnId, gate, null, "typed turn failed: " + failed)) {
             Log.i(TAG, "typed turn " + turnId + " failed: " + failed);
         } else {
-            Log.i(TAG, "typed turn " + turnId + " finished after its deadline; dropped ms=" + ms);
+            Log.i(TAG, "typed turn " + turnId + " finished after it ended (deadline or the actuator's close); dropped ms=" + ms);
         }
     }
 
     /**
      * The turn's last writes, once: the reply (or, with {@code reply} null after a failure, an
-     * apology; at the deadline, nothing), the compaction after the turn, then endTurn. False if the
-     * turn had already ended.
+     * apology; at the deadline or the actuator's close, nothing), the compaction after the turn, then
+     * endTurn. False if the turn had already ended.
      */
     private static boolean end(Wiring w, String turnId, TurnGate gate, String reply, String reason) {
         return gate.close(() -> {
@@ -152,7 +198,7 @@ final class TypedTurns {
                 w.context().vos(turnId, reply);
                 w.transcripts().write(turnId, "vos", reply);
                 actuator.typedReply(turnId, reply);
-            } else if (!DEADLINE.equals(reason)) {
+            } else if (!DEADLINE.equals(reason) && !CLOSED.equals(reason)) {
                 actuator.typedReply(turnId, "Something went wrong; I couldn't answer that.");
             }
             w.context().afterTurn(turnId);

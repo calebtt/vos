@@ -120,6 +120,16 @@ public final class SessionApp extends Application {
         typedTurns.open(turnId, text, holdMs);
     }
 
+    /**
+     * The actuator ended a turn (IVosSession.onTurnClosed). A typed turn is closed by its gate and
+     * answered with endTurn ({@link TypedTurns#close}); any other id goes to the voice turns.
+     */
+    void turnClosed(String turnId) {
+        if (!typedTurns.close(turnId)) {
+            turns().closed(turnId);
+        }
+    }
+
     String recentThread(int max) {
         return conversation.recentThread(max);
     }
