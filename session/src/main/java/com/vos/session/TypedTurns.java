@@ -72,14 +72,16 @@ final class TypedTurns {
     /** Turns opened and not yet run to the end, so the actuator can close them (queued ones included). */
     private final Map<String, Open> open = new ConcurrentHashMap<>();
 
-    /** A typed turn {@link #close} can end: its gate, and the wiring it was opened with. */
+    /** A typed turn {@link #close} can end: its gate, the wiring it was opened with, and when it arrived. */
     private static final class Open {
         final Wiring wiring;
         final TurnGate gate;
+        final long t0;
 
-        Open(Wiring wiring, TurnGate gate) {
+        Open(Wiring wiring, TurnGate gate, long t0) {
             this.wiring = wiring;
             this.gate = gate;
+            this.t0 = t0;
         }
     }
 
@@ -100,20 +102,16 @@ final class TypedTurns {
     void open(String turnId, String text, long holdMs) {
         Wiring w = wiring.get();
         TurnGate gate = new TurnGate();
-        Open o = new Open(w, gate);
-        open.put(turnId, o);
         long t0 = System.nanoTime();
-        ScheduledFuture<?> deadline = deadlines.schedule(() -> {
-            if (end(w, turnId, gate, null, DEADLINE)) {
-                Log.i(TAG, "typed turn " + turnId + " ended at its deadline ms=" + (System.nanoTime() - t0) / 1_000_000);
-            }
-        }, deadlineMs, TimeUnit.MILLISECONDS);
+        Open o = new Open(w, gate, t0);
+        open.put(turnId, o);
+        ScheduledFuture<?> deadline = deadlines.schedule(() -> pastDeadline(turnId, o), deadlineMs, TimeUnit.MILLISECONDS);
         worker.execute(() -> {
             try {
                 run(w, turnId, text, gate, holdMs, t0);
             } finally {
                 deadline.cancel(false);
-                open.remove(turnId, o); // its gate has closed: whoever closed it sent endTurn
+                open.remove(turnId, o); // its gate is closed: whoever closed it sends endTurn
             }
         });
     }
@@ -139,10 +137,37 @@ final class TypedTurns {
         return true;
     }
 
+    /** The turn's deadline has passed: ends it with no reply ({@link #DEADLINE}). On the deadline thread. */
+    private static void pastDeadline(String turnId, Open o) {
+        if (end(o.wiring, turnId, o.gate, null, DEADLINE)) {
+            Log.i(TAG, "typed turn " + turnId + " ended at its deadline ms=" + (System.nanoTime() - o.t0) / 1_000_000);
+        }
+    }
+
+    /**
+     * For tests: {@code turnId}'s deadline passes now, at a step the test chose, and runs on the
+     * deadline thread as its timer would. False if the turn is not running here.
+     */
+    boolean expireNow(String turnId) {
+        Open o = turnId == null ? null : open.get(turnId);
+        if (o == null) {
+            return false;
+        }
+        deadlines.execute(() -> pastDeadline(turnId, o));
+        return true;
+    }
+
+    /** For tests: {@code turnId} is running here and its gate is closing (no new step can start). */
+    boolean closing(String turnId) {
+        Open o = turnId == null ? null : open.get(turnId);
+        return o != null && !o.gate.isOpen();
+    }
+
     /**
      * Nothing of any turn is left to run here: every turn's worker run has finished (its gate is
-     * closed and it was forgotten), and no deadline or close is queued. For tests, which wait for this
-     * instead of sleeping.
+     * closed and it was forgotten), and no deadline or close is queued. A close already running may
+     * still be sending its endTurn, so a test waits for that endTurn first. For tests, which wait for
+     * this instead of sleeping.
      */
     boolean idle() {
         return open.isEmpty() && deadlines.getQueue().isEmpty();

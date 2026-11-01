@@ -159,7 +159,7 @@ def evaluate(d):
     sid = stopped[0].get("turnId") if stopped else None
     stop_line = next((a for a in stops if a.get("turnId") == sid), None) if sid else None
     late = [a for a in audit if sid and a.get("turnId") == sid
-            and a.get("event") in ("typed.reply_refused", "tool.call")]
+            and a.get("event") in ("typed.reply_refused", "tool.call", "typed.model_call_refused")]
     stop_roles = [t.get("role") for t in tr if sid and t.get("turn_id") == sid]
     _, after_reply = owner_turn(["thanks, that is all"])
 
@@ -487,6 +487,8 @@ BREAKS = [  # (check id, what is broken, how)
      audit_edit(lambda entries: entries.append(
          [{"event": "tool.call", "turnId": STOP_ID, "typed": True, "stopped": True, "tool": "time_get",
            "status": "FAILED"}, False]))),
+    ("stop_no_late", "the session reported a model call for the stopped turn",
+     audit_edit(lambda entries: entries.append([{"event": "typed.model_call_refused", "turnId": STOP_ID}, False]))),
     ("stop_no_late", "no stopped turn to judge", set_field("typed.turn_ended", STOP_ID, "reason", "session: typed reply")),
     ("stop_no_vos", "the stopped turn wrote a VOS line",
      edit("transcripts.jsonl", lambda t: t + json.dumps({"turn_id": STOP_ID, "role": "vos", "text": "One, two"}) + "\n")),
