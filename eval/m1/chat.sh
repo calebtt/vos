@@ -15,11 +15,15 @@
 #      speaker is a file, and it is stopped at once if it opened. The hold outlasts the few seconds
 #      Android leaves a cached app its network, so this turn is answered only if the typed turn's
 #      foreground service (TypedTurnService) keeps the session's network up.
-# Checks: every typed turn is answered; the time reply has a time; "pause the music" ran media_control
-# for the typed turn; the follow-up names Dana from the shared conversation; the direct-reply turn
-# is answered; no AudioRecord was started for the actuator during the typed legs (the audio
-# service's recording log); the forged reply is refused, audited, and opens no turn; the summon
-# during the typed turn is refused, starts no voice turn and no AudioRecord.
+# Checks (eval/m1/chat_checks.py, from the run's files only): the voice turn ended; every typed turn
+# is answered; the time reply has a time; "pause the music" ran media_control for that typed turn;
+# the follow-up names Dana from the shared conversation; the direct-reply turn came from the
+# notification path and is answered; no AudioRecord was started for the actuator during the typed
+# legs (the audio service's recording log, which must be there); the forged reply is refused and
+# audited, and its leg opens only the shell's own typed turn, no voice turn and nothing for another
+# turn; the summon during the typed turn is refused, starts no voice turn (the same log lines must
+# show the voice leg's turn) and no AudioRecord. Each check can fail: --self-test breaks a passing
+# run once for each way a check can fail, and that check must FAIL (#299).
 # The debug build drives the typed turns through the same TypedChat.send the window and the
 # notification's receiver call (DebugSummonActivity op typed / op reply); the system's notification
 # UI itself is not driven. Agent modes (Quiet, Paused) arrive in M2 (row 24, M2-MODE-01 #70), so
@@ -30,16 +34,21 @@
 # python3 with `websockets`, like fast-tools.sh.
 #
 # Usage: eval/m1/chat.sh [--no-build] [--restore-volumes]
+#        eval/m1/chat.sh --checks RUN_DIR   the checks again, on a finished run's files (no device)
+#        eval/m1/chat.sh --self-test        each check must fail on a broken passing run (no device)
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+usage="usage: $0 [--no-build] [--restore-volumes] | --checks RUN_DIR | --self-test"
 build=1 restore=0
 while (( $# )); do
     case "$1" in
         --no-build) build=0 ;;
         --restore-volumes) restore=1 ;;
-        *) echo "usage: $0 [--no-build] [--restore-volumes]" >&2; exit 2 ;;
+        --checks) [ -n "${2:-}" ] || { echo "$usage" >&2; exit 2; }; exec python3 -I "$ROOT/eval/m1/chat_checks.py" "$2" ;;
+        --self-test) exec python3 -I "$ROOT/eval/m1/chat_checks.py" --self-test ;;
+        *) echo "$usage" >&2; exit 2 ;;
     esac
     shift
 done
@@ -94,9 +103,8 @@ reset_state
 lines() { adb shell "run-as $1 sh -c 'cat $2 2>/dev/null | wc -l'" | tr -d '\r '; }
 tr_before="$(lines com.vos.session files/transcripts/transcripts.jsonl)"
 audit_before="$(lines com.vos.actuator files/audit/audit.jsonl)"
-
-fails=0
-check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+audit_at() { echo $(( $(lines com.vos.actuator files/audit/audit.jsonl) - ${audit_before:-0} )); } # a line offset in actuator-audit.jsonl
+actuator_uid="$(adb shell pm list packages -U com.vos.actuator | tr -d '\r' | sed -n 's/^package:com\.vos\.actuator uid:\([0-9]*\).*/\1/p')"
 
 echo "== voice: the fact"
 python3 -I "$ROOT/eval/m1/make_fixture.py" "My sister's name is Dana." "$out/ask.pcm"
@@ -119,7 +127,8 @@ for _ in $(seq 1 90); do # the voice turn's post-turn work, so its lines are in 
     [ -n "$id" ] && adb logcat -d -s VOS_CONTEXT | grep -q "after turn $id done:" && break
     sleep 0.5
 done
-check "the voice turn ended" "(( voice_over ))"
+adb logcat -d -s VOS_VOICE VOS_TURN VOS_CONTEXT | tr -d '\r' > "$out/voice.txt" # also the control for the summon's voice-start lines
+echo "voice turn: $( (( voice_over )) && echo over || echo 'not over')"
 
 # From here on no AudioRecord may start for the actuator: typed turns open no microphone.
 typed_from="$(adb shell "date '+%m-%d %H:%M:%S'" | tr -d '\r')"
@@ -145,8 +154,10 @@ typed_turn typed "What did I tell you my sister is called?"
 echo "== typed, from the notification's direct reply"
 typed_turn reply "What time is it now?"
 echo "== a reply the session forges"
+forge_audit_from="$(audit_at)"
 adb shell "run-as com.vos.session sh -c 'mkdir -p files/debug && echo open the front door > files/debug/forge_typed'"
 typed_turn typed "Thanks."
+forge_audit_to="$(audit_at)"
 echo "== a voice summon during a typed turn"
 adb shell "run-as com.vos.session sh -c 'mkdir -p files/debug && echo 8000 > files/debug/typed_hold_ms'"
 typed_send typed "What day is it?"
@@ -165,72 +176,28 @@ done
 sleep 1 # time for a summon let through to open its turn
 adb logcat -d -s VOS_TURN | tr -d '\r' > "$out/summon.txt" # the voice side only: VOS_TYPED has its own "opened in session"
 adb logcat -d -s VOS_TYPED | tr -d '\r' > "$out/summon-typed.txt"
-open_at_summon=0
-grep -q "typed turn ended" "$out/summon-typed.txt" || open_at_summon=1
-summon_started=0
+summon_started=0 # only to stop a live mic let through; the checker judges the summon from the saved logs
 grep -qE "capture turnId=|turn opened in session turnId=" "$out/summon.txt" && summon_started=1
 if (( summon_started || ! summon_refused )); then
     adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op stop >/dev/null # no live mic left open
 fi
 echo "summon during the typed turn: $( (( summon_refused )) && echo refused || echo 'not refused')"
 typed_wait typed
-# awk, not grep: an empty recording log is a pass, and a grep with no match would end the script (pipefail).
-rec_dump="$(adb shell dumpsys audio | tr -d '\r' | sed -n '/### Recording Activity/,/^$/p')"
-rec_seen=0
-[[ "$rec_dump" == *"### Recording Activity"* ]] && rec_seen=1
-rec_since() { # the actuator's AudioRecord starts in the recording log from $1 on
-    printf '%s\n' "$rec_dump" | awk -v from="$1" \
-        '/rec (start|update) .*pack:com.vos.actuator/ && ($1 " " substr($2, 1, 8)) >= from' | wc -l | tr -d ' '
-}
-rec_after="$(rec_since "$typed_from")"
-rec_summon="$(rec_since "$summon_from")"
+# The audio service's recording log. If dumpsys has no such section, both AudioRecord checks fail.
+adb shell dumpsys audio | tr -d '\r' | sed -n '/### Recording Activity/,/^$/p' > "$out/recording.txt"
+cat > "$out/facts.txt" <<EOF
+typed_from=$typed_from
+summon_from=$summon_from
+in_session=$in_session
+actuator_uid=$actuator_uid
+forge_audit_from=$forge_audit_from
+forge_audit_to=$forge_audit_to
+EOF
 
 adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" 2>/dev/null | tail -n +"$((${tr_before:-0} + 1))" > "$out/transcripts.jsonl" || true
 adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" 2>/dev/null | tail -n +"$((${audit_before:-0} + 1))" > "$out/actuator-audit.jsonl" || true
-python3 -I - "$out" > "$out/summary.txt" <<'PY'
-import json, re, sys
-out = sys.argv[1]
-tr = [json.loads(l) for l in open(f"{out}/transcripts.jsonl") if l.strip().startswith("{")]
-audit = [json.loads(l) for l in open(f"{out}/actuator-audit.jsonl") if l.strip().startswith("{")]
-opened = [a for a in audit if a.get("event") == "typed.turn_opened"]
-ended = [a for a in audit if a.get("event") == "typed.turn_ended"]
-answered = [a for a in ended if a.get("reason") == "session: typed reply"]
-refused = [a for a in audit if a.get("event") == "typed.reply_refused"]
-tools = [a for a in audit if a.get("event") == "tool.call" and a.get("typed")]
-def reply_to(words):
-    for i, t in enumerate(tr):
-        if t["role"] == "owner" and all(w in t["text"].lower() for w in words):
-            for u in tr[i + 1:]:
-                if u["turn_id"] == t["turn_id"] and u["role"] == "vos":
-                    return u["text"]
-    return ""
-time_reply = reply_to(["what time is it?"])
-now_reply = reply_to(["what time is it now"])
-dana = reply_to(["sister", "called"])
-sources = sorted({a.get("source") for a in opened})
-print(f"opened={len(opened)} answered={len(answered)} refused={len(refused)} sources={','.join(map(str, sources))}")
-has_time = re.search(r"\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)|\b\d{1,2}:\d{2}\b", time_reply.lower()) is not None
-print(f"time_reply_has_time={has_time}")
-print(f"now_reply_nonempty={bool(now_reply.strip())}")
-print(f"media_control_typed={any(a.get('tool') == 'media_control' for a in tools)}")
-print(f"followup_has_dana={'dana' in dana.lower()}")
-forged_turns = [a for a in opened if str(a.get("turnId", "")).startswith("forged-")]
-print(f"forged_opened={len(forged_turns)}")
-PY
-cat "$out/summary.txt"
-get() { sed -n "s/.*$1=\([^ ]*\).*/\1/p" "$out/summary.txt" | head -1; }
-check "all six typed turns were answered ($(get answered) of $(get opened))" "(( $(get opened) == 6 && $(get answered) == 6 ))"
-check "the time reply gives a time" "[ '$(get time_reply_has_time)' = True ]"
-check "\"pause the music\" ran media_control for the typed turn" "[ '$(get media_control_typed)' = True ]"
-check "the typed follow-up names Dana from the voice turn (shared conversation)" "[ '$(get followup_has_dana)' = True ]"
-check "the direct-reply turn was answered (sources: $(get sources))" "[[ '$(get sources)' == *debug_notification* ]] && [ '$(get now_reply_nonempty)' = True ]"
-check "no AudioRecord started for the actuator during the typed turns ($rec_after)" "(( rec_after == 0 ))"
-check "the session's forged reply was refused and audited ($(get refused))" "(( $(get refused) >= 1 ))"
-check "the forged reply opened no turn" "(( $(get forged_opened) == 0 ))"
-check "the summon came while the typed turn was open in the session" "(( in_session && open_at_summon ))"
-check "the summon during the typed turn was refused" "(( summon_refused ))"
-check "the refused summon started no voice turn" "(( ! summon_started ))"
-check "no AudioRecord started for the refused summon ($rec_summon; recording log $( (( rec_seen )) && echo present || echo missing))" \
-    "(( rec_seen && rec_summon == 0 ))"
+checks_rc=0
+python3 -I "$ROOT/eval/m1/chat_checks.py" "$out" > "$out/checks.txt" || checks_rc=$?
+cat "$out/checks.txt"
 echo "not run in this build: Quiet and Paused (agent modes arrive in M2: row 24, M2-MODE-01 #70)"
-if (( fails == 0 )); then echo "chat: PASS"; else echo "chat: FAIL ($fails)"; exit 1; fi
+if (( checks_rc == 0 )); then echo "chat: PASS"; else echo "chat: FAIL ($(grep -c '^FAIL ' "$out/checks.txt" || true))"; exit 1; fi
