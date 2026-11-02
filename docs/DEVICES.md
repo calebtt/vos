@@ -9,9 +9,8 @@ Enrollment record for M0-06 (#131), from TARGET-PLAN §7 "Devices". Values marke
 | **Phone C:** mainstream non-Pixel (e.g. Samsung Galaxy A-series), Android 15+ | — | Tier S reach from M1. No SIM, so no real-comms tests. | **Deferred / not yet ordered** | Record order date and ETA in #4 when ordered. |
 | Headsets | — | Current classic BT; one LE Audio reference from M4 | Classic BT owned; LE Audio PENDING order | Route type logged on every turn. |
 | Workstation | — | Build, CI runner, emulators, image builds, Wi-Fi AP for edge captures | Present | No phone control in production; ADB is development-only. |
-| VPS | — | **Retired** | Retired (2026-10-18) | VPS retired; no VPS secrets remain; if a VPS is ever found still running, shut it down. |
 
-## Firmware trees (data-disk, `/media/caleb/data-disk/vos/`)
+## Firmware trees (data disk, `<data-disk>/vos/`)
 
 Downloaded 2026-10-18 23:23–23:31 CT from `releases.grapheneos.org` (agent, no flashing). Channel metadata at download time: `panther-stable`, `-beta` and `-alpha` all = `2026101600` (same for akita). Build `2026101601` (one-second-later respin, same Android build ID) is also published and is **exactly what Phone B runs** (`google/panther/panther:17/CP3A.261005.002.A1/2026101601:user/release-keys`), so both are kept. Each build dir holds the factory zip + `.sig`, the full OTA, `allowed_signers`, the channel file as fetched (`*-stable.channel-at-download`) and `SHA256SUMS`.
 
@@ -39,5 +38,5 @@ Archive (§7 Layout, DAY0 §5): `archive/2026-10-10-pre-vos.tar.zst`, created 20
 fastboot getvar product            # expect: panther
 fastboot flashing get_unlock_ability   # expect: 1 — record the output and date here
 # Firmware trees:
-ls -l /media/caleb/data-disk/vos/firmware/panther/grapheneos/ /media/caleb/data-disk/vos/firmware/akita/grapheneos/
+ls -l <data-disk>/vos/firmware/panther/grapheneos/ <data-disk>/vos/firmware/akita/grapheneos/
 ```

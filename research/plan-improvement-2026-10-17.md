@@ -840,7 +840,7 @@ Every proposal keeps decisions 1–29 and the standing constraints:
   1. **Lanes** (all under C6):
      - **L1 Core**: Core-9 plus Held-out-6 from the nav-workflow research, on current apps.
      - **L2 AndroidWorld**: decision 29, M3-AW-01.
-     - **L3 MobileWorld subset**, Apache-2.0: multi-app, ask-the-user and MCP-to-VTB tasks. Upstream needs a rooted emulator and self-hosted Mattermost, Mastodon and Mall4Uni, so VOS ports its checks with decision 29's hooks (Tier P grants, F8). The backends run on the dev desktop for eval only. SMS and phone tasks are dropped. Test **M5-MW-01**.
+     - **L3 MobileWorld subset**, Apache-2.0: multi-app, ask-the-user and MCP-to-VTB tasks. Upstream needs a rooted emulator and self-hosted Mattermost, Mastodon and Mall4Uni, so VOS ports its checks with decision 29's hooks (Tier P grants, F8). The backends run on the desktop for eval only. SMS and phone tasks are dropped. Test **M5-MW-01**.
      - **L4 Safety**: M2-INJ, M3-INJ-01 to -04, the trusted-path fixtures, F-SEC-01.
      - **L5 Voice**: M1-VOICE-01 and M1-BARGE-01 fixtures.
      - **L6 Owner day**: `eval/tasks.yaml` and the field days.
