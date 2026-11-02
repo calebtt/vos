@@ -43,8 +43,12 @@
 # and after. Needs GROK_API_KEY (the fixture; sealing the key into the session if it holds none) and
 # python3 with `websockets`, like fast-tools.sh.
 #
+# The checks' summary starts with the run files that are missing or empty, and a failed pull of the
+# transcripts or the actuator's audit is warned about where it happens and on the FAIL line (#305).
+#
 # Usage: eval/m1/chat.sh [--no-build] [--restore-volumes]
-#        eval/m1/chat.sh --checks RUN_DIR   the checks again, on a finished run's files (no device)
+#        eval/m1/chat.sh --checks RUN_DIR   the checks again, on a finished run's files (no device;
+#                                           exit 2 if there is no such run directory)
 #        eval/m1/chat.sh --self-test        each check must fail on a broken passing run (no device)
 
 set -euo pipefail
@@ -239,10 +243,17 @@ forge_audit_from=$forge_audit_from
 forge_audit_to=$forge_audit_to
 EOF
 
-adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" 2>/dev/null | tail -n +"$((${tr_before:-0} + 1))" > "$out/transcripts.jsonl" || true
-adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" 2>/dev/null | tail -n +"$((${audit_before:-0} + 1))" > "$out/actuator-audit.jsonl" || true
+pull_failed=""
+pull() { # package, file, its lines before the run, file in $out: this run's lines; warns if the pull fails
+    if ! adb shell "run-as $1 cat $2" | tail -n +"$(( ${3:-0} + 1 ))" > "$out/$4"; then
+        echo "warning: pulling $2 from $1 failed (adb's error, if any, is above); the checks see $4 as empty or partial" >&2
+        pull_failed+=" $4"
+    fi
+}
+pull com.vos.session files/transcripts/transcripts.jsonl "${tr_before:-0}" transcripts.jsonl
+pull com.vos.actuator files/audit/audit.jsonl "${audit_before:-0}" actuator-audit.jsonl
 checks_rc=0
 python3 -I "$ROOT/eval/m1/chat_checks.py" "$out" > "$out/checks.txt" || checks_rc=$?
 cat "$out/checks.txt"
 echo "not run in this build: Quiet and Paused (agent modes arrive in M2: row 24, M2-MODE-01 #70)"
-if (( checks_rc == 0 )); then echo "chat: PASS"; else echo "chat: FAIL ($(grep -c '^FAIL ' "$out/checks.txt" || true))"; exit 1; fi
+if (( checks_rc == 0 )); then echo "chat: PASS"; else echo "chat: FAIL ($(grep -c '^FAIL ' "$out/checks.txt" || true)${pull_failed:+; pulls failed:$pull_failed})"; exit 1; fi

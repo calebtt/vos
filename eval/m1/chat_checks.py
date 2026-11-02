@@ -5,10 +5,13 @@ temp dir, then breaks it once for each way a check can be broken, and that check
 check must have at least one such break, so a check that cannot fail fails the self-test.
 
 Usage: python3 -I eval/m1/chat_checks.py RUN_DIR    the summary and one PASS or FAIL line per check;
-                                                    exits 1 if any check fails
+                                                    exits 1 if any check fails, 2 if there is no
+                                                    such run directory (and no check is run)
        python3 -I eval/m1/chat_checks.py --self-test
 
-RUN_DIR holds what chat.sh pulled (a missing file reads as empty):
+RUN_DIR holds what chat.sh pulled. A missing file reads as empty, so its checks fail; the summary's
+first line names each of these files that is missing or empty (#305), so a failed pull or an aborted
+run shows as that and not only as unrelated FAIL lines:
   facts.txt            key=value: typed_from and summon_from (device time, MM-DD HH:MM:SS), in_session
                        (1 if the held typed turn was open in the session before the summon),
                        stop_in_session (the same, before the stop leg's tile press), stop_pressed (1 if
@@ -23,6 +26,8 @@ RUN_DIR holds what chat.sh pulled (a missing file reads as empty):
                        the session's hold
   recording.txt        the "### Recording Activity" section of `dumpsys audio`
 """
+import contextlib
+import io
 import json
 import re
 import shutil
@@ -46,11 +51,20 @@ STOP_ENDED_BY = "session: closed by the actuator"
 STOP_MAX_MS = 500
 # A logcat line (threadtime): its tag and message.
 LOGCAT = re.compile(r"\s[VDIWEF] ([^\s:]+)\s*: (.*)")
+# The files chat.sh writes for the checks, in the order the summary names them.
+RUN_FILES = ("facts.txt", "voice.txt", "transcripts.jsonl", "actuator-audit.jsonl", "summon.txt",
+             "summon-typed.txt", "stop.txt", "recording.txt")
 
 
 def read(d, name):
     p = Path(d) / name
-    return p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
+    return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+
+
+def unread(d):
+    """Each of RUN_FILES in d that is missing or empty (blank counts as empty), as "name (missing)"."""
+    return [f"{name} ({'empty' if (Path(d) / name).is_file() else 'missing'})"
+            for name in RUN_FILES if not read(d, name).strip()]
 
 
 def parse(lines):
@@ -179,7 +193,10 @@ def evaluate(d):
     rec_note = "recording log " + ("present" if rec_seen else "missing")
     voice_control = VOICE_START.search(voice) is not None
 
+    gaps = unread(d)
     summary = [
+        (f"run files missing or empty ({len(gaps)} of {len(RUN_FILES)}): " + ", ".join(gaps)) if gaps
+        else f"run files: all {len(RUN_FILES)} present",
         f"opened={len(opened)} answered={len(answered_ids & opened_ids)} forged_refused={len(forged)} "
         f"sources={','.join(sorted(map(str, set(sources.values()))))}",
         f"time_reply={time_reply!r}",
@@ -254,6 +271,9 @@ def evaluate(d):
 
 
 def main(d):
+    if not Path(d).is_dir():
+        print(f"chat_checks.py: no such run directory: {d}", file=sys.stderr)
+        return 2
     summary, results = evaluate(d)
     for line in summary:
         print(line)
@@ -527,10 +547,30 @@ def self_test():
                 print(f"self-test FAIL: {what}: still PASS {text}", file=sys.stderr)
             else:
                 print(f"{cid}: {what}: FAIL {text}" + (f" (also failing: {'; '.join(others)})" if others else ""))
+        # The run files (#305): the passing run misses none, an empty RUN_DIR misses every one, and a
+        # RUN_DIR that does not exist is no run: exit 2, with no check run.
+        if unread(base):
+            bad += 1
+            print("self-test FAIL: the passing run's files are reported missing or empty: "
+                  + ", ".join(unread(base)), file=sys.stderr)
+        empty = root / "empty"
+        empty.mkdir()
+        first = evaluate(empty)[0][0]
+        if not all(f"{name} (missing)" in first for name in RUN_FILES):
+            bad += 1
+            print(f"self-test FAIL: an empty run directory does not name every file as missing: {first}",
+                  file=sys.stderr)
+        with contextlib.redirect_stdout(io.StringIO()) as o, contextlib.redirect_stderr(io.StringIO()) as e:
+            rc = main(root / "no-such-run")
+        if rc != 2 or o.getvalue() or "no such run directory" not in e.getvalue():
+            bad += 1
+            print(f"self-test FAIL: a missing run directory gave exit {rc}, not 2 with \"no such run directory\"",
+                  file=sys.stderr)
         if bad:
             return 1
         print(f"self-test PASS: the {len(ids)} checks pass on the passing run, and each fails on its breaks "
-              f"({len(BREAKS)} in all)")
+              f"({len(BREAKS)} in all); an empty run directory names all {len(RUN_FILES)} run files as "
+              "missing, and a missing one exits 2")
         return 0
     finally:
         shutil.rmtree(root, ignore_errors=True)
