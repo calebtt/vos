@@ -17,25 +17,25 @@ For Caleb, by hand, except steps marked **done by agent** (run 2026-10-18 on Cal
 
    Pass: `401` (record the exact code; any 2xx means the key is still live). Then `shred -u ~/old-xai-key.txt`.
 
-## 2. VPS (retired)
+## 2. (Removed)
 
-VPS retired; no VPS secrets remain; if a VPS is ever found still running, shut it down.
+This step is no longer part of Day 0. The steps below keep their numbers, so references to them stay valid.
 
 ## 3. Revoke ADB authorizations on Phone A (M0-03)
 
 On Phone A: Settings › System › Developer options › **Revoke USB debugging authorizations**; turn **Wireless debugging** off. If developer options are not needed on Phone A, turn them off. If Phone A is still in a tailnet, remove it. (Phone B stays tethered with USB debugging on for development, §7.)
 
-## 4. Pin data-disk in fstab (§7)
+## 4. Pin the data disk in fstab (§7)
 
 Needs sudo (Caleb): passwordless sudo is not available to agents. Status 2026-10-18: not pinned; currently automounted at this path.
 
 ```bash
-sudo blkid /dev/nvme1n1p2            # expect UUID="AA947A61947A2FC5"
+sudo blkid /dev/nvme1n1p2            # expect UUID="<disk-uuid>"
 sudo cp /etc/fstab /etc/fstab.bak-$(date +%F)
 # add one line with sudoedit /etc/fstab:
-#   UUID=AA947A61947A2FC5 /media/caleb/data-disk ntfs3 uid=1000,gid=1000,nosuid,nodev,nofail 0 0
+#   UUID=<disk-uuid> <data-disk> ntfs3 uid=1000,gid=1000,nosuid,nodev,nofail 0 0
 sudo findmnt --verify                # must report no errors
-sudo mount -a && findmnt /media/caleb/data-disk
+sudo mount -a && findmnt <data-disk>
 ```
 
 The loop-mounted ext4 build volume (§7) can follow on Mon 10-12; it is not part of Day 0.
@@ -47,7 +47,7 @@ The loop-mounted ext4 build volume (§7) can follow on Mon 10-12; it is not part
 The command below carries every exclusion the 2026-10-18 run used. Checked 2026-10-20: its file list (`tar -cvf /dev/null` with the same arguments) is identical to the tarball's (`tar -tf`), 675 entries.
 
 ```bash
-a=/media/caleb/data-disk/vos/archive/2026-10-10-pre-vos.tar.zst
+a=<data-disk>/vos/archive/2026-10-10-pre-vos.tar.zst
 if [ -e "$a" ]; then
   echo "refusing: $a exists (read-only archive, never overwritten)" >&2
 else
@@ -75,7 +75,7 @@ For each codename in `panther akita`, set `build` to the current stable build nu
 ```bash
 build=2026101601   # the current stable build number
 c=panther          # then akita
-d="/media/caleb/data-disk/vos/firmware/$c/grapheneos/$build"
+d="<data-disk>/vos/firmware/$c/grapheneos/$build"
 mkdir -p "$d" && cd "$d"
 curl -fLO https://releases.grapheneos.org/allowed_signers  # Graphene's factory-image key; compare with grapheneos.org/install/cli
 curl -fLO "https://releases.grapheneos.org/$c-install-$build.zip"

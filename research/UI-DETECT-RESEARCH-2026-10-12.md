@@ -194,14 +194,14 @@ That gives 10 detector classes. Containers like toolbar, drawer, and navigation 
 
 ### 5.2 Data, in order of value
 
-1. **Your own Top-N apps (the core).** A debug actuator build captures `(screenshot, a11y tree, package, versionCode, timestamp)` on every M3 run and during an owner-driven "capture session." Export goes over **adb/USB to data-disk**: the actuator has no network, and this keeps it that way.
+1. **Your own Top-N apps (the core).** A debug actuator build captures `(screenshot, a11y tree, package, versionCode, timestamp)` on every M3 run and during an owner-driven "capture session." Export goes over **adb/USB to the data disk**: the actuator has no network, and this keeps it that way.
    - **Auto-label:**
      - a11y nodes with `isClickable` / `isEditable` / `isCheckable` / `isVisibleToUser`, where `className` → type. Compose maps `Role` to classic widget class names, so this works for most Compose apps **[verify per app]**.
      - Plus an **OmniParser `icon_detect_v3` teacher** (MIT) run on the desktop, plus OCR for text lines.
      - Merge with IoU rules; flag disagreements.
    - **Human-correct only the disagreements** in CVAT or Label Studio, locally. That is where the hard cases are: unlabeled icons, canvas, and giant merged clickables.
    - **Successful-trajectory positives:** the element tapped right before a passing oracle is a verified positive, which is free supervision from M3 itself.
-   - **Privacy:** these frames hold Signal chats and notifications. Keep the corpus encrypted at rest on data-disk. Exclude or blur messaging content (the text recognizer can locate text to blur). Never use a cloud labeling service. Skip `FLAG_SECURE` frames.
+   - **Privacy:** these frames hold Signal chats and notifications. Keep the corpus encrypted at rest on the data disk. Exclude or blur messaging content (the text recognizer can locate text to blur). Never use a cloud labeling service. Skip `FLAG_SECURE` frames.
 2. **Public mobile data for breadth:**
    - CLAY (clean labels, best schema match).
    - MUD (modern Android).

@@ -1,6 +1,6 @@
 # Nav eval tasks
 
-Every task the nav-eval harness (`~/vos-nav-evals`, `vosnav/tasks.py`) has defined or tried, including dropped ones. Results for each attempt are in [RESULTS-LOG.md](RESULTS-LOG.md). Device: Pixel 7 (`panther`, GrapheneOS), tethered to the dev desktop. Every task starts inside its own app (launcher taps are blocked), runs `setup()`, the model loop, then `cleanup()` in `finally`. The foreground app must stay on the task's allowlist or the harness presses Home and aborts.
+Every task the nav-eval harness (`~/vos-nav-evals`, `vosnav/tasks.py`) has defined or tried, including dropped ones. Results for each attempt are in [RESULTS-LOG.md](RESULTS-LOG.md). Device: Pixel 7 (`panther`, GrapheneOS), tethered to the desktop. Every task starts inside its own app (launcher taps are blocked), runs `setup()`, the model loop, then `cleanup()` in `finally`. The foreground app must stay on the task's allowlist or the harness presses Home and aborts.
 
 **Strict pass** (what `success` / `strict_pass` mean): the check is false before step 1, the model declares `done` (answer tasks must also put a non-empty answer on that `done`), and the check is true at the end. `lucky_end_state` is recorded separately when the check is true at the end but the model never said `done`. `precondition_already_true` means the check was already true before step 1; that run is not a pass. `first_step_check_true` is the first step whose check succeeded.
 

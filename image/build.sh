@@ -10,7 +10,7 @@
 #
 # Usage:
 #   image/build.sh --device panther --ota <graphene-full-ota.zip> --overlay image/overlays/s01-hello \
-#       --add priv-app/VosHello/VosHello.apk=<path/to/apk> [--add ...] [--keys ~/.vos-keys] [--out <zip>]
+#       --add priv-app/VosHello/VosHello.apk=<path/to/apk> [--add ...] [--keys $HOME/.vos-keys] [--out <zip>]
 #
 # Paths inside /product (overlay files and --add destinations) may use only [A-Za-z0-9._-] in each
 # component. Every APK added must be a signed, non-debuggable build that is not signed with an
@@ -19,7 +19,7 @@
 # Output (--out, else): $VOS_IMAGE_OUT/<YYYY-MM>/vos-<device>-<build>-<overlay>-<git>.zip, where
 # VOS_IMAGE_OUT defaults to out/images/ in this checkout (gitignored). A .manifest.txt goes beside it.
 #
-# Keys (--keys, default ~/.vos-keys; made by image/keys.sh): avb.key, avb_pkmd.bin, ota.key, ota.crt.
+# Keys (--keys, default $HOME/.vos-keys; made by image/keys.sh): avb.key, avb_pkmd.bin, ota.key, ota.crt.
 # avbroot prompts for each key's passphrase unless VOS_AVB_PASS_FILE / VOS_OTA_PASS_FILE name files
 # that hold them (test keys only; never keep the owner's passphrases in a file).
 #
