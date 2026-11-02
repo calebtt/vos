@@ -22,6 +22,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/eval/m1/lib.sh"
 # True only when the actuator control shows a real recording. pass=false follows from granted=true
 # for every outcome, so outcome=recorded is what shows the probe saw audio.
 control_recorded() {
@@ -60,10 +61,7 @@ if (( self_test )); then
     exit
 fi
 
-stamp="$(date +%Y-%m-%d)/m1-aud-02-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
-mkdir -p "$out"
-exec > >(tee -a "$out/run.log") 2>&1
+vos_run_dir m1-aud-02
 
 echo "M1-AUD-02 on $(adb get-serialno) ($(adb shell getprop ro.build.fingerprint | tr -d '\r')); results in $out"
 
@@ -71,6 +69,7 @@ fails=0
 check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 
 if (( build )); then
+    # shellcheck disable=SC2046 # unquoted on purpose: no extra task (not an empty one) without --control
     "$ROOT/gradlew" -p "$ROOT" -q --console=plain :session:assembleDebugAndroidTest \
         $( (( control )) && echo :actuator:assembleDebugAndroidTest )
 fi
