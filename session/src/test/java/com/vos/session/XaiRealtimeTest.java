@@ -2,6 +2,7 @@ package com.vos.session;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Base64;
@@ -21,10 +22,12 @@ public class XaiRealtimeTest {
         @Override public void speechStopped() { calls.add("speech stopped"); }
         @Override public void ownerTranscript(String t) { calls.add("owner " + t); }
         @Override public void audio(String rid, byte[] pcm) { calls.add("audio " + rid + " " + pcm.length); audio = pcm; }
-        @Override public void replyTranscript(String t) { calls.add("reply " + t); }
+        @Override public void replyTranscriptDelta(String rid, String d) { calls.add("reply-delta " + rid + " " + d); }
+        @Override public void replyTranscript(String rid, String t) { calls.add("reply " + rid + " " + t); }
         @Override public void responseDone(String id, String s) { calls.add("done " + s); }
         @Override public void responseCreated(String id) { calls.add("created-response " + id); }
-        @Override public void error(String c, String m) { calls.add("error " + c + " " + m); }
+        @Override public void itemAdded(String role) { calls.add("added " + role); }
+        @Override public void error(String c, String m, String e) { calls.add("error " + c + " " + m + " " + e); }
         @Override public void functionCall(String r, String id, String n, String a) { calls.add("call " + r + " " + id + " " + n + " " + a); }
     }
 
@@ -113,9 +116,63 @@ public class XaiRealtimeTest {
             XaiRealtime.dispatch(e, r);
         }
         assertEquals(List.of("created grok-voice-3.0", "updated", "speech started", "speech stopped",
-                "owner What time is it?", "created-response r-1", "audio r-1 4", "reply It's 7:52.", "done completed",
-                "call r-2 call-9 volume_set {\"percent\":30,\"stream\":\"media\"}", "error invalid_audio bad"),
+                "owner What time is it?", "created-response r-1", "audio r-1 4", "reply-delta  It's",
+                "reply  It's 7:52.", "done completed",
+                "call r-2 call-9 volume_set {\"percent\":30,\"stream\":\"media\"}", "error invalid_audio bad "),
                 r.calls);
         assertArrayEquals(pcm, r.audio);
+    }
+
+    @Test
+    public void transcriptsCarryTheirResponseIdAndAnErrorNamesTheEventItRefused() {
+        Rec r = new Rec();
+        XaiRealtime.dispatch("{\"type\":\"response.output_audio_transcript.delta\",\"response_id\":\"r-3\",\"delta\":\"Sure\"}", r);
+        XaiRealtime.dispatch("{\"type\":\"response.output_audio_transcript.done\",\"response_id\":\"r-3\","
+                + "\"transcript\":\"Sure, here it is.\"}", r);
+        XaiRealtime.dispatch("{\"type\":\"error\",\"error\":{\"code\":\"invalid_value\",\"message\":\"no\","
+                + "\"event_id\":\"vos-heard-1\"}}", r);
+        assertEquals(List.of("reply-delta r-3 Sure", "reply r-3 Sure, here it is.", "error invalid_value no vos-heard-1"),
+                r.calls);
+    }
+
+    @Test
+    public void itemAddedAndXaiErrorsAsTheLiveApiSentThem() {
+        // Shapes from the PR #309 probe on the live API (2026-11-01; ids shortened, params cut).
+        Rec r = new Rec();
+        XaiRealtime.dispatch("{\"type\":\"conversation.item.added\",\"event_id\":\"s-1\",\"item\":{\"id\":\"i-1\","
+                + "\"object\":\"realtime.item\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"system\","
+                + "\"content\":[{\"type\":\"input_text\",\"text\":\"The owner interrupted ...\"}],\"replayed\":false}}", r);
+        XaiRealtime.dispatch("{\"type\":\"conversation.item.created\",\"item\":{\"role\":\"user\"}}", r); // OpenAI's name
+        XaiRealtime.dispatch("{\"type\":\"conversation.item.added\"}", r);
+        // xAI's error.event_id is the error's own server id, never the client's event_id.
+        XaiRealtime.dispatch("{\"type\":\"error\",\"event_id\":\"aaea872d\",\"error\":{\"message\":\"Invalid event received\","
+                + "\"type\":\"invalid_request_error\",\"code\":\"invalid_event\",\"event_id\":\"aaea872d\","
+                + "\"params\":\"1 validation error for RealtimeClientEvent\\nitem.role ...\"},\"previous_item_id\":null}", r);
+        assertEquals(List.of("added system", "added user", "added ", "error invalid_event Invalid event received aaea872d"),
+                r.calls);
+    }
+
+    @Test
+    public void aSeededItemCanCarryAnEventId() throws Exception {
+        JSONObject item = new JSONObject("{\"type\":\"message\",\"role\":\"system\",\"content\":[{\"type\":\"input_text\",\"text\":\"n\"}]}");
+        JSONObject m = new JSONObject(XaiRealtime.itemCreate(item, "vos-heard-seed-1"));
+        assertEquals("conversation.item.create", m.getString("type"));
+        assertEquals("vos-heard-seed-1", m.getString("event_id"));
+        assertEquals("system", m.getJSONObject("item").getString("role"));
+        assertTrue(!new JSONObject(XaiRealtime.itemCreate(item)).has("event_id"));
+    }
+
+    @Test
+    public void theHeardNoteIsASystemMessageItemWithAnEventId() throws Exception {
+        JSONObject m = new JSONObject(XaiRealtime.systemNote("The owner interrupted ...", "vos-heard-2"));
+        assertEquals("conversation.item.create", m.getString("type"));
+        assertEquals("vos-heard-2", m.getString("event_id"));
+        JSONObject item = m.getJSONObject("item");
+        assertEquals("message", item.getString("type"));
+        assertEquals("system", item.getString("role"));
+        JSONObject part = item.getJSONArray("content").getJSONObject(0);
+        assertEquals("input_text", part.getString("type"));
+        assertEquals("The owner interrupted ...", part.getString("text"));
+        assertEquals(1, item.getJSONArray("content").length());
     }
 }

@@ -29,7 +29,11 @@ final class XaiRealtime {
         /** Reply audio; {@code responseId} names the response it belongs to (barge-in drops by it). */
         void audio(String responseId, byte[] pcm);
 
-        void replyTranscript(String text);
+        /** Part of a reply's transcript, as it is generated (for the heard note, decision 48). */
+        void replyTranscriptDelta(String responseId, String delta);
+
+        /** A reply's whole transcript; {@code responseId} is "" when the vendor sends none. */
+        void replyTranscript(String responseId, String text);
 
         /** A response finished; {@code status} is e.g. "completed" or "cancelled" (the owner talked over it). */
         void responseDone(String responseId, String status);
@@ -38,7 +42,19 @@ final class XaiRealtime {
         /** A complete tool call; {@code responseId} names the response it belongs to. */
         void functionCall(String responseId, String callId, String name, String argsJson);
 
-        void error(String code, String message);
+        /**
+         * The vendor added an item to the conversation ({@code role} "" when it has none). xAI answers
+         * each {@code conversation.item.create} with exactly one {@code conversation.item.added} or one
+         * {@code error}, in order (PR #309 probe, 2026-11-01); OpenAI names it {@code conversation.item.created}.
+         */
+        void itemAdded(String role);
+
+        /**
+         * {@code eventId} is {@code error.event_id}, "" when absent. OpenAI puts the refused client
+         * event's id there; xAI puts the error's own server id there (PR #309 probe), so on xAI it
+         * names no client event.
+         */
+        void error(String code, String message, String eventId);
     }
 
     private XaiRealtime() {
@@ -104,6 +120,32 @@ final class XaiRealtime {
         }
     }
 
+    /** As above, with a client {@code event_id} (a seeded heard note, decision 48). */
+    static String itemCreate(JSONObject item, String eventId) {
+        try {
+            return new JSONObject().put("type", "conversation.item.create").put("event_id", eventId).put("item", item)
+                    .toString();
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * VOS's note to the model, as a system message item (decision 48: the words the owner heard of a cut
+     * reply). xAI accepts it (PR #309 probe). A vendor that echoes {@code event_id} in its errors names
+     * the note it refuses; xAI does not, so refusals are matched by timing (XaiRealtimeBackend).
+     */
+    static String systemNote(String text, String eventId) {
+        try {
+            JSONObject item = new JSONObject().put("type", "message").put("role", "system")
+                    .put("content", new JSONArray().put(new JSONObject().put("type", "input_text").put("text", text)));
+            return new JSONObject().put("type", "conversation.item.create").put("event_id", eventId).put("item", item)
+                    .toString();
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** A tool's result for the model, as a function_call_output item. */
     static String functionOutput(String callId, String outputJson) {
         try {
@@ -150,6 +192,11 @@ final class XaiRealtime {
             case "conversation.item.input_audio_transcription.completed":
                 h.ownerTranscript(m.optString("transcript", ""));
                 break;
+            case "conversation.item.added":
+            case "conversation.item.created":
+                JSONObject added = m.optJSONObject("item");
+                h.itemAdded(added == null ? "" : added.optString("role", ""));
+                break;
             case "response.created":
                 JSONObject c = m.optJSONObject("response");
                 h.responseCreated(c == null ? "" : c.optString("id", ""));
@@ -164,8 +211,11 @@ final class XaiRealtime {
                     }
                 }
                 break;
+            case "response.output_audio_transcript.delta":
+                h.replyTranscriptDelta(m.optString("response_id", ""), m.optString("delta", ""));
+                break;
             case "response.output_audio_transcript.done":
-                h.replyTranscript(m.optString("transcript", ""));
+                h.replyTranscript(m.optString("response_id", ""), m.optString("transcript", ""));
                 break;
             case "response.function_call_arguments.done":
                 h.functionCall(m.optString("response_id", ""), m.optString("call_id", ""), m.optString("name", ""),
@@ -178,7 +228,7 @@ final class XaiRealtime {
             case "error":
                 JSONObject e = m.optJSONObject("error");
                 h.error(e == null ? "unknown" : e.optString("code", e.optString("type", "unknown")),
-                        e == null ? "" : e.optString("message", ""));
+                        e == null ? "" : e.optString("message", ""), e == null ? "" : e.optString("event_id", ""));
                 break;
             default:
                 break;
