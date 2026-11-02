@@ -75,13 +75,14 @@ public class HeardNoteTest {
         String longWords = ("internationalization ".repeat(30)).strip();
         HeardNote l = HeardNote.of(longWords, 900, 1000);
         String lq = l.note.substring(l.note.indexOf('"') + 1, l.note.lastIndexOf('"'));
-        assertTrue(lq, lq.startsWith(HeardNote.ELLIPSIS) && lq.length() <= HeardNote.MAX_CHARS + 1);
+        assertTrue(lq, lq.startsWith(HeardNote.ELLIPSIS) && lq.length() <= HeardNote.MAX_CHARS); // "…" included
         assertTrue(lq, lq.endsWith("internationalization"));
         // One word longer than MAX_CHARS: its end.
         String url = "see " + "x".repeat(200) + " ok then";
         HeardNote u = HeardNote.of(url, 205, url.length());
         String uq = u.note.substring(u.note.indexOf('"') + 1, u.note.lastIndexOf('"'));
-        assertEquals(HeardNote.ELLIPSIS + "x".repeat(HeardNote.MAX_CHARS), uq);
+        assertEquals(HeardNote.ELLIPSIS + "x".repeat(HeardNote.MAX_CHARS - 1), uq);
+        assertEquals(HeardNote.MAX_CHARS, uq.length());
     }
 
     @Test
