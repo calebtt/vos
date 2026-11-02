@@ -44,6 +44,16 @@ import org.json.JSONObject;
  *       of one response form a batch: the model is asked to answer once, after all their results. If
  *       the owner talks over that response (or it is cancelled), the results still go back but no
  *       response.create is sent: the vendor's VAD opens the next response itself;</li>
+ *   <li>the heard note (decision 48, #248): xAI accepts {@code conversation.item.truncate} but does not
+ *       apply it, so after a barge-in VOS adds a system message to the vendor conversation quoting the
+ *       last words of the cut reply the owner heard ({@link HeardNote}). What was heard is fixed at the
+ *       barge-in: the reply's audio written to the speaker pipe, minus what was still unplayed in it (the
+ *       pacing lead the quiet clock also uses). It is mapped onto the reply's transcript in proportion to
+ *       all the audio the vendor sent for that reply, dropped late deltas included. The note is sent once
+ *       the reply's transcript is final (its {@code response.done}; at once if that came before the
+ *       barge-in), or at the latest when the owner stops speaking. It also goes into the shared
+ *       conversation, so later turns are seeded with it. No note when nothing was heard or the whole reply
+ *       was; a vendor refusal of the note is logged and does not end the turn;</li>
  *   <li>the quiet clock: it starts when the owner stops speaking (in case no reply comes), stops while
  *       reply audio arrives, and restarts once a completed reply has finished playing; a cancelled
  *       response (the owner talked over it) does not count as a finished reply;</li>
@@ -62,6 +72,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
     static final String END_TURN = "end_turn";
     /** The OpenAI-shaped error for a response.create while a response is active; not fatal here. */
     static final String ACTIVE_RESPONSE = "conversation_already_has_active_response";
+    /** The event_id prefix of the heard notes VOS sends (decision 48), so a refusal can be told apart. */
+    static final String NOTE_EVENT = "vos-heard-";
 
     /** Runs a tool in the actuator for this turn; returns the result JSON (never throws). */
     interface ToolCaller {
@@ -176,6 +188,19 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         private String endReason;
         private boolean ended;
         private boolean actuatorEnded;
+        /**
+         * Guards the replies and the pacing window the heard note reads (decision 48): the WebSocket
+         * thread, the reply thread and the turn's teardown all touch them.
+         */
+        private final Object heardLock = new Object();
+        private final java.util.Map<String, Reply> replies = new java.util.HashMap<>(); // by vendor id
+        private final List<Reply> uncut = new ArrayList<>(); // replies no barge-in has cut yet
+        private final List<Reply> pendingNotes = new ArrayList<>(); // cut, waiting for the response's done
+        private Reply lastReply; // the response last created, or audio or a transcript last arrived for
+        private Reply lastWritten; // the reply whose audio was last written to the speaker pipe
+        private long playStart; // playReplies' pacing window, as of its last write
+        private long playWritten;
+        private int noteSeq;
 
         Turn(String turnId, InputStream mic, OutputStream speaker, Runnable ready) {
             this.turnId = turnId;
@@ -250,6 +275,9 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 t.interrupt();
             }
             toolRunner.shutdownNow();
+            for (Reply r : waitingNotes()) {
+                note(r); // the turn ended first: the note still goes into the shared conversation
+            }
             synchronized (callLock) { // a response still open at the end ends with the turn; none starts after it
                 callsClosed = true;
                 endCallLocked();
@@ -383,6 +411,12 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                         }
                         speaker.write(c.pcm, off, len);
                         written += len;
+                        synchronized (heardLock) {
+                            playStart = start;
+                            playWritten = written;
+                            c.reply.written += len;
+                            lastWritten = c.reply;
+                        }
                     }
                 }
             } catch (IOException e) {
@@ -420,6 +454,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void speechStarted() {
+            List<Reply> cut = cutReplies(); // first: what had been heard when the owner started speaking
             synchronized (idleLock) {
                 speaking = true;
                 responseDone = false;
@@ -436,6 +471,99 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             int dropped = replyQueue.size();
             replyQueue.clear();
             Log.i(TAG, "turn " + turnId + " speech started" + (dropped > 0 ? ", dropped " + dropped + " reply chunks" : ""));
+            for (Reply r : cut) {
+                note(r); // its transcript is final already
+            }
+        }
+
+        /**
+         * Fixes how much of each reply not yet cut the owner heard: its audio written to the speaker
+         * pipe, minus, for the reply written last, what of the pipe was still unplayed. A reply that is
+         * done and was heard whole needs no note. Returns the cut replies whose response is done (their
+         * notes can go now); the others wait for their done in {@link #pendingNotes}. A reply is cut once,
+         * so a later barge-in cuts only replies that came after this one.
+         */
+        private List<Reply> cutReplies() {
+            List<Reply> ready = new ArrayList<>();
+            synchronized (heardLock) {
+                long unplayedMs = Math.max(0, playWritten * 1000 / BYTES_PER_SECOND - (now() - playStart));
+                long unplayed = unplayedMs * BYTES_PER_SECOND / 1000;
+                for (Reply r : uncut) {
+                    r.heard = r == lastWritten ? Math.max(0, r.written - unplayed) : r.written;
+                    if (r.done && r.heard >= r.received) {
+                        r.noted = true; // played whole (or had no audio): nothing was cut
+                    } else if (r.done) {
+                        ready.add(r);
+                    } else {
+                        pendingNotes.add(r);
+                    }
+                }
+                uncut.clear();
+            }
+            return ready;
+        }
+
+        /** A new reply record, not yet cut. Under heardLock. */
+        private Reply newReply() {
+            Reply r = new Reply();
+            uncut.add(r);
+            lastReply = r;
+            return r;
+        }
+
+        private List<Reply> waitingNotes() {
+            synchronized (heardLock) {
+                return new ArrayList<>(pendingNotes);
+            }
+        }
+
+        /** The reply {@code responseId} names; "" means the last one, or a new one once that is done. */
+        private Reply replyFor(String responseId) { // under heardLock
+            if (!responseId.isEmpty()) {
+                Reply r = replies.get(responseId);
+                if (r == null) {
+                    r = newReply();
+                    replies.put(responseId, r);
+                }
+                return r;
+            }
+            return lastReply == null || lastReply.done ? newReply() : lastReply;
+        }
+
+        /**
+         * Sends the heard note for a cut reply (decision 48), once: to the vendor while the turn is open,
+         * and to the shared conversation. Logs counts and timings only, never the words.
+         */
+        private void note(Reply r) {
+            String text;
+            long heard;
+            long total;
+            String eventId;
+            synchronized (heardLock) {
+                if (r.noted) {
+                    return;
+                }
+                r.noted = true;
+                pendingNotes.remove(r);
+                text = r.transcript != null ? r.transcript : r.deltas.toString();
+                heard = r.heard;
+                total = r.received;
+                eventId = NOTE_EVENT + (++noteSeq);
+            }
+            if (heard >= total) {
+                return; // the whole reply had played: nothing was cut
+            }
+            HeardNote n = HeardNote.of(text, heard, total);
+            if (n.note != null) {
+                WebSocket w = ws;
+                if (w != null && !over()) {
+                    w.send(XaiRealtime.systemNote(n.note, eventId));
+                }
+                context.note(turnId, n.note);
+            }
+            Log.i(TAG, "turn " + turnId + " heard note " + (n.note != null ? "sent" : "none (" + n.outcome + ")")
+                    + " heard_ms=" + heard * 1000 / BYTES_PER_SECOND + " reply_ms=" + total * 1000 / BYTES_PER_SECOND
+                    + " words=" + n.heardWords + "/" + n.words);
         }
 
         @Override
@@ -453,6 +581,13 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             }
             if (!responseId.isEmpty()) {
                 currentResponse = responseId; // so a barge-in before its first audio still drops it
+            }
+            synchronized (heardLock) { // a new response is the last reply, even before its first audio
+                if (responseId.isEmpty()) {
+                    newReply();
+                } else {
+                    replyFor(responseId);
+                }
             }
             if (speaking) {
                 // Only our tool follow-up can open a response while the owner talks (the vendor's VAD
@@ -479,6 +614,9 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             }
             speechEndedAt = now();
             firstAudioOfReply = true;
+            for (Reply r : waitingNotes()) {
+                note(r); // no done for the cut reply yet: the note goes with the transcript so far
+            }
         }
 
         @Override
@@ -489,6 +627,11 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
 
         @Override
         public void audio(String responseId, byte[] pcm) {
+            Reply reply;
+            synchronized (heardLock) { // all of a reply's audio counts for the heard note, played or not
+                reply = replyFor(responseId);
+                reply.received += pcm.length;
+            }
             if (cancelled(responseId)) {
                 return; // a late delta of a response the owner interrupted
             }
@@ -502,7 +645,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 Log.i(TAG, "turn " + turnId + " first reply audio speech_end_to_audio_ms="
                         + (speechEndedAt > 0 ? now() - speechEndedAt : -1));
             }
-            replyQueue.add(new Chunk(responseId, pcm));
+            replyQueue.add(new Chunk(responseId, pcm, reply));
         }
 
         /** Ends the open model call, if any: on a done, a barge-in, or the turn's teardown. */
@@ -520,7 +663,17 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         }
 
         @Override
-        public void replyTranscript(String text) {
+        public void replyTranscriptDelta(String responseId, String delta) {
+            synchronized (heardLock) {
+                replyFor(responseId).deltas.append(delta);
+            }
+        }
+
+        @Override
+        public void replyTranscript(String responseId, String text) {
+            synchronized (heardLock) {
+                replyFor(responseId).transcript = text;
+            }
             transcripts.write(turnId, "vos", text);
             context.vos(turnId, text);
         }
@@ -528,6 +681,19 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void responseDone(String responseId, String status) {
             Log.i(TAG, "turn " + turnId + " response done status=" + status);
+            Reply cutAndDone = null;
+            synchronized (heardLock) {
+                Reply r = responseId.isEmpty() ? lastReply : replies.get(responseId);
+                if (r != null) {
+                    r.done = true;
+                    if (pendingNotes.contains(r)) {
+                        cutAndDone = r;
+                    }
+                }
+            }
+            if (cutAndDone != null) {
+                note(cutAndDone); // its transcript is final now
+            }
             synchronized (callLock) { // completed, cancelled or failed: that response no longer produces output
                 // A done ends the open call when it is that call's (same id), carries no id, or carries an
                 // id this turn never saw created (the open call was created without one). A done for
@@ -656,8 +822,12 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         }
 
         @Override
-        public void error(String code, String message) {
+        public void error(String code, String message, String eventId) {
             Log.w(TAG, "turn " + turnId + " vendor error code=" + code);
+            if (eventId.startsWith(NOTE_EVENT)) {
+                Log.w(TAG, "turn " + turnId + " the vendor refused the heard note; the turn goes on");
+                return;
+            }
             if (ACTIVE_RESPONSE.equals(code)) {
                 return; // our follow-up met a response the vendor already opened; that one answers
             }
@@ -673,15 +843,28 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         }
     }
 
-    /** One reply delta and the response it belongs to. */
+    /** One reply delta, the response it belongs to, and that response's reply record. */
     private static final class Chunk {
         final String responseId;
         final byte[] pcm;
+        final Reply reply;
 
-        Chunk(String responseId, byte[] pcm) {
+        Chunk(String responseId, byte[] pcm, Reply reply) {
             this.responseId = responseId;
             this.pcm = pcm;
+            this.reply = reply;
         }
+    }
+
+    /** One response's reply, for the heard note (decision 48); guarded by its turn's heardLock. */
+    private static final class Reply {
+        long received; // audio bytes the vendor sent, played or not
+        long written; // audio bytes written to the speaker pipe
+        final StringBuilder deltas = new StringBuilder();
+        String transcript; // the done transcript, or null
+        boolean done; // its response.done arrived
+        long heard = -1; // audio bytes heard, fixed by the first barge-in; -1 until then
+        boolean noted;
     }
 
     private static long now() {
