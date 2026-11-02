@@ -11,7 +11,8 @@ package com.vos.session;
  * It rounds down to whole words, so a word the owner heard only part of is not quoted, and a word
  * whose unheard part is only punctuation counts as heard. No note when the transcript is empty, when
  * no whole word was heard, or when the whole reply was. The quote is bounded: at most
- * {@link #MAX_WORDS} words and {@link #MAX_CHARS} characters. Pure, so it is tested on the JVM.
+ * {@link #MAX_WORDS} words and {@link #MAX_CHARS} characters, its ellipsis included. Pure, so it is
+ * tested on the JVM.
  */
 final class HeardNote {
     static final int MAX_WORDS = 12;
@@ -76,17 +77,20 @@ final class HeardNote {
         return start < 0 ? "" : text.substring(0, start).strip();
     }
 
-    /** The last words of {@code prefix}, at most MAX_WORDS and MAX_CHARS, with an ellipsis if cut. */
+    /**
+     * The last words of {@code prefix}: at most MAX_WORDS words and MAX_CHARS characters, the leading
+     * ellipsis (when words were left out) included.
+     */
     static String quote(String prefix) {
         String[] w = prefix.split(" ");
         int from = Math.max(0, w.length - MAX_WORDS);
         String q = String.join(" ", java.util.Arrays.copyOfRange(w, from, w.length));
-        while (q.length() > MAX_CHARS && from < w.length - 1) {
+        while ((from > 0 ? ELLIPSIS.length() : 0) + q.length() > MAX_CHARS && from < w.length - 1) {
             from++;
             q = String.join(" ", java.util.Arrays.copyOfRange(w, from, w.length));
         }
-        if (q.length() > MAX_CHARS) { // one very long word: its end
-            q = q.substring(q.length() - MAX_CHARS);
+        if ((from > 0 ? ELLIPSIS.length() : 0) + q.length() > MAX_CHARS) { // one very long word: its end
+            q = q.substring(q.length() - (MAX_CHARS - ELLIPSIS.length()));
             from = 1;
         }
         return (from > 0 ? ELLIPSIS : "") + q.replace('"', '\'');

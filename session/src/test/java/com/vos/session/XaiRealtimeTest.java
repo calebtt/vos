@@ -2,6 +2,7 @@ package com.vos.session;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Base64;
@@ -25,6 +26,7 @@ public class XaiRealtimeTest {
         @Override public void replyTranscript(String rid, String t) { calls.add("reply " + rid + " " + t); }
         @Override public void responseDone(String id, String s) { calls.add("done " + s); }
         @Override public void responseCreated(String id) { calls.add("created-response " + id); }
+        @Override public void itemAdded(String role) { calls.add("added " + role); }
         @Override public void error(String c, String m, String e) { calls.add("error " + c + " " + m + " " + e); }
         @Override public void functionCall(String r, String id, String n, String a) { calls.add("call " + r + " " + id + " " + n + " " + a); }
     }
@@ -131,6 +133,33 @@ public class XaiRealtimeTest {
                 + "\"event_id\":\"vos-heard-1\"}}", r);
         assertEquals(List.of("reply-delta r-3 Sure", "reply r-3 Sure, here it is.", "error invalid_value no vos-heard-1"),
                 r.calls);
+    }
+
+    @Test
+    public void itemAddedAndXaiErrorsAsTheLiveApiSentThem() {
+        // Shapes from the PR #309 probe on the live API (2026-11-01; ids shortened, params cut).
+        Rec r = new Rec();
+        XaiRealtime.dispatch("{\"type\":\"conversation.item.added\",\"event_id\":\"s-1\",\"item\":{\"id\":\"i-1\","
+                + "\"object\":\"realtime.item\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"system\","
+                + "\"content\":[{\"type\":\"input_text\",\"text\":\"The owner interrupted ...\"}],\"replayed\":false}}", r);
+        XaiRealtime.dispatch("{\"type\":\"conversation.item.created\",\"item\":{\"role\":\"user\"}}", r); // OpenAI's name
+        XaiRealtime.dispatch("{\"type\":\"conversation.item.added\"}", r);
+        // xAI's error.event_id is the error's own server id, never the client's event_id.
+        XaiRealtime.dispatch("{\"type\":\"error\",\"event_id\":\"aaea872d\",\"error\":{\"message\":\"Invalid event received\","
+                + "\"type\":\"invalid_request_error\",\"code\":\"invalid_event\",\"event_id\":\"aaea872d\","
+                + "\"params\":\"1 validation error for RealtimeClientEvent\\nitem.role ...\"},\"previous_item_id\":null}", r);
+        assertEquals(List.of("added system", "added user", "added ", "error invalid_event Invalid event received aaea872d"),
+                r.calls);
+    }
+
+    @Test
+    public void aSeededItemCanCarryAnEventId() throws Exception {
+        JSONObject item = new JSONObject("{\"type\":\"message\",\"role\":\"system\",\"content\":[{\"type\":\"input_text\",\"text\":\"n\"}]}");
+        JSONObject m = new JSONObject(XaiRealtime.itemCreate(item, "vos-heard-seed-1"));
+        assertEquals("conversation.item.create", m.getString("type"));
+        assertEquals("vos-heard-seed-1", m.getString("event_id"));
+        assertEquals("system", m.getJSONObject("item").getString("role"));
+        assertTrue(!new JSONObject(XaiRealtime.itemCreate(item)).has("event_id"));
     }
 
     @Test

@@ -52,8 +52,11 @@ import org.json.JSONObject;
  *       all the audio the vendor sent for that reply, dropped late deltas included. The note is sent once
  *       the reply's transcript is final (its {@code response.done}; at once if that came before the
  *       barge-in), or at the latest when the owner stops speaking. It also goes into the shared
- *       conversation, so later turns are seeded with it. No note when nothing was heard or the whole reply
- *       was; a vendor refusal of the note is logged and does not end the turn;</li>
+ *       conversation, after the cut reply's line, so later turns are seeded with it. No note when nothing
+ *       was heard or the whole reply was. xAI accepts the note (PR #309 probe) but its errors name no
+ *       client event, so a refusal is matched by timing: an error while a note is unconfirmed (no
+ *       {@code conversation.item.added} for it yet) is that note's refusal. It is logged and never ends
+ *       the turn;</li>
  *   <li>the quiet clock: it starts when the owner stops speaking (in case no reply comes), stops while
  *       reply audio arrives, and restarts once a completed reply has finished playing; a cancelled
  *       response (the owner talked over it) does not count as a finished reply;</li>
@@ -72,7 +75,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
     static final String END_TURN = "end_turn";
     /** The OpenAI-shaped error for a response.create while a response is active; not fatal here. */
     static final String ACTIVE_RESPONSE = "conversation_already_has_active_response";
-    /** The event_id prefix of the heard notes VOS sends (decision 48), so a refusal can be told apart. */
+    /** The event_id prefix of the heard notes VOS sends (decision 48); seeded notes add "seed-". */
     static final String NOTE_EVENT = "vos-heard-";
 
     /** Runs a tool in the actuator for this turn; returns the result JSON (never throws). */
@@ -88,6 +91,11 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         long idleMs = 8_000;
         long maxTurnMs = 180_000;
         long leadMs = 300;
+        /**
+         * How long a heard note stays unconfirmed at most (decision 48). xAI answers it within ~40 ms;
+         * the cap only keeps a vendor that never answers from turning later errors into refusals.
+         */
+        long noteAckMs = 5_000;
         /** The vendor's end-of-turn settings for this turn (patience, #247). */
         TurnDetection turnDetection = TurnDetection.VENDOR_DEFAULT;
     }
@@ -196,6 +204,12 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         private final java.util.Map<String, Reply> replies = new java.util.HashMap<>(); // by vendor id
         private final List<Reply> uncut = new ArrayList<>(); // replies no barge-in has cut yet
         private final List<Reply> pendingNotes = new ArrayList<>(); // cut, waiting for the response's done
+        private final List<Reply> allReplies = new ArrayList<>(); // this turn's, for the teardown
+        /** Heard notes sent and not yet confirmed by a conversation.item.added, oldest first. */
+        private final java.util.ArrayDeque<Unconfirmed> unconfirmed = new java.util.ArrayDeque<>();
+        /** Shared-conversation lines (VOS replies and heard notes), in the order decided under heardLock. */
+        private final java.util.ArrayDeque<String[]> lines = new java.util.ArrayDeque<>();
+        private boolean writingLines; // a thread is writing the lines queue out
         private Reply lastReply; // the response last created, or audio or a transcript last arrived for
         private Reply lastWritten; // the reply whose audio was last written to the speaker pipe
         private long playStart; // playReplies' pacing window, as of its last write
@@ -276,8 +290,18 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             }
             toolRunner.shutdownNow();
             for (Reply r : waitingNotes()) {
-                note(r); // the turn ended first: the note still goes into the shared conversation
+                note(r, true); // the turn ended first: the note still goes into the shared conversation
             }
+            synchronized (heardLock) { // notes still waiting for their reply's line get it from the deltas
+                for (Reply r : allReplies) {
+                    if (r.heldNote != null) {
+                        lineFromDeltas(r);
+                        releaseHeldNote(r);
+                    }
+                }
+                unconfirmed.clear(); // the session is over: nothing answers them now
+            }
+            writeLines();
             synchronized (callLock) { // a response still open at the end ends with the turn; none starts after it
                 callsClosed = true;
                 endCallLocked();
@@ -438,8 +462,13 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 WebSocket w = ws;
                 if (w != null && !seed.isEmpty()) {
                     int tokens = 0;
+                    int notes = 0;
                     for (JSONObject item : seed) {
-                        w.send(XaiRealtime.itemCreate(item));
+                        if ("system".equals(item.optString("role"))) { // a heard note from an earlier turn
+                            w.send(XaiRealtime.itemCreate(item, expectAnswer(NOTE_EVENT + "seed-" + (++notes))));
+                        } else {
+                            w.send(XaiRealtime.itemCreate(item));
+                        }
                         tokens += ContextBudget.tokens(item.toString());
                     }
                     Log.i(TAG, "turn " + turnId + " seeded items=" + seed.size() + " tokens~" + tokens);
@@ -472,7 +501,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             replyQueue.clear();
             Log.i(TAG, "turn " + turnId + " speech started" + (dropped > 0 ? ", dropped " + dropped + " reply chunks" : ""));
             for (Reply r : cut) {
-                note(r); // its transcript is final already
+                note(r, false); // its transcript is final already
             }
         }
 
@@ -507,6 +536,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         private Reply newReply() {
             Reply r = new Reply();
             uncut.add(r);
+            allReplies.add(r);
             lastReply = r;
             return r;
         }
@@ -531,14 +561,14 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         }
 
         /**
-         * Sends the heard note for a cut reply (decision 48), once: to the vendor while the turn is open,
-         * and to the shared conversation. Logs counts and timings only, never the words.
+         * Sends the heard note for a cut reply (decision 48), once: to the vendor while the turn is open
+         * ({@code turnOver} false), and to the shared conversation once the reply's own line is there.
+         * Logs counts and timings only, never the words.
          */
-        private void note(Reply r) {
+        private void note(Reply r, boolean turnOver) {
             String text;
             long heard;
             long total;
-            String eventId;
             synchronized (heardLock) {
                 if (r.noted) {
                     return;
@@ -548,22 +578,115 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                 text = r.transcript != null ? r.transcript : r.deltas.toString();
                 heard = r.heard;
                 total = r.received;
-                eventId = NOTE_EVENT + (++noteSeq);
             }
             if (heard >= total) {
                 return; // the whole reply had played: nothing was cut
             }
             HeardNote n = HeardNote.of(text, heard, total);
+            String eventId = null;
             if (n.note != null) {
                 WebSocket w = ws;
-                if (w != null && !over()) {
-                    w.send(XaiRealtime.systemNote(n.note, eventId));
+                boolean live = !turnOver && w != null && !over();
+                synchronized (heardLock) {
+                    r.heldNote = n.note;
+                    if (r.done || turnOver) {
+                        lineFromDeltas(r); // no transcript.done is coming for it
+                    }
+                    releaseHeldNote(r);
+                    if (live) {
+                        eventId = NOTE_EVENT + (++noteSeq); // counts notes sent, not cuts
+                    }
                 }
-                context.note(turnId, n.note);
+                if (eventId != null) {
+                    w.send(XaiRealtime.systemNote(n.note, expectAnswer(eventId)));
+                }
+                writeLines();
             }
-            Log.i(TAG, "turn " + turnId + " heard note " + (n.note != null ? "sent" : "none (" + n.outcome + ")")
+            Log.i(TAG, "turn " + turnId + " heard note "
+                    + (n.note == null ? "none (" + n.outcome + ")" : eventId != null ? "sent " + eventId : "kept (turn over)")
                     + " heard_ms=" + heard * 1000 / BYTES_PER_SECOND + " reply_ms=" + total * 1000 / BYTES_PER_SECOND
                     + " words=" + n.heardWords + "/" + n.words);
+        }
+
+        /**
+         * Registers a heard note about to be sent as unconfirmed, before the send so its answer cannot
+         * arrive first; returns its event id.
+         */
+        private String expectAnswer(String eventId) {
+            synchronized (heardLock) {
+                unconfirmed.add(new Unconfirmed(eventId, now()));
+            }
+            return eventId;
+        }
+
+        /**
+         * The unconfirmed heard note an error answers, or null. xAI answers each client event once, in
+         * order, and its errors name no client event (PR #309 probe), so an error while a note is
+         * unconfirmed is taken as the oldest one's refusal; a vendor that echoes {@code event_id} names
+         * the note. The trade-off: an unrelated error arriving in that window (about 40 ms on xAI) is
+         * taken as the refusal too and does not end the turn; a fatal error recurs or ends the turn by
+         * its other limits. Notes past {@link Timing#noteAckMs} are no longer unconfirmed.
+         */
+        private Unconfirmed refusedNote(String eventId) {
+            synchronized (heardLock) {
+                long now = now();
+                while (!unconfirmed.isEmpty() && now - unconfirmed.peekFirst().sentAt > timing.noteAckMs) {
+                    unconfirmed.pollFirst();
+                }
+                for (Unconfirmed u : unconfirmed) {
+                    if (u.eventId.equals(eventId)) {
+                        unconfirmed.remove(u);
+                        return u;
+                    }
+                }
+                return unconfirmed.pollFirst();
+            }
+        }
+
+        /** Queues the reply's line from its transcript deltas, if it has no line yet. Under heardLock. */
+        private void lineFromDeltas(Reply r) {
+            String d = r.deltas.toString();
+            if (!r.lineRecorded && !d.isBlank()) {
+                lines.add(new String[] {"vos", d});
+                r.lineRecorded = true;
+                r.lineFromDeltas = true; // a late transcript.done adds no second line
+            }
+        }
+
+        /** Queues the reply's held note once its line is queued. Under heardLock. */
+        private void releaseHeldNote(Reply r) {
+            if (r.heldNote != null && r.lineRecorded) {
+                lines.add(new String[] {"note", r.heldNote});
+                r.heldNote = null;
+            }
+        }
+
+        /**
+         * Writes the queued lines to the shared conversation in order. One thread writes at a time, and
+         * no lock is held while writing (the conversation saves to storage).
+         */
+        private void writeLines() {
+            synchronized (heardLock) {
+                if (writingLines) {
+                    return; // the writing thread takes these too
+                }
+                writingLines = true;
+            }
+            while (true) {
+                String[] l;
+                synchronized (heardLock) {
+                    l = lines.pollFirst();
+                    if (l == null) {
+                        writingLines = false;
+                        return;
+                    }
+                }
+                if (l[0].equals("vos")) {
+                    context.vos(turnId, l[1]);
+                } else {
+                    context.note(turnId, l[1]);
+                }
+            }
         }
 
         @Override
@@ -615,7 +738,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             speechEndedAt = now();
             firstAudioOfReply = true;
             for (Reply r : waitingNotes()) {
-                note(r); // no done for the cut reply yet: the note goes with the transcript so far
+                note(r, false); // no done for the cut reply yet: the note goes with the transcript so far
             }
         }
 
@@ -672,10 +795,30 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void replyTranscript(String responseId, String text) {
             synchronized (heardLock) {
-                replyFor(responseId).transcript = text;
+                Reply r = replyFor(responseId);
+                r.transcript = r.transcript == null ? text : r.transcript + " " + text;
+                if (!r.lineFromDeltas) {
+                    lines.add(new String[] {"vos", text});
+                    r.lineRecorded = true;
+                }
+                releaseHeldNote(r); // a note held for this line follows it
             }
             transcripts.write(turnId, "vos", text);
-            context.vos(turnId, text);
+            writeLines();
+        }
+
+        @Override
+        public void itemAdded(String role) {
+            if (!"system".equals(role)) {
+                return;
+            }
+            Unconfirmed u;
+            synchronized (heardLock) {
+                u = unconfirmed.pollFirst(); // answers come in order: the oldest note is confirmed
+            }
+            if (u != null) {
+                Log.i(TAG, "turn " + turnId + " heard note " + u.eventId + " confirmed after_ms=" + (now() - u.sentAt));
+            }
         }
 
         @Override
@@ -689,10 +832,15 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
                     if (pendingNotes.contains(r)) {
                         cutAndDone = r;
                     }
+                    if (r.heldNote != null) { // sent at speech_stopped; no transcript.done came before this done
+                        lineFromDeltas(r);
+                        releaseHeldNote(r);
+                    }
                 }
             }
+            writeLines();
             if (cutAndDone != null) {
-                note(cutAndDone); // its transcript is final now
+                note(cutAndDone, false); // its transcript is final now
             }
             synchronized (callLock) { // completed, cancelled or failed: that response no longer produces output
                 // A done ends the open call when it is that call's (same id), carries no id, or carries an
@@ -824,12 +972,14 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         @Override
         public void error(String code, String message, String eventId) {
             Log.w(TAG, "turn " + turnId + " vendor error code=" + code);
-            if (eventId.startsWith(NOTE_EVENT)) {
-                Log.w(TAG, "turn " + turnId + " the vendor refused the heard note; the turn goes on");
-                return;
-            }
             if (ACTIVE_RESPONSE.equals(code)) {
                 return; // our follow-up met a response the vendor already opened; that one answers
+            }
+            Unconfirmed refused = refusedNote(eventId); // never the message: it may quote the note
+            if (refused != null) {
+                Log.w(TAG, "turn " + turnId + " heard note " + refused.eventId + " refused code=" + code
+                        + " after_ms=" + (now() - refused.sentAt) + "; the turn goes on");
+                return;
             }
             finish("vendor error: " + code);
         }
@@ -865,6 +1015,20 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
         boolean done; // its response.done arrived
         long heard = -1; // audio bytes heard, fixed by the first barge-in; -1 until then
         boolean noted;
+        boolean lineRecorded; // its line is queued for the shared conversation
+        boolean lineFromDeltas; // that line came from the deltas (no transcript.done before it was needed)
+        String heldNote; // its heard note, waiting for that line
+    }
+
+    /** A heard note sent and not yet answered by the vendor. */
+    private static final class Unconfirmed {
+        final String eventId;
+        final long sentAt;
+
+        Unconfirmed(String eventId, long sentAt) {
+            this.eventId = eventId;
+            this.sentAt = sentAt;
+        }
     }
 
     private static long now() {

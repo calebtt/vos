@@ -83,6 +83,8 @@ public class XaiRealtimeBackendTest {
     /** Every session.update the fake vendor of enqueueVendor received. */
     private final List<JSONObject> sessionUpdates = new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile long toolDelayMs;
+    /** How long a heard note stays unconfirmed at most (decision 48); the backend's default unless a test sets it. */
+    private long noteAckMs = new XaiRealtimeBackend.Timing().noteAckMs;
 
     private XaiRealtimeBackend backend(long idleMs) throws Exception {
         String policy = "{\"registry\":[{\"id\":\"xai:test\",\"kind\":\"realtime_voice\",\"vendor\":\"xai\","
@@ -94,6 +96,7 @@ public class XaiRealtimeBackendTest {
         t.firstSpeechMs = 5_000;
         t.maxTurnMs = 20_000;
         t.turnDetection = turnDetection;
+        t.noteAckMs = noteAckMs;
         org.json.JSONArray schemas = new org.json.JSONArray(
                 "[{\"type\":\"function\",\"name\":\"volume_set\",\"parameters\":{\"type\":\"object\"}}]");
         return new XaiRealtimeBackend(egress, vault, e, transcripts, () -> "be brief", schemas,
@@ -228,6 +231,7 @@ public class XaiRealtimeBackendTest {
     private final class RecordingContext implements ContextKeeper {
         final List<String> events = new java.util.concurrent.CopyOnWriteArrayList<>();
         String refuse;
+        List<JSONObject> seedItems; // null: the two default items
 
         @Override
         public String beforeTurn(String turnId) {
@@ -237,6 +241,9 @@ public class XaiRealtimeBackendTest {
 
         @Override
         public List<JSONObject> seed() {
+            if (seedItems != null) {
+                return seedItems;
+            }
             try {
                 return List.of(new JSONObject("{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"My sister's name is Dana.\"}]}"),
                         new JSONObject("{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Got it.\"}]}"));
@@ -1247,7 +1254,27 @@ public class XaiRealtimeBackendTest {
      * A vendor that runs {@code script} on its own thread after the third mic append (so its sleeps do
      * not hold up what the session sends), and refuses every heard note when {@code refuseNotes}.
      */
+    /**
+     * How the scripted vendor answers each heard note (a system message item): as xAI does when it
+     * accepts one (conversation.item.added, role system), with an error in xAI's shape (its own server
+     * id in error.event_id, never the client's; PR #309 probe), or not at all.
+     */
+    private enum NoteAnswer { ADDED, REFUSED, NONE }
+
     private void enqueueScripted(Script script, boolean refuseNotes) {
+        enqueueScripted(script, refuseNotes ? NoteAnswer.REFUSED : NoteAnswer.ADDED, 0);
+    }
+
+    /** An error as the live xAI API sends one: error.event_id is the error's own id. */
+    private static String xaiError(String code) {
+        String id = java.util.UUID.randomUUID().toString();
+        return "{\"type\":\"error\",\"event_id\":\"" + id + "\",\"error\":{\"message\":\"Invalid event received\","
+                + "\"type\":\"invalid_request_error\",\"code\":\"" + code + "\",\"event_id\":\"" + id + "\","
+                + "\"params\":\"1 validation error for RealtimeClientEvent\"},\"previous_item_id\":null}";
+    }
+
+    /** The scripted vendor, answering heard notes as {@code answer} says, after {@code answerDelayMs}. */
+    private void enqueueScripted(Script script, NoteAnswer answer, long answerDelayMs) {
         server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
             boolean started;
 
@@ -1288,9 +1315,21 @@ public class XaiRealtimeBackendTest {
                 vendorLog.add("got " + type + (note ? " note" : ""));
                 if (note) {
                     notesSeen.add(m);
-                    if (refuseNotes) {
-                        ws.send("{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":"
-                                + "\"invalid_value\",\"message\":\"role\",\"event_id\":\"" + m.optString("event_id") + "\"}}");
+                    String reply = answer == NoteAnswer.ADDED
+                            ? "{\"type\":\"conversation.item.added\",\"item\":{\"type\":\"message\",\"status\":\"completed\","
+                                    + "\"role\":\"system\",\"content\":" + item.optJSONArray("content") + "}}"
+                            : answer == NoteAnswer.REFUSED ? xaiError("invalid_event") : null;
+                    if (reply != null && answerDelayMs == 0) {
+                        ws.send(reply);
+                    } else if (reply != null) {
+                        new Thread(() -> {
+                            try {
+                                Thread.sleep(answerDelayMs);
+                            } catch (InterruptedException ignored) {
+                                // test
+                            }
+                            ws.send(reply);
+                        }).start();
                     }
                 }
             }
@@ -1457,7 +1496,7 @@ public class XaiRealtimeBackendTest {
     }
 
     @Test
-    public void aVendorRefusingTheNoteDoesNotEndTheTurn() throws Exception {
+    public void aRefusalThatNamesNoClientEventIsMatchedByTimingAndTheTurnGoesOn() throws Exception {
         vault.put(KeyVault.XAI, "xai-test-key");
         String story = HeardNoteTest.words(20);
         enqueueScripted(ws -> {
@@ -1502,5 +1541,249 @@ public class XaiRealtimeBackendTest {
         assertEquals("idle", backend(400).run("t-48e", mic.in, new ByteArrayOutputStream(), () -> { }));
         mic.close();
         assertEquals(0, notesSeen.size());
+    }
+
+    /** A system message item for a seed: a heard note from an earlier turn. */
+    private static JSONObject seededNote(String text) throws Exception {
+        return new JSONObject().put("type", "message").put("role", "system").put("content",
+                new org.json.JSONArray().put(new JSONObject().put("type", "input_text").put("text", text)));
+    }
+
+    /** The shared conversation's "vos …" and "note …" events, in order. */
+    private static List<String> linesOf(RecordingContext rc) {
+        List<String> out = new ArrayList<>();
+        for (String e : rc.events) {
+            if (e.startsWith("vos ") || e.startsWith("note ") || e.startsWith("owner ")) {
+                out.add(e.startsWith("note ") ? "note" : e);
+            }
+        }
+        return out;
+    }
+
+    @Test
+    public void anErrorAfterTheNoteIsConfirmedStillEndsTheTurn() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueScripted(ws -> {
+            ws.send(STARTED);
+            ws.send(STOPPED);
+            ws.send(created("r1"));
+            ws.send(delta("r1", filled(2 * BPS, 0x11)));
+            ws.send(transcriptDone("r1", HeardNoteTest.words(20)));
+            ws.send(done("r1", "completed"));
+            Thread.sleep(800);
+            barge(ws); // the note goes out and is confirmed at once (conversation.item.added)
+            Thread.sleep(300);
+            ws.send(xaiError("invalid_audio")); // then an unrelated error
+        }, NoteAnswer.ADDED, 0);
+        Mic mic = new Mic();
+        assertEquals("vendor error: invalid_audio", backend(10_000).run("t-48f", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(1, notesSeen.size());
+    }
+
+    @Test
+    public void aNoteTheVendorNeverAnswersIsUnconfirmedOnlyUntilTheCap() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        noteAckMs = 200;
+        enqueueScripted(ws -> {
+            ws.send(STARTED);
+            ws.send(STOPPED);
+            ws.send(created("r1"));
+            ws.send(delta("r1", filled(2 * BPS, 0x11)));
+            ws.send(transcriptDone("r1", HeardNoteTest.words(20)));
+            ws.send(done("r1", "completed"));
+            Thread.sleep(800);
+            barge(ws); // no answer to the note at all
+            Thread.sleep(600);
+            ws.send(xaiError("invalid_audio")); // well past the cap: not the note's
+        }, NoteAnswer.NONE, 0);
+        Mic mic = new Mic();
+        assertEquals("vendor error: invalid_audio", backend(10_000).run("t-48g", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(1, notesSeen.size());
+    }
+
+    @Test
+    public void twoUnconfirmedNotesTakeOneErrorEachAndThenErrorsEndTheTurnAgain() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        RecordingContext rc = new RecordingContext();
+        rc.seedItems = List.of(seededNote("The owner interrupted your last reply after: \"one\"."),
+                seededNote("The owner interrupted your last reply after: \"two\"."));
+        context = rc;
+        enqueueScripted(ws -> {
+            Thread.sleep(500); // both seeded notes were refused by now, one error each, in order
+            ws.send(xaiError("invalid_audio"));
+        }, NoteAnswer.REFUSED, 150);
+        Mic mic = new Mic();
+        assertEquals("the third error is not a note's", "vendor error: invalid_audio",
+                backend(10_000).run("t-48h", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(2, notesSeen.size());
+        assertEquals(XaiRealtimeBackend.NOTE_EVENT + "seed-1", notesSeen.get(0).getString("event_id"));
+        assertEquals(XaiRealtimeBackend.NOTE_EVENT + "seed-2", notesSeen.get(1).getString("event_id"));
+    }
+
+    @Test
+    public void transcriptsAndDonesWithoutIdsAsTheLiveApiSentThemOnOctober20() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        RecordingContext rc = new RecordingContext();
+        context = rc;
+        String story = HeardNoteTest.words(20);
+        byte[] r1 = filled(2 * BPS, 0x11);
+        enqueueScripted(ws -> {
+            ws.send(STARTED);
+            ws.send(STOPPED);
+            ws.send(created("r1"));
+            ws.send(delta("r1", r1)); // audio carries the response id
+            ws.send("{\"type\":\"response.output_audio_transcript.delta\",\"delta\":" + JSONObject.quote(story) + "}");
+            ws.send("{\"type\":\"response.output_audio_transcript.done\",\"transcript\":" + JSONObject.quote(story) + "}");
+            ws.send("{\"type\":\"response.done\",\"response\":{\"status\":\"completed\"}}"); // no id
+            Thread.sleep(1300);
+            barge(ws);
+            Thread.sleep(300);
+            answer(ws);
+        }, NoteAnswer.ADDED, 0);
+        Mic mic = new Mic();
+        TimedSpeaker speaker = new TimedSpeaker();
+        assertEquals("idle", backend(400).run("t-48i", mic.in, speaker, () -> { }));
+        mic.close();
+        assertEquals(1, notesSeen.size());
+        int expected = expectedWords(story, speaker, r1.length);
+        int quoted = lastQuoted(notesSeen.get(0));
+        assertTrue("quoted up to w" + quoted + ", heard about " + expected + " words", Math.abs(quoted - expected) <= 1);
+        List<String> lines = linesOf(rc);
+        assertEquals(lines.toString(), "note", lines.get(lines.indexOf("vos " + story) + 1));
+    }
+
+    @Test
+    public void theOwnerStoppingFirstSendsTheNoteThenAndTheConversationKeepsItAfterTheReply() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        RecordingContext rc = new RecordingContext();
+        context = rc;
+        String story = HeardNoteTest.words(20);
+        enqueueScripted(ws -> {
+            ws.send(STARTED);
+            ws.send(STOPPED);
+            ws.send(created("r1"));
+            ws.send(transcriptDelta("r1", HeardNoteTest.words(10)));
+            ws.send(delta("r1", filled(BPS, 0x11)));
+            Thread.sleep(600);
+            barge(ws);
+            Thread.sleep(150);
+            send(ws, "speech_stopped", STOPPED); // before the cut reply's done: the note goes now
+            Thread.sleep(200);
+            ws.send("{\"type\":\"conversation.item.input_audio_transcription.completed\",\"transcript\":\"wait\"}");
+            ws.send(transcriptDone("r1", story));
+            send(ws, "done r1", done("r1", "cancelled"));
+            Thread.sleep(100);
+            ws.send(created("r2"));
+            ws.send(delta("r2", filled(3200, 0x33)));
+            ws.send(transcriptDone("r2", "Yes?"));
+            ws.send(done("r2", "completed"));
+        }, NoteAnswer.ADDED, 0);
+        Mic mic = new Mic();
+        assertEquals("idle", backend(400).run("t-48j", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(1, notesSeen.size());
+        int note = vendorLog.indexOf("got conversation.item.create note");
+        assertTrue(vendorLog.toString(), note > vendorLog.indexOf("sent speech_stopped") && note < vendorLog.indexOf("sent done r1"));
+        // In the shared conversation the note waits for the reply's line, from its final transcript.
+        List<String> lines = linesOf(rc);
+        assertEquals(lines.toString(), List.of("owner wait", "vos " + story, "note", "vos Yes?"), lines);
+    }
+
+    @Test
+    public void aTurnEndingBeforeTheCutReplyIsDoneKeepsTheReplyThenTheNoteAndSendsNothing() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        RecordingContext rc = new RecordingContext();
+        context = rc;
+        enqueueScripted(ws -> {
+            ws.send(STARTED);
+            ws.send(STOPPED);
+            ws.send(created("r1"));
+            ws.send(transcriptDelta("r1", HeardNoteTest.words(10)));
+            ws.send(delta("r1", filled(BPS, 0x11)));
+            Thread.sleep(600);
+            barge(ws);
+            Thread.sleep(150);
+            ws.close(1000, "bye"); // the vendor ends the session before the reply's done
+        }, NoteAnswer.ADDED, 0);
+        Mic mic = new Mic();
+        assertEquals("vendor closed: 1000", backend(10_000).run("t-48k", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals("nothing goes to a closed session", 0, notesSeen.size());
+        List<String> lines = linesOf(rc);
+        assertEquals(List.of("vos " + HeardNoteTest.words(10), "note"), lines.subList(lines.size() - 2, lines.size()));
+        String note = rc.events.get(rc.events.size() - 2);
+        assertTrue(note, note.startsWith("note The owner interrupted your last reply after: \"w01"));
+        assertEquals("after t-48k", rc.events.get(rc.events.size() - 1));
+    }
+
+    @Test
+    public void aFollowUpCreatedWhileTheReplyStillPlaysDoesNotTakeItsNote() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        String story = HeardNoteTest.words(20);
+        byte[] r1 = filled(2 * BPS, 0x11);
+        enqueueScripted(ws -> {
+            ws.send(STARTED);
+            ws.send(STOPPED);
+            ws.send(created("r1"));
+            ws.send(transcriptDelta("r1", story));
+            for (int i = 0; i < 20; i++) { // 100 ms deltas, as xAI streams them
+                ws.send(delta("r1", java.util.Arrays.copyOfRange(r1, i * BPS / 10, (i + 1) * BPS / 10)));
+            }
+            ws.send(transcriptDone("r1", story));
+            ws.send(done("r1", "completed"));
+            ws.send(created("r2")); // e.g. the answer after a tool result, while r1 is still playing
+            Thread.sleep(1000);
+            barge(ws);
+            ws.send(delta("r2", filled(3200, 0x22))); // r2's audio only after the cut: never played
+            ws.send(transcriptDone("r2", "x01 x02 x03"));
+            ws.send(done("r2", "cancelled"));
+            Thread.sleep(200);
+            send(ws, "speech_stopped", STOPPED);
+            ws.send(created("r3"));
+            ws.send(delta("r3", filled(3200, 0x33)));
+            ws.send(done("r3", "completed"));
+        }, NoteAnswer.ADDED, 0);
+        Mic mic = new Mic();
+        TimedSpeaker speaker = new TimedSpeaker();
+        assertEquals("idle", backend(400).run("t-48l", mic.in, speaker, () -> { }));
+        mic.close();
+        assertEquals("one note, about the reply that was playing", 1, notesSeen.size());
+        int expected = expectedWords(story, speaker, r1.length);
+        int quoted = lastQuoted(notesSeen.get(0));
+        assertTrue("quoted up to w" + quoted + ", heard about " + expected + " words", Math.abs(quoted - expected) <= 1);
+    }
+
+    @Test
+    public void theFirstNoteSentIsNumberOneEvenAfterCutsThatSentNone() throws Exception {
+        vault.put(KeyVault.XAI, "xai-test-key");
+        enqueueScripted(ws -> {
+            ws.send(STARTED);
+            ws.send(STOPPED);
+            ws.send(created("r1"));
+            send(ws, "speech_started", STARTED); // r1 is cut before any of it played: no note
+            ws.send(delta("r1", filled(3200, 0x22)));
+            ws.send(transcriptDone("r1", "The weather today is"));
+            ws.send(done("r1", "cancelled"));
+            ws.send(STOPPED);
+            ws.send(created("r2"));
+            ws.send(delta("r2", filled(2 * BPS, 0x11)));
+            ws.send(transcriptDone("r2", HeardNoteTest.words(20)));
+            ws.send(done("r2", "completed"));
+            Thread.sleep(800);
+            barge(ws);
+            Thread.sleep(200);
+            ws.send(STOPPED);
+            ws.send(created("r3"));
+            ws.send(delta("r3", filled(3200, 0x33)));
+            ws.send(done("r3", "completed"));
+        }, NoteAnswer.ADDED, 0);
+        Mic mic = new Mic();
+        assertEquals("idle", backend(400).run("t-48m", mic.in, new ByteArrayOutputStream(), () -> { }));
+        mic.close();
+        assertEquals(1, notesSeen.size());
+        assertEquals(XaiRealtimeBackend.NOTE_EVENT + "1", notesSeen.get(0).getString("event_id"));
     }
 }
