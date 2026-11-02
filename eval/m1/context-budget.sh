@@ -210,7 +210,8 @@ audit = [json.loads(l) for l in open(f"{out}/session-audit.jsonl") if l.strip().
 compacts = [a for a in audit if a.get("event") == "context.compact"]
 failed = [a for a in audit if a.get("event") == "context.compact_failed"]
 counts_only = all(set(a) <= {"ts", "event", "context", "tokens_before", "tokens_after", "budget", "compacted_owner",
-                             "compacted_vos", "compacted_tool_results", "model", "taint", "error", "source"}
+                             "compacted_vos", "compacted_tool_results", "compacted_notes", "model", "taint", "error",
+                             "source"}
                   for a in compacts + failed)
 tr = [json.loads(l) for l in open(f"{out}/transcripts.jsonl") if l.strip().startswith("{")]
 turns = []

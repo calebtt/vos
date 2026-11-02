@@ -18,7 +18,8 @@ import org.json.JSONObject;
 
 /**
  * The conversation the owner's voice turns share (decisions 21 and 46): the owner's words, VOS's
- * replies and the tool results, carried from turn to turn and seeded into each new realtime session.
+ * replies, the tool results and VOS's heard notes after a barge-in (decision 48), carried from turn
+ * to turn and seeded into each new realtime session.
  * It lives in session CE storage ({@code files/conversation/conversation.json}) and holds nothing
  * else: OwnerMemory stays in the actuator, task records and audit lines are never added, and the
  * session receives no secure or masked content in M1, so none of those can reach a summary.
@@ -30,8 +31,12 @@ import org.json.JSONObject;
  * counts only, never text. Thread-safe.
  */
 final class Conversation {
-    /** Who said it, which is also its origin: the owner, VOS, or a tool result (app data, e.g. a track title). */
-    enum Role { OWNER, VOS, TOOL }
+    /**
+     * Who said it, which is also its origin: the owner, VOS, a tool result (app data, e.g. a track
+     * title), or VOS's note on how much of a cut reply the owner heard (decision 48; seeded as a system
+     * message).
+     */
+    enum Role { OWNER, VOS, TOOL, NOTE }
 
     static final class Item {
         final Role role;
@@ -84,12 +89,12 @@ final class Conversation {
         return Collections.unmodifiableList(new ArrayList<>(items));
     }
 
-    /** The last {@code max} owner and VOS lines, oldest first, as JSON for the chat window (no tool lines, no summary). */
+    /** The last {@code max} owner and VOS lines, oldest first, as JSON for the chat window (no tool lines, notes or summary). */
     synchronized String recentThread(int max) {
         JSONArray a = new JSONArray();
         List<Item> lines = new ArrayList<>();
         for (Item i : items) {
-            if (i.role != Role.TOOL) {
+            if (i.role == Role.OWNER || i.role == Role.VOS) {
                 lines.add(i);
             }
         }
@@ -185,6 +190,9 @@ final class Conversation {
                 case VOS:
                     out.add(message("assistant", "text", i.text));
                     break;
+                case NOTE:
+                    out.add(message("system", "input_text", i.text));
+                    break;
                 default:
                     out.add(message("user", "input_text", TOOL_FRAME + i.text + "]"));
                     break;
@@ -212,7 +220,8 @@ final class Conversation {
         }
         b.append("<conversation>\n");
         for (Item i : slice) {
-            b.append(i.role == Role.OWNER ? "owner: " : i.role == Role.VOS ? "vos: " : "tool result (app data): ")
+            b.append(i.role == Role.OWNER ? "owner: " : i.role == Role.VOS ? "vos: "
+                    : i.role == Role.NOTE ? "vos note: " : "tool result (app data): ")
                     .append(i.text.replace("\n", " ")).append('\n');
         }
         return b.append("</conversation>").toString();
@@ -250,12 +259,14 @@ final class Conversation {
 
     private void record(String event, int before, int after, ContextBudget budget, List<Item> slice, String model,
             String error) {
-        int owner = 0, vos = 0, tool = 0;
+        int owner = 0, vos = 0, tool = 0, note = 0;
         for (Item i : slice) {
             if (i.role == Role.OWNER) {
                 owner++;
             } else if (i.role == Role.VOS) {
                 vos++;
+            } else if (i.role == Role.NOTE) {
+                note++;
             } else {
                 tool++;
             }
@@ -269,6 +280,7 @@ final class Conversation {
         line.put("compacted_owner", owner);
         line.put("compacted_vos", vos);
         line.put("compacted_tool_results", tool); // raw output: cut to one line, then summarized
+        line.put("compacted_notes", note); // VOS's heard notes (decision 48)
         line.put("model", model);
         line.put("taint", tool > 0 || summaryHasAppData ? "owner+app" : "owner");
         if (error != null) {
