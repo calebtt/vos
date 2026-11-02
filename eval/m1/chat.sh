@@ -68,24 +68,19 @@ while (( $# )); do
 done
 : "${GROK_API_KEY:?set GROK_API_KEY (used for the fixture; never printed)}"
 
-stamp="$(date +%Y-%m-%d)/chat-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
-mkdir -p "$out"
-exec > >(tee -a "$out/run.log") 2>&1
+source "$ROOT/eval/m1/lib.sh"
+vos_run_dir chat
 echo "chat on $(adb get-serialno) ($(adb shell getprop ro.build.fingerprint)); results in $out"
 
 if (( build )); then
     "$ROOT/gradlew" -p "$ROOT" -q --console=plain :actuator:assembleDebug :session:assembleDebug
 fi
-adb install -r -t "$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk" >/dev/null
-adb install -r -t "$ROOT/session/build/outputs/apk/debug/session-debug.apk" >/dev/null
-adb shell pm grant com.vos.actuator android.permission.RECORD_AUDIO
-adb shell pm grant com.vos.actuator android.permission.POST_NOTIFICATIONS
-if ! adb shell "run-as com.vos.session test -f files/keys/xai.bin"; then
-    printf '%s' "$GROK_API_KEY" | adb shell "run-as com.vos.session sh -c 'umask 077 && mkdir -p files/key-import && cat > files/key-import/xai'"
-fi
+vos_install_apps
+vos_grant_mic
+vos_grant_notifications
+vos_seal_key_if_missing
 
-vol() { adb shell cmd media_session volume --stream "$1" --get | tr -d '\r' | sed -n 's/.*volume is \([0-9]*\) in range.*/\1/p'; }
+vol() { vos_volume "$1" | cut -d' ' -f1; }
 declare -A vol_before low=([3]=2 [0]=1 [11]=1)
 for s in 3 0 11; do vol_before[$s]="$(vol "$s")"; done
 for s in 3 0 11; do adb shell cmd audio set-volume "$s" "${low[$s]}" >/dev/null 2>&1 || true; done
@@ -227,6 +222,7 @@ else
 fi
 sleep 9 # past the hold: anything the stopped turn would still do
 adb logcat -d -s VOS_TYPED VOS_AUDIT VOS_TURN | tr -d '\r' > "$out/stop.txt"
+# shellcheck disable=SC2015 # echo does not fail, so the "||" branch runs only when its test is false
 echo "typed stop: $( (( ! stop_pressed )) && echo 'not pressed' || { (( stop_ended )) && echo ended || echo 'did not end'; }) $(grep -o 'typed turn ended.*reason=.*' "$out/stop.txt" | grep -o 'reason=.*' | head -1)"
 echo "== a typed turn after the stop"
 typed_turn typed "Thanks, that is all."

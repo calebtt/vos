@@ -16,6 +16,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/eval/m1/lib.sh"
 build=1 keep=0
 for a in "$@"; do
     case "$a" in
@@ -25,11 +26,7 @@ for a in "$@"; do
     esac
 done
 
-stamp="$(date +%Y-%m-%d)/m1-auth-01-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
-mkdir -p "$out"
-log="$out/run.log"
-exec > >(tee -a "$log") 2>&1
+vos_run_dir m1-auth-01
 
 device="$(adb get-serialno)"
 echo "M1-AUTH-01 on $device ($(adb shell getprop ro.product.device) $(adb shell getprop ro.build.fingerprint)); results in $out"
@@ -42,18 +39,14 @@ if (( build )); then
 fi
 
 apk() { echo "$ROOT/$1"; }
-ACTUATOR_APK=$(apk actuator/build/outputs/apk/debug/actuator-debug.apk)
 ACTUATOR_TEST_APK=$(apk actuator/build/outputs/apk/androidTest/debug/actuator-debug-androidTest.apk)
-SESSION_APK=$(apk session/build/outputs/apk/debug/session-debug.apk)
 SESSION_TEST_APK=$(apk session/build/outputs/apk/androidTest/debug/session-debug-androidTest.apk)
 WRONG_APK=$(apk eval/fixtures/auth/build/outputs/apk/wrongpkg/debug/fixture-auth-wrongpkg-debug.apk)
 FOREIGN_APK=$(apk eval/fixtures/auth/build/outputs/apk/foreign/debug/fixture-auth-foreign-debug.apk)
 
 # Both VOS apps first (each defines the permission the other uses), then the fixtures, so the
 # signature permissions are decided against the installed definers.
-for f in "$ACTUATOR_APK" "$SESSION_APK" "$ACTUATOR_TEST_APK" "$SESSION_TEST_APK" "$WRONG_APK" "$FOREIGN_APK"; do
-    adb install -r -t "$f" >/dev/null
-done
+vos_install_apps "$ACTUATOR_TEST_APK" "$SESSION_TEST_APK" "$WRONG_APK" "$FOREIGN_APK"
 
 granted() { # package permission → true/false, or "not granted" when dumpsys lists no grant
     local g
