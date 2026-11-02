@@ -22,6 +22,7 @@ vos_daytime_only() {
 }
 
 # vos_install_apps [APK...]: the debug actuator and session, then any extra APKs (e.g. a test APK).
+# shellcheck disable=SC2120 # the extra APKs are optional; most runners pass none
 vos_install_apps() {
     local apk
     for apk in "$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk" \
@@ -43,6 +44,7 @@ vos_grant_notifications() {
 # vos_seal_key_if_missing: if the session holds no sealed key, pushes GROK_API_KEY through run-as
 # stdin (never a command-line argument, never printed) for the session to seal on its next turn.
 # Sets VOS_KEY_PUSHED to 1 if it pushed, else 0.
+# shellcheck disable=SC2034 # VOS_KEY_PUSHED is for the sourcing runner (voice-roundtrip.sh prints it)
 vos_seal_key_if_missing() {
     VOS_KEY_PUSHED=0
     if ! adb shell "run-as com.vos.session test -f files/keys/xai.bin"; then

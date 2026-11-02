@@ -87,6 +87,7 @@ cleanup() {
     fi
     if (( restore )); then
         for s in 3 0 11; do
+            # shellcheck disable=SC2015 # "|| true" covers both: a stream with no reading, and a failed set
             [ -n "${vol_before[$s]}" ] && adb shell cmd audio set-volume "$s" "${vol_before[$s]}" >/dev/null 2>&1 || true
         done
         echo "volumes restored"
@@ -191,6 +192,7 @@ done
 # The recall questions only count after two compactions; their own compactions do not.
 before_questions="$(compactions_so_far)"
 for q in "${questions[@]}"; do any_turn "$q" q 0; done
+# shellcheck disable=SC2034 # read in the check "(( post_done ))" below
 post_done=$turn_done
 adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/session.txt"
 ring_after="$(vol 2)"

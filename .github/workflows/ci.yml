@@ -36,8 +36,8 @@ jobs:
         with:
           validate-wrappers: true
 
-      - name: Shell scripts (image builder, key script, CI helpers)
-        run: shellcheck -S warning image/*.sh ci/*.sh
+      - name: Shell scripts (image builder, key script, CI helpers, M1 eval runners and their lib.sh)
+        run: shellcheck -S warning image/*.sh ci/*.sh eval/m1/*.sh
 
       - name: Install pinned gitleaks (sha256-verified)
         run: ci/fetch-gitleaks.sh
