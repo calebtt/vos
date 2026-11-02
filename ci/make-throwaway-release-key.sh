@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generate a throwaway release keystore OUTSIDE the repo so CI exercises the release signing path
 # and the "release cert != debug cert" check. The key is random per run and never reused or
-# uploaded. The real release key lives in ~/.vos-keys/ and is never in CI (TARGET-PLAN §5.4).
+# uploaded. The real release key lives in <key-dir>/ and is never in CI (TARGET-PLAN §5.4).
 #
 # Usage: ci/make-throwaway-release-key.sh <dir>   → prints VOS_RELEASE_* lines for $GITHUB_ENV
 set -euo pipefail

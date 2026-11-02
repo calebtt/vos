@@ -1,6 +1,6 @@
 # Research: on-device UI control detection for VOS (control_detect)
 
-Read `/home/caleb/vos/docs/TARGET-PLAN.md` (§3.5.1 hybrid pipeline, §3.5.2 tool surface, §3.2.1 ModelRouter, M3 eval). Do web research (current as of Oct 2026).
+Read `~/vos/docs/TARGET-PLAN.md` (§3.5.1 hybrid pipeline, §3.5.2 tool surface, §3.2.1 ModelRouter, M3 eval). Do web research (current as of Oct 2026).
 
 Goal: pick candidates for the actuator's on-device `control_detect` model on Pixel 7 (Tensor G2) / Pixel 8a (Tensor G3), GrapheneOS, no Play services, no network from the actuator.
 
@@ -16,4 +16,4 @@ Questions:
 
 Deliver: a ranked shortlist (top 3 + a fallback), recommended v0 pick and why, a fine-tune path for YOLO, risks, and open questions.
 
-Write the report to `/home/caleb/vos/research/UI-DETECT-RESEARCH-2026-10-12.md`. Also include the full report in your final message.
+Write the report to `~/vos/research/UI-DETECT-RESEARCH-2026-10-12.md`. Also include the full report in your final message.

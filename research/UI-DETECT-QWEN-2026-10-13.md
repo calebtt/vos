@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Script | `/tmp/launch-koboldcpp-ustor21.sh` |
+| Script | `/tmp/launch-koboldcpp.sh` |
 | Model | `koboldcpp/Huihui-Qwen3.8-27B-abliterated-UD-Q4_K_XL` |
 | Endpoint | `http://127.0.0.1:5001/v1/chat/completions` |
 | Date | 2026-10-13 |
@@ -436,7 +436,7 @@ The first completion stopped after the sentence "Useful for row detection and ic
 
 | Field | Value |
 |---|---|
-| Script | `/tmp/launch-koboldcpp-ustor21.sh` |
+| Script | `/tmp/launch-koboldcpp.sh` |
 | Model | `koboldcpp/Huihui-Qwen3.8-27B-abliterated-UD-Q4_K_XL` |
 | Endpoint | `http://127.0.0.1:5001/v1/chat/completions` |
 | Date | 2026-10-13 |
@@ -1156,7 +1156,7 @@ A third call finished the novel-ideas section, which the second call cut off at 
 
 | Field | Value |
 |---|---|
-| Script | `/tmp/launch-koboldcpp-ustor21.sh` |
+| Script | `/tmp/launch-koboldcpp.sh` |
 | Model | `koboldcpp/Huihui-Qwen3.8-27B-abliterated-UD-Q4_K_XL` |
 | Endpoint | `http://127.0.0.1:5001/v1/chat/completions` |
 | Date | 2026-10-13 |

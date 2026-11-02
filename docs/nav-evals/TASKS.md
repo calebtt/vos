@@ -1,6 +1,6 @@
 # Nav eval tasks
 
-Every task the nav-eval harness (`~/vos-nav-evals`, `vosnav/tasks.py`) has defined or tried, including dropped ones. Results for each attempt are in [RESULTS-LOG.md](RESULTS-LOG.md). Device: Pixel 7 (`panther`, GrapheneOS), tethered to caleb-Z790. Every task starts inside its own app (launcher taps are blocked), runs `setup()`, the model loop, then `cleanup()` in `finally`. The foreground app must stay on the task's allowlist or the harness presses Home and aborts.
+Every task the nav-eval harness (`~/vos-nav-evals`, `vosnav/tasks.py`) has defined or tried, including dropped ones. Results for each attempt are in [RESULTS-LOG.md](RESULTS-LOG.md). Device: Pixel 7 (`panther`, GrapheneOS), tethered to the desktop. Every task starts inside its own app (launcher taps are blocked), runs `setup()`, the model loop, then `cleanup()` in `finally`. The foreground app must stay on the task's allowlist or the harness presses Home and aborts.
 
 **Strict pass** (what `success` / `strict_pass` mean): the check is false before step 1, the model declares `done` (answer tasks must also put a non-empty answer on that `done`), and the check is true at the end. `lucky_end_state` is recorded separately when the check is true at the end but the model never said `done`. `precondition_already_true` means the check was already true before step 1; that run is not a pass. `first_step_check_true` is the first step whose check succeeded.
 
@@ -45,7 +45,7 @@ Ids 1–28 exist in `vosnav/tasks.py`; 29–30 were specified but never implemen
 
 ```bash
 cd ~/vos-nav-evals
-/home/caleb/miniforge3/bin/python3 export_to_vos.py runs/<stamp>_<mode>_<backend>
+~/miniforge3/bin/python3 export_to_vos.py runs/<stamp>_<mode>_<backend>
 ```
 
 Add a line for the run in `export_notes.json` first if you want a model name, a one-line note, or plain failure reasons; otherwise the exporter writes a default reason from the check detail.

@@ -130,7 +130,7 @@ The harness today runs about 8 s per Grok step. I could not read the harness in 
 
 ### 4.3 Validation: M3-IMG-01 (offline sweep, desktop only)
 
-- **Data.** Stored screenshots, a11y dumps and task records in `~/vos-task-data` on caleb-Z790 (never GitHub). Stratify about 200 frames [est] by app class: Settings/list, Clock/Calculator, Files, Vanadium web page, Spotify (art-heavy, dense), Maps, light and dark theme, one landscape set. Frames already carry the redaction.
+- **Data.** Stored screenshots, a11y dumps and task records in `~/vos-task-data` on the desktop (never GitHub). Stratify about 200 frames [est] by app class: Settings/list, Clock/Calculator, Files, Vanadium web page, Spotify (art-heavy, dense), Maps, light and dark theme, one landscape set. Frames already carry the redaction.
 - **Grid.** format {JPEG q60/70/80/90, WebP q60/70/75/80/90, PNG reference, PNG-8 for wireframes} × long edge {720, 896, 1000, 1280, 1568, 2400 native} × {color, gray} × {full, crop policy, marks on/off}.
 - **No-model metrics (can run any time on the desktop):** bytes; encode time; OCR text recall against the tree text of `TREE_OK` regions and against OCR of the native PNG, overall and for small text (<12 sp); toggle and selected-state classification from pixels vs the tree's `checked`/`selected`; mask integrity.
 - **Model metrics (a future run; calls a vendor, so it needs Caleb's OK on spend and on which vendor sees the frames, §9 Q41):** element-grounding hit rate (ask for a named element; hit = the inverse-transformed point lands in that node's bounds, using the M3-COORD-01 code); action agreement on replayed steps (same prompt, image varied; agreement with the native-PNG action and with the action from passing runs); vendor-reported image tokens.
