@@ -22,6 +22,9 @@ interface ContextKeeper {
 
     void tool(String turnId, String name, String result);
 
+    /** VOS's note after a barge-in: the words the owner heard of the cut reply (decision 48). */
+    void note(String turnId, String text);
+
     /** The turn is over: compact in the background if the conversation is over its budget. */
     void afterTurn(String turnId);
 
@@ -47,6 +50,10 @@ interface ContextKeeper {
 
         @Override
         public void tool(String turnId, String name, String result) {
+        }
+
+        @Override
+        public void note(String turnId, String text) {
         }
 
         @Override

@@ -91,6 +91,11 @@ public class TypedTurnsTest {
         }
 
         @Override
+        public void note(String turnId, String text) {
+            log("note " + turnId);
+        }
+
+        @Override
         public void afterTurn(String turnId) {
             log("afterTurn " + turnId);
         }

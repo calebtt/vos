@@ -87,6 +87,11 @@ final class SharedConversation implements ContextKeeper {
     }
 
     @Override
+    public void note(String turnId, String text) {
+        conversation.add(Conversation.Role.NOTE, turnId, text);
+    }
+
+    @Override
     public synchronized void afterTurn(String turnId) {
         pending = worker.submit(() -> {
             ContextBudget b = budget.get();

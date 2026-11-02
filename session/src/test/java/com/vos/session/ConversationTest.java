@@ -222,6 +222,43 @@ public class ConversationTest {
     }
 
     @Test
+    public void aHeardNoteIsKeptSeededAsASystemMessageAndCompactedAsVosNote() throws Exception {
+        File dir = tmp.newFolder();
+        Conversation c = conversation(dir);
+        String note = "The owner interrupted your last reply after: \"turn left on\". They did not hear the rest of it.";
+        c.add(Conversation.Role.OWNER, "t1", "how do I get there");
+        c.add(Conversation.Role.VOS, "t1", "Turn left on Main, then right on Oak.");
+        c.add(Conversation.Role.NOTE, "t1", note);
+        c.add(Conversation.Role.OWNER, "t1", "wait, which street?");
+        Conversation again = conversation(dir); // decision 48's note survives a restart
+        List<JSONObject> seed = again.seed();
+        assertEquals(4, seed.size());
+        assertEquals("system", seed.get(2).getString("role"));
+        assertEquals("input_text", seed.get(2).getJSONArray("content").getJSONObject(0).getString("type"));
+        assertEquals(note, seed.get(2).getJSONArray("content").getJSONObject(0).getString("text"));
+        // The typed chat backend gets it as a system message too.
+        org.json.JSONArray chat = XaiTextBackend.messages("be brief", seed, "hi");
+        assertEquals("system", chat.getJSONObject(3).getString("role"));
+        assertEquals(note, chat.getJSONObject(3).getString("content"));
+        // Not a line of the chat window's thread: VOS did not say it.
+        org.json.JSONArray thread = new org.json.JSONArray(again.recentThread(10));
+        assertEquals(3, thread.length());
+        for (int k = 0; k < thread.length(); k++) {
+            assertFalse(thread.getJSONObject(k).getString("text").contains("interrupted"));
+        }
+        // Compacted with its origin, and counted as a note, not a tool result (no app taint).
+        for (int n = 2; n <= 13; n++) {
+            exchange(again, n);
+        }
+        assertTrue(again.fit(new ContextBudget(again.tokens() / 2), fake));
+        assertTrue(summarizerInputs.get(0), summarizerInputs.get(0).contains("\nvos note: The owner interrupted"));
+        Map<String, Object> line = audit.get(0);
+        assertEquals(1, line.get("compacted_notes"));
+        assertEquals(0, line.get("compacted_tool_results"));
+        assertEquals("owner", line.get("taint"));
+    }
+
+    @Test
     public void aDamagedFileStartsFresh() throws Exception {
         File dir = tmp.newFolder();
         Files.write(new File(dir, "conversation.json").toPath(), "{not json".getBytes(java.nio.charset.StandardCharsets.UTF_8));
