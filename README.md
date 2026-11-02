@@ -44,7 +44,7 @@ ci/fetch-gitleaks.sh        # optional locally: pinned, checksum-verified gitlea
 - [docs/DECISIONS.md](docs/DECISIONS.md) — M0 platform and audio decisions (pending spikes).
 - [docs/DEVICES.md](docs/DEVICES.md) — device enrollment (M0-06).
 - [docs/spikes/](docs/spikes/) — spike report templates (S-01, S-02, S-03, S-07, S-08, S-27a).
-- [docs/runbooks/DAY0.md](docs/runbooks/DAY0.md) — Day 0 steps for Caleb (key rotation, ADB revocation, fstab pin, archive, Graphene downloads, OTA cert pin).
+- [docs/runbooks/DAY0.md](docs/runbooks/DAY0.md) — Day 0 steps for Caleb (ADB revocation, fstab pin, archive, Graphene downloads, OTA cert pin).
 - [research/](research/README.md) — raw AI-model reports and reviews, kept for the record; not reviewed docs.
 
 ## License
