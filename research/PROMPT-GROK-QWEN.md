@@ -1,4 +1,4 @@
-You are working on Caleb's desktop in /home/caleb/vos. Task: get an independent research opinion from a local Qwen 3.8 model on on-device UI element / clickable detection for VOS. Do NOT git commit or push. Do NOT run any unload/stop scripts; leave the Qwen server running.
+You are working on Caleb's desktop in ~/vos. Task: get an independent research opinion from a local Qwen 3.8 model on on-device UI element / clickable detection for VOS. Do NOT git commit or push. Do NOT run any unload/stop scripts; leave the Qwen server running.
 
 Steps:
 (a) Start the model: run `bash /tmp/launch-koboldcpp-ustor21.sh < /dev/null` (it nohups KoboldCPP itself and waits for readiness). Then confirm with `curl -s http://127.0.0.1:5001/v1/models`. If it fails, inspect ~/.local/state/koboldcpp/qwen.log and nvidia-smi, write the exact error to ~/vos/research/UI-DETECT-QWEN-2026-10-13.md, and stop. Do not invent results.
