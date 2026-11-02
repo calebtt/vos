@@ -24,6 +24,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/eval/m1/lib.sh"
 if [[ "${1:-}" == "--self-test" ]]; then
     SELF_TEST=1
 elif (( $# )); then
@@ -33,10 +34,7 @@ fi
 PREFIX="xai-"
 
 if [[ "${SELF_TEST:-}" != 1 ]]; then
-stamp="$(date +%Y-%m-%d)/m1-key-01-$(date +%H%M%S)"
-out="${VOS_EVAL_OUT:-${VOS_EVAL_ROOT:-$ROOT/eval/runs}/$stamp}"
-mkdir -p "$out"
-exec > >(tee -a "$out/run.log") 2>&1
+vos_run_dir m1-key-01
 
 work="$(mktemp -d)"
 chmod 700 "$work"
@@ -127,6 +125,7 @@ self_test() {
     local t log phrase="no key in the actuator's data"
     t="$(mktemp -d)"
     chmod 700 "$t"
+    # shellcheck disable=SC2064 # $t is local to self_test, so the trap takes its value now
     trap "chmod -R u+rwx '$t' 2>/dev/null || true; rm -rf '$t'" EXIT
     mkdir -p "$t/tree/readable" "$t/tree/locked" "$t/files" "$t/clean"
     printf 'ordinary\n' > "$t/tree/readable/note.txt"
