@@ -5,7 +5,7 @@ TARGET-PLAN §4.4. GrapheneOS's own signed full OTA for one device, plus a VOS o
 | Path | What |
 |---|---|
 | `build.sh` | Builds a VOS Image for one codename (`panther` for 1.0, `akita` in the post-1.0 port, decision 40). No root needed. |
-| `keys.sh` | Makes the owner keys in `~/.vos-keys/` once (Caleb, by hand; §5.4). |
+| `keys.sh` | Makes the owner keys in `<key-dir>/` once (default `$HOME/.vos-keys`, or the directory given as its first argument; Caleb, by hand; §5.4). |
 | `overlays/<name>/` | A tree that mirrors `/product`. Files are added; nothing of Graphene's is replaced. |
 | `pins/` | Graphene's OTA certificates, pinned (threat A6). |
 
@@ -14,7 +14,7 @@ TARGET-PLAN §4.4. GrapheneOS's own signed full OTA for one device, plus a VOS o
 ```bash
 build=2026101601
 image/build.sh --device panther \
-  --ota "/media/caleb/UStor2/vos/firmware/panther/grapheneos/$build/panther-ota_update-$build.zip" \
+  --ota "<data-disk>/vos/firmware/panther/grapheneos/$build/panther-ota_update-$build.zip" \
   --overlay image/overlays/s01-hello \
   --add priv-app/VosHello/VosHello.apk=spikes/probes/probe-s01-hello/build/outputs/apk/release/probe-s01-hello-release.apk
 ```
@@ -33,7 +33,7 @@ What it does, in order:
 3. Graphene's `product` is ext4 with `shared_blocks` and almost no free space. It grows the image by the overlay size + 64 MB (`resize2fs`) and unshares the blocks (`e2fsck -E unshare_blocks`).
 4. Adds the overlay with `debugfs`: `root:root`, `0755` dirs, `0644` files, SELinux label `u:object_r:system_file:s0`, and the AOSP 2009-01-01 timestamp on all four inode times. It refuses to replace any existing file, reads every file back, checks each added inode's owner, mode, label and times, and requires a clean `e2fsck -fn`. All e2fsprogs steps run at that fixed time (`E2FSPROGS_FAKE_TIME`, `E2FSCK_TIME`), so the superblock times are fixed too and two builds of the same overlay from the same OTA and keys are byte-identical.
 5. Rebuilds the dm-verity hash tree and FEC (`avbroot avb pack --recompute-size`).
-6. `avbroot ota patch --rootless --replace product`, signed with `~/.vos-keys` (`--keys` overrides). avbroot prompts for each passphrase.
+6. `avbroot ota patch --rootless --replace product`, signed with the keys in `<key-dir>` (default `$HOME/.vos-keys`; `--keys` overrides). avbroot prompts for each passphrase.
 7. Verifies the output against the owner OTA cert and AVB key, and checks its `product` is the one just built.
 
 Work space: `$VOS_IMAGE_WORK`, else `/mnt/vos-build/image-work` when it exists (§7), else a temp dir; about 3 GB, wiped at the end. A panther build takes under a minute on the workstation.

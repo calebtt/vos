@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Owner AVB + OTA keys for the VOS Image (TARGET-PLAN §5.4). Caleb runs this once, by hand.
 #
-# Makes, in ~/.vos-keys (or $1):
+# Makes, in $HOME/.vos-keys (or $1):
 #   avb.key       AVB signing key (RSA 4096, passphrase-encrypted PKCS#8)
 #   avb_pkmd.bin  its AVB public key, flashed once with `fastboot flash avb_custom_key`
 #   ota.key       OTA signing key (RSA 4096, passphrase-encrypted)
@@ -9,7 +9,7 @@
 #
 # avbroot prompts for each passphrase. Keep the passphrases in the password manager, and copy the
 # directory to the offline USB stick before the first flash: losing the AVB key means a wipe to
-# recover a relocked phone. Never put these files on UStor2 in the clear, in the repo, or in CI.
+# recover a relocked phone. Never put these files on the data disk in the clear, in the repo, or in CI.
 
 set -euo pipefail
 

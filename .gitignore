@@ -56,5 +56,5 @@ research/*.json
 __pycache__/
 *.pyc
 
-# avbroot signing keys (image/keys.sh writes them to ~/.vos-keys, never here)
+# avbroot signing keys (image/keys.sh writes them to <key-dir>, never here)
 *.key
