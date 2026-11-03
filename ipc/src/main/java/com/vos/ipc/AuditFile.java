@@ -5,20 +5,31 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
 /**
- * The bytes of one JSONL audit file (#319). Each record is one line, durable once {@link #append}
- * returns. The file stays readable after a torn write, when power is cut in the middle of a write
- * and the filesystem keeps a cut-off line or NULs where unsynced data was.
+ * The bytes of one JSONL audit file (#319). Each record is one line, written by one synchronous
+ * {@code write()} before {@link #append} returns, so a crash of the app loses nothing. The fsync is
+ * not on the caller's thread: a background syncer runs it after the write, and one sync covers
+ * every write before it. A record is durable within one sync period, not when append returns: a
+ * power cut can lose the records written since the last finished sync. At worst it leaves a torn
+ * tail (a cut-off line or NULs where unsynced data was), which the next append repairs and
+ * {@link #read} skips.
  *
  * <p>There is no hash chain yet (audit v2). When it comes, every piece {@link #read} skips is a
  * gap: the verifier must report the chain broken at the next record it keeps and never link
@@ -26,31 +37,113 @@ import org.json.JSONTokener;
  * {@link JsonlAudit} writes an {@code audit.torn_tail} line when it repairs a torn tail.
  */
 public final class AuditFile {
+    /** One fsync of a file or a directory; injectable for tests. */
+    interface Fsync {
+        void sync(File fileOrDir) throws IOException;
+    }
+
     private final File file;
-    /** False until this instance has checked the tail, and again after a write that failed. */
+    private final Executor syncer;
+    private final Consumer<IOException> syncFailed;
+    private final Fsync fsync;
+    /** Whether a sync is queued and has not started yet; the next append after it starts queues another. */
+    private final AtomicBoolean syncPending = new AtomicBoolean();
+    /** Directories this instance created entries in (audit/'s parent, audit/), synced once by the next sync, best effort. */
+    private final Queue<File> dirsToSync = new ConcurrentLinkedQueue<>();
+    /** False until this instance has checked the tail, and again after a write that failed. Guarded by this. */
     private boolean tailKnownClean;
 
-    public AuditFile(File file) {
+    /**
+     * {@code syncer} runs the fsyncs, and should be one background thread; {@code syncFailed}
+     * hears a failed file sync (on the syncer's thread).
+     */
+    public AuditFile(File file, Executor syncer, Consumer<IOException> syncFailed) {
+        this(file, syncer, syncFailed, AuditFile::fsync);
+    }
+
+    AuditFile(File file, Executor syncer, Consumer<IOException> syncFailed, Fsync fsync) {
         this.file = file;
+        this.syncer = syncer;
+        this.syncFailed = syncFailed;
+        this.fsync = fsync;
     }
 
     /**
      * Appends {@code json} (one JSON object, no newline) as one write of one complete line on an
-     * {@code O_APPEND} stream, then syncs it to the device. On the first append, and after a
-     * failed one, it checks the tail first. If the file's last byte is not a newline (a cut-off
-     * record, or a NUL run), the write starts with a newline, so this record starts on a fresh line
-     * and the torn piece stays a piece of its own. Returns whether it did that.
+     * {@code O_APPEND} stream, then queues a sync on the syncer unless one is already queued.
+     * It never syncs on the caller's thread. On the first append, and after a failed one, it
+     * creates the directory if it has to and checks the tail. If the file's last byte is not a
+     * newline (a cut-off record, or a NUL run), the write starts with a newline, so this record
+     * starts on a fresh line and the torn piece stays a piece of its own. Returns whether it did
+     * that.
      */
-    public synchronized boolean append(String json) throws IOException {
-        boolean torn = !tailKnownClean && tornTail();
+    public boolean append(String json) throws IOException {
+        boolean torn = write(json);
+        if (syncPending.compareAndSet(false, true)) {
+            syncer.execute(this::syncNow);
+        }
+        return torn;
+    }
+
+    private synchronized boolean write(String json) throws IOException {
+        boolean torn = false;
+        if (!tailKnownClean) {
+            File dir = file.getParentFile();
+            if (dir != null && !dir.isDirectory()) {
+                if (!dir.mkdirs() && !dir.isDirectory()) {
+                    throw new IOException("cannot create " + dir);
+                }
+                File up = dir.getParentFile();
+                if (up != null) {
+                    dirsToSync.add(up);
+                }
+            }
+            if (!file.exists()) {
+                if (dir != null) {
+                    dirsToSync.add(dir);
+                }
+            } else {
+                torn = tornTail();
+            }
+        }
         byte[] bytes = ((torn ? "\n" : "") + json + "\n").getBytes(StandardCharsets.UTF_8);
         tailKnownClean = false;
         try (FileOutputStream out = new FileOutputStream(file, true)) {
             out.write(bytes);
-            out.getFD().sync();
         }
         tailKnownClean = true;
         return torn;
+    }
+
+    /** On the syncer: one fsync of the file covers every write before it, then any new directories. */
+    private void syncNow() {
+        syncPending.set(false); // before the sync: a write that lands after this queues the next one
+        try {
+            fsync.sync(file);
+        } catch (NoSuchFileException | FileNotFoundException e) {
+            // moved aside or deleted since the write: nothing of ours left to sync
+        } catch (IOException e) {
+            syncFailed.accept(e);
+        }
+        for (File d; (d = dirsToSync.poll()) != null; ) {
+            try {
+                fsync.sync(d);
+            } catch (IOException e) {
+                // best effort: some platforms cannot open a directory to sync it
+            }
+        }
+    }
+
+    private static void fsync(File f) throws IOException {
+        if (f.isDirectory()) {
+            try (FileChannel c = FileChannel.open(f.toPath(), StandardOpenOption.READ)) {
+                c.force(true);
+            }
+        } else {
+            try (RandomAccessFile r = new RandomAccessFile(f, "r")) { // read-only: never creates the file
+                r.getFD().sync();
+            }
+        }
     }
 
     private boolean tornTail() throws IOException {

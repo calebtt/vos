@@ -6,6 +6,8 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -13,18 +15,24 @@ import org.json.JSONObject;
 /**
  * Append-only audit lines in the app's CE storage ({@code files/audit/audit.jsonl}) and logcat
  * (tag {@code VOS_AUDIT}). The actuator's file is the audit of record; audit v1 replaces this
- * writer with rotation, the owner view and export (§3.8). Each line is one synced write, and a
- * torn tail left by a power cut is repaired on the next write ({@link AuditFile}, #319).
+ * writer with rotation, the owner view and export (§3.8). Each line is one write on the caller's
+ * thread. The fsync runs on one background thread ({@code vos-audit-sync}), coalesced, so a line is
+ * durable within one sync period. A torn tail left by a power cut is repaired on the next write
+ * ({@link AuditFile}, #319).
  */
 public final class JsonlAudit implements BinderGuard.Audit {
     public static final String TAG = "VOS_AUDIT";
 
-    private final File dir;
     private final AuditFile file;
 
     public JsonlAudit(Context context) {
-        this.dir = new File(context.getFilesDir(), "audit");
-        this.file = new AuditFile(new File(dir, "audit.jsonl"));
+        ExecutorService syncer = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "vos-audit-sync");
+            t.setDaemon(true);
+            return t;
+        });
+        this.file = new AuditFile(new File(new File(context.getFilesDir(), "audit"), "audit.jsonl"), syncer,
+                e -> Log.e(TAG, "audit sync failed", e));
     }
 
     @Override
@@ -74,11 +82,7 @@ public final class JsonlAudit implements BinderGuard.Audit {
 
     private synchronized void append(String line) {
         Log.w(TAG, line);
-        if (!dir.isDirectory() && !dir.mkdirs()) {
-            Log.e(TAG, "cannot create " + dir);
-            return;
-        }
-        try {
+        try { // the write only: the fsync is on the syncer thread, never here or under this lock
             if (file.append(line)) { // the tail was torn (#319): say so in the trail, after the record
                 String note;
                 try {

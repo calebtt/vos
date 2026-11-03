@@ -3,13 +3,21 @@ package com.vos.ipc;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 import org.junit.Rule;
 import org.junit.Test;
@@ -25,7 +33,14 @@ public class AuditFileTest {
     private AuditFile at(String bytes) throws IOException {
         file = tmp.newFile("audit.jsonl");
         Files.write(file.toPath(), bytes.getBytes(StandardCharsets.UTF_8));
-        return new AuditFile(file);
+        return open(file);
+    }
+
+    /** Real fsyncs, run inline: these tests are about the bytes. */
+    private static AuditFile open(File f) {
+        return new AuditFile(f, Runnable::run, e -> {
+            throw new AssertionError(e);
+        });
     }
 
     private String bytes() throws IOException {
@@ -47,7 +62,7 @@ public class AuditFileTest {
     @Test
     public void eachAppendIsOneLineAndAMissingFileReadsEmpty() throws IOException {
         file = new File(tmp.getRoot(), "audit.jsonl");
-        AuditFile f = new AuditFile(file);
+        AuditFile f = open(file);
         AuditFile.Read empty = f.read();
         assertEquals(0, empty.records.size());
         assertEquals(0, empty.skipped);
@@ -135,5 +150,82 @@ public class AuditFileTest {
         assertEquals(List.of(1, 2), ns(r));
         assertEquals(4, r.skipped);
         assertFalse(r.tornTail);
+    }
+
+    /** Records each fsync's target; while {@code hold} is set, a sync waits for it. */
+    private static final class Syncs implements AuditFile.Fsync {
+        final List<File> done = Collections.synchronizedList(new ArrayList<>());
+        final CountDownLatch entered = new CountDownLatch(1);
+        volatile CountDownLatch hold;
+
+        @Override
+        public void sync(File f) {
+            entered.countDown();
+            CountDownLatch h = hold;
+            if (h != null) {
+                try {
+                    h.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            done.add(f);
+        }
+
+        long of(File f) {
+            synchronized (done) {
+                return done.stream().filter(f::equals).count();
+            }
+        }
+    }
+
+    @Test(timeout = 10_000)
+    public void appendNeverWaitsForASyncAndOneSyncCoversEveryWriteQueuedBehindIt() throws Exception {
+        file = tmp.newFile("audit.jsonl");
+        Syncs syncs = new Syncs();
+        syncs.hold = new CountDownLatch(1);
+        ExecutorService syncer = Executors.newSingleThreadExecutor();
+        AuditFile f = new AuditFile(file, syncer, e -> fail("sync failed: " + e), syncs);
+
+        f.append("{\"n\":1}");
+        assertTrue("the syncer is inside the first fsync, held", syncs.entered.await(5, TimeUnit.SECONDS));
+        List<Integer> want = new ArrayList<>(List.of(1));
+        for (int n = 2; n <= 50; n++) {
+            f.append("{\"n\":" + n + "}"); // returns while the fsync is still held
+            want.add(n);
+        }
+        assertEquals("every line is written before any sync finishes", want, ns(f.read()));
+        assertEquals(0, syncs.of(file));
+
+        syncs.hold.countDown();
+        syncer.shutdown();
+        assertTrue(syncer.awaitTermination(5, TimeUnit.SECONDS));
+        assertEquals("the held sync, then one more for the 49 lines written during it", 2, syncs.of(file));
+    }
+
+    @Test
+    public void syncsCoalesceRunOnlyOnTheSyncerAndSyncNewDirectoriesOnce() throws IOException {
+        file = new File(new File(tmp.getRoot(), "audit"), "audit.jsonl"); // audit/ does not exist yet
+        Queue<Runnable> queued = new ArrayDeque<>();
+        Syncs syncs = new Syncs();
+        AuditFile f = new AuditFile(file, queued::add, e -> fail("sync failed: " + e), syncs);
+
+        f.append("{\"n\":1}");
+        f.append("{\"n\":2}");
+        f.append("{\"n\":3}");
+        assertEquals("written at once, in order", List.of(1, 2, 3), ns(f.read()));
+        assertTrue("nothing synced on the caller's thread", syncs.done.isEmpty());
+        assertEquals("one sync queued for three appends", 1, queued.size());
+
+        queued.poll().run();
+        assertEquals("the file, then the new entries: audit/ in its parent, the file in audit/",
+                List.of(file, tmp.getRoot(), file.getParentFile()), syncs.done);
+
+        f.append("{\"n\":4}");
+        assertEquals("the next append queues the next sync", 1, queued.size());
+        queued.poll().run();
+        assertEquals("the directories are synced once", List.of(file, tmp.getRoot(), file.getParentFile(), file),
+                syncs.done);
+        assertTrue(queued.isEmpty());
     }
 }
