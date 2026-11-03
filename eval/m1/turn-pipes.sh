@@ -75,7 +75,7 @@ adb logcat -d -s VOS_TURN VOS_SESSION > "$out/logcat.txt"
 
 turn_id="$(sed -n 's/.*turn opened in session turnId=\([0-9a-f-]*\).*/\1/p' "$out/logcat.txt" | head -1)"
 echo "turnId=$turn_id"
-adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r' | grep -F "\"turnId\":\"$turn_id\"" > "$out/audit.jsonl" || true
+adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r\000' | grep -F "\"turnId\":\"$turn_id\"" > "$out/audit.jsonl" || true
 states="$(sed -n 's/.*"state":"\([A-Z_]*\)".*/\1/p' "$out/audit.jsonl" | tr '\n' ' ')"
 echo "audit states: $states"
 check "audit CAPTURE CONVERSE RESTORE IDLE" "[[ '$states' == 'CAPTURE CONVERSE RESTORE IDLE ' ]]"

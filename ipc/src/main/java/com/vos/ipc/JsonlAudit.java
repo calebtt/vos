@@ -3,9 +3,7 @@ package com.vos.ipc;
 import android.content.Context;
 import android.util.Log;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Map;
 import org.json.JSONArray;
@@ -15,15 +13,18 @@ import org.json.JSONObject;
 /**
  * Append-only audit lines in the app's CE storage ({@code files/audit/audit.jsonl}) and logcat
  * (tag {@code VOS_AUDIT}). The actuator's file is the audit of record; audit v1 replaces this
- * writer with rotation, the owner view and export (§3.8).
+ * writer with rotation, the owner view and export (§3.8). Each line is one synced write, and a
+ * torn tail left by a power cut is repaired on the next write ({@link AuditFile}, #319).
  */
 public final class JsonlAudit implements BinderGuard.Audit {
     public static final String TAG = "VOS_AUDIT";
 
-    private final File file;
+    private final File dir;
+    private final AuditFile file;
 
     public JsonlAudit(Context context) {
-        this.file = new File(new File(context.getFilesDir(), "audit"), "audit.jsonl");
+        this.dir = new File(context.getFilesDir(), "audit");
+        this.file = new AuditFile(new File(dir, "audit.jsonl"));
     }
 
     @Override
@@ -73,13 +74,23 @@ public final class JsonlAudit implements BinderGuard.Audit {
 
     private synchronized void append(String line) {
         Log.w(TAG, line);
-        File dir = file.getParentFile();
         if (!dir.isDirectory() && !dir.mkdirs()) {
             Log.e(TAG, "cannot create " + dir);
             return;
         }
-        try (FileOutputStream out = new FileOutputStream(file, true)) {
-            out.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+        try {
+            if (file.append(line)) { // the tail was torn (#319): say so in the trail, after the record
+                String note;
+                try {
+                    note = new JSONObject().put("ts", System.currentTimeMillis()).put("event", "audit.torn_tail")
+                            .put("detail", "the file ended in an unfinished line or NULs; the record before this started a fresh line")
+                            .toString();
+                } catch (JSONException e) {
+                    throw new IllegalStateException(e);
+                }
+                Log.w(TAG, note);
+                file.append(note);
+            }
         } catch (IOException e) {
             Log.e(TAG, "audit write failed", e);
         }

@@ -129,7 +129,7 @@ python3 -I "$ROOT/eval/m1/make_fixture.py" "That's all, thanks." "$out/done.pcm"
 n=0
 compactions_so_far() {
     adb shell "run-as com.vos.session sh -c 'cat files/audit/audit.jsonl 2>/dev/null'" | tail -n +"$((${audit_before:-0} + 1))" \
-        | grep -c '"event":"context.compact"' || true
+        | tr -d '\000' | grep -c '"event":"context.compact"' || true
 }
 # One voice turn; then waits for that turn's own post-turn work ("after turn <id> done", logged
 # whether it compacted or not; up to 45 s, three compact call timeouts). Sets turn_done.
@@ -198,7 +198,7 @@ adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/
 ring_after="$(vol 2)"
 adb shell "run-as com.vos.session cat files/conversation/conversation.json" > "$out/conversation.json" 2>/dev/null || true
 adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" 2>/dev/null | tail -n +"$((${tr_before:-0} + 1))" > "$out/transcripts.jsonl" || true
-adb shell "run-as com.vos.session cat files/audit/audit.jsonl" 2>/dev/null | tail -n +"$((${audit_before:-0} + 1))" > "$out/session-audit.jsonl" || true
+adb shell "run-as com.vos.session cat files/audit/audit.jsonl" 2>/dev/null | tail -n +"$((${audit_before:-0} + 1))" | tr -d '\000' > "$out/session-audit.jsonl" || true
 
 python3 -I - "$out" "$budget" > "$out/summary.txt" <<'PY'
 import json, re, sys
@@ -206,7 +206,17 @@ out, budget = sys.argv[1], int(sys.argv[2])
 lines = open(f"{out}/session.txt").read().splitlines()
 starts = [(int(m.group(1)), int(m.group(2)), "over budget" in l) for l in lines
           for m in [re.search(r"context tokens~(\d+) budget=(\d+)", l)] if m and "after turn" not in l]
-audit = [json.loads(l) for l in open(f"{out}/session-audit.jsonl") if l.strip().startswith("{")]
+def objects(path):  # JSONL objects; a torn line (#319), blank or not JSON, is skipped instead of failing the run
+    out = []
+    for l in open(path, encoding="utf-8", errors="replace"):
+        try:
+            o = json.loads(l)
+        except ValueError:
+            continue
+        if isinstance(o, dict):
+            out.append(o)
+    return out
+audit = objects(f"{out}/session-audit.jsonl")
 compacts = [a for a in audit if a.get("event") == "context.compact"]
 failed = [a for a in audit if a.get("event") == "context.compact_failed"]
 counts_only = all(set(a) <= {"ts", "event", "context", "tokens_before", "tokens_after", "budget", "compacted_owner",

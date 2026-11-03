@@ -86,7 +86,7 @@ for i in $(seq "$replies"); do
     aec="$(sed -n 's/.*capture turnId=[^ ]* source=[^ ]* aec=\([a-z]*\).*/\1/p' "$log" | head -1)"
     ns="$(sed -n 's/.*capture turnId=.* ns=\([a-z]*\).*/\1/p' "$log" | head -1)"
     indev="$(sed -n 's/.*capture turnId=.* inDev=\([A-Za-z0-9_]*\).*/\1/p' "$log" | head -1)"
-    outdev="$(adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r' | grep -F "\"turnId\":\"$turn\"" \
+    outdev="$(adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r\000' | grep -F "\"turnId\":\"$turn\"" \
         | grep '"state":"CAPTURE"' | sed -n 's/.*"outDev":"\([A-Z_]*\)".*/\1/p' | head -1 || true)"
     bytes="$(sed -n 's/.*speaker done turnId=[^ ]* bytes=\([0-9]*\).*/\1/p' "$log" | head -1)"
     reply_s="$(awk -v b="${bytes:-0}" 'BEGIN { printf "%.1f", b / 32000 }')"

@@ -75,7 +75,7 @@ turn="$(sed -n 's/.*turn opened in session turnId=\([0-9a-f-]*\).*/\1/p' "$out/l
 echo "turnId=$turn"
 grep -E "tool |earcon|first reply audio|response done|over after_ms" "$out/logcat.txt" | sed 's/^.*VOS_/VOS_/' || true
 
-adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r' | grep -F "\"turnId\":\"$turn\"" > "$out/audit.jsonl" || true
+adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r\000' | grep -F "\"turnId\":\"$turn\"" > "$out/audit.jsonl" || true
 grep '"event":"tool.call"' "$out/audit.jsonl" | sed 's/^/  /' || true
 check "volume_set ran in the actuator and was VERIFIED" \
     "grep '\"event\":\"tool.call\"' '$out/audit.jsonl' | grep '\"tool\":\"volume_set\"' | grep -q '\"status\":\"VERIFIED\"'"

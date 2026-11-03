@@ -121,7 +121,7 @@ death_case actuator-sees-session-die "$ACTUATOR_T" session com.vos.session
 # fixture never reaches the guard (the system refuses its bind), so it must have no lines.
 check_audit() { # app-package caller-uid caller-package reason
     local lines
-    lines="$(adb shell run-as "$1" cat files/audit/audit.jsonl 2>/dev/null || true)"
+    lines="$(adb shell run-as "$1" cat files/audit/audit.jsonl 2>/dev/null | tr -d '\000' || true)"  # NULs: a torn tail (#319)
     if grep -F "\"uid\":$2," <<<"$lines" | grep -F "\"$3\"" | grep -qF "\"reason\":\"$4\""; then
         echo "PASS audit $1 has uid $2 ($3): $4"
     else
@@ -133,7 +133,7 @@ check_audit com.vos.session "$UID_WRONG" com.vos.fixture.wrongpkg "package misma
 check_audit com.vos.actuator "$UID_ACTUATOR" com.vos.actuator "package mismatch"
 check_audit com.vos.session "$UID_SESSION" com.vos.session "package mismatch"
 for p in com.vos.actuator com.vos.session; do
-    adb shell run-as "$p" cat files/audit/audit.jsonl > "$out/audit-$p.jsonl" 2>/dev/null || true
+    adb shell run-as "$p" cat files/audit/audit.jsonl 2>/dev/null | tr -d '\000' > "$out/audit-$p.jsonl" || true
     if grep -q "\"uid\":$UID_FOREIGN," "$out/audit-$p.jsonl"; then
         echo "FAIL audit $p has a line for the foreign fixture (its bind should never reach the guard)"; fails=$((fails + 1))
     fi
