@@ -72,10 +72,11 @@ public final class AuditFile {
      * Appends {@code json} (one JSON object, no newline) as one write of one complete line on an
      * {@code O_APPEND} stream, then queues a sync on the syncer unless one is already queued.
      * It never syncs on the caller's thread. On the first append, and after a failed one, it
-     * creates the directory if it has to and checks the tail. If the file's last byte is not a
-     * newline (a cut-off record, or a NUL run), the write starts with a newline, so this record
-     * starts on a fresh line and the torn piece stays a piece of its own. Returns whether it did
-     * that.
+     * creates the directory if it has to and checks the tail. If the directory is deleted while
+     * the app runs, the next append recreates it and the file and retries once. If the file's last
+     * byte is not a newline (a cut-off record, or a NUL run), the write starts with a newline, so
+     * this record starts on a fresh line and the torn piece stays a piece of its own. Returns
+     * whether it did that.
      */
     public boolean append(String json) throws IOException {
         boolean torn = write(json);
@@ -86,33 +87,53 @@ public final class AuditFile {
     }
 
     private synchronized boolean write(String json) throws IOException {
-        boolean torn = false;
-        if (!tailKnownClean) {
-            File dir = file.getParentFile();
-            if (dir != null && !dir.isDirectory()) {
-                if (!dir.mkdirs() && !dir.isDirectory()) {
-                    throw new IOException("cannot create " + dir);
-                }
-                File up = dir.getParentFile();
-                if (up != null) {
-                    dirsToSync.add(up);
-                }
-            }
-            if (!file.exists()) {
-                if (dir != null) {
-                    dirsToSync.add(dir);
-                }
-            } else {
-                torn = tornTail();
-            }
-        }
-        byte[] bytes = ((torn ? "\n" : "") + json + "\n").getBytes(StandardCharsets.UTF_8);
+        boolean torn = !tailKnownClean && prepare();
         tailKnownClean = false;
-        try (FileOutputStream out = new FileOutputStream(file, true)) {
-            out.write(bytes);
+        try {
+            writeLine((torn ? "\n" : "") + json);
+        } catch (FileNotFoundException e) {
+            File dir = file.getParentFile();
+            if (dir == null || dir.isDirectory()) {
+                throw e;
+            }
+            // The directory went away while we ran (e.g. rm -rf files/audit): start it and the file
+            // again, as on a first append. A new file has no torn tail.
+            prepare();
+            torn = false;
+            writeLine(json);
         }
         tailKnownClean = true;
         return torn;
+    }
+
+    /**
+     * Creates the directory if it has to, queues the one-time syncs of the entries this creates,
+     * and returns whether an existing file's tail is torn.
+     */
+    private boolean prepare() throws IOException {
+        File dir = file.getParentFile();
+        if (dir != null && !dir.isDirectory()) {
+            if (!dir.mkdirs() && !dir.isDirectory()) {
+                throw new IOException("cannot create " + dir);
+            }
+            File up = dir.getParentFile();
+            if (up != null) {
+                dirsToSync.add(up);
+            }
+        }
+        if (!file.exists()) {
+            if (dir != null) {
+                dirsToSync.add(dir);
+            }
+            return false;
+        }
+        return tornTail();
+    }
+
+    private void writeLine(String line) throws IOException {
+        try (FileOutputStream out = new FileOutputStream(file, true)) {
+            out.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+        }
     }
 
     /** On the syncer: one fsync of the file covers every write before it, then any new directories. */

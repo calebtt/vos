@@ -228,4 +228,28 @@ public class AuditFileTest {
                 syncs.done);
         assertTrue(queued.isEmpty());
     }
+
+    @Test
+    public void aDirectoryDeletedWhileRunningIsRecreatedAndNoRecordAfterItIsLost() throws IOException {
+        File dir = new File(tmp.getRoot(), "audit");
+        file = new File(dir, "audit.jsonl");
+        Queue<Runnable> queued = new ArrayDeque<>();
+        Syncs syncs = new Syncs();
+        AuditFile f = new AuditFile(file, queued::add, e -> fail("sync failed: " + e), syncs);
+        f.append("{\"n\":1}");
+        queued.poll().run();
+        syncs.done.clear();
+
+        for (File x : dir.listFiles()) { // what an eval's rm -rf files/audit does
+            assertTrue(x.delete());
+        }
+        assertTrue(dir.delete());
+
+        assertFalse("a new file has no torn tail", f.append("{\"n\":2}"));
+        assertFalse(f.append("{\"n\":3}"));
+        assertEquals(List.of(2, 3), ns(f.read()));
+        assertEquals("{\"n\":2}\n{\"n\":3}\n", bytes());
+        queued.poll().run();
+        assertEquals("the recreated entries are synced again", List.of(file, tmp.getRoot(), dir), syncs.done);
+    }
 }
