@@ -241,7 +241,7 @@ EOF
 
 pull_failed=""
 pull() { # package, file, its lines before the run, file in $out: this run's lines; warns if the pull fails
-    if ! adb shell "run-as $1 cat $2" | tail -n +"$(( ${3:-0} + 1 ))" > "$out/$4"; then
+    if ! adb shell "run-as $1 cat $2" | tail -n +"$(( ${3:-0} + 1 ))" | tr -d '\000' > "$out/$4"; then # NULs: a torn tail (#319)
         echo "warning: pulling $2 from $1 failed (adb's error, if any, is above); the checks see $4 as empty or partial" >&2
         pull_failed+=" $4"
     fi

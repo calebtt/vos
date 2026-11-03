@@ -70,7 +70,7 @@ grep -E "vendor session|configured|first reply audio|response done|over after_ms
 
 reason="$(sed -n "s/.*turn $turn over after_ms=[0-9]* reason=//p" "$out/logcat.txt" | tr -d '\r' | head -1)"
 check "the turn ended because the owner went quiet (reason: $reason)" "[[ '$reason' == idle ]]"
-adb shell "run-as com.vos.session cat files/audit/audit.jsonl" | tr -d '\r' | grep '"event":"model.pick"' | tail -1 > "$out/pick.json" || true
+adb shell "run-as com.vos.session cat files/audit/audit.jsonl" | tr -d '\r\000' | grep '"event":"model.pick"' | tail -1 > "$out/pick.json" || true
 check "chat_voice picked xai:grok-voice-3.0" "grep -q '\"model\":\"xai:grok-voice-3.0\"' '$out/pick.json'"
 
 adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" | tr -d '\r' | grep -F "\"turn_id\":\"$turn\"" > "$out/transcripts.jsonl" || true
@@ -78,7 +78,7 @@ echo "transcripts:"; sed 's/^/  /' "$out/transcripts.jsonl"
 check "the owner's question was transcribed" "grep '\"role\":\"owner\"' '$out/transcripts.jsonl' | grep -qi 'time'"
 check "a reply was transcribed" "grep -q '\"role\":\"vos\",\"text\":\"[^\"]' '$out/transcripts.jsonl'"
 
-adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r' | grep -F "\"turnId\":\"$turn\"" > "$out/audit.jsonl" || true
+adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r\000' | grep -F "\"turnId\":\"$turn\"" > "$out/audit.jsonl" || true
 states="$(sed -n 's/.*"state":"\([A-Z_]*\)".*/\1/p' "$out/audit.jsonl" | tr '\n' ' ')"
 check "AudioPlane audit CAPTURE CONVERSE RESTORE IDLE ($states)" "[[ '$states' == 'CAPTURE CONVERSE RESTORE IDLE ' ]]"
 check "RESTORE was the session's idle end" "grep '\"state\":\"RESTORE\"' '$out/audit.jsonl' | grep -q 'session: idle'"

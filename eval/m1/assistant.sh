@@ -48,9 +48,9 @@ pass() { echo "PASS $*"; }
 fail() { echo "FAIL $*"; fails=$((fails + 1)); }
 holder() { adb shell cmd role get-role-holders android.app.role.ASSISTANT | tr -d '\r'; }
 notice() { adb shell dumpsys notification --noredact 2>/dev/null | tr -d '\r' | grep -c "VOS is not your assistant" || true; }
-last_role_audit() { adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r' | grep '"role.assistant"' | tail -1; }
+last_role_audit() { adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r\000' | grep '"role.assistant"' | tail -1; }
 turn_open() { adb shell dumpsys activity services com.vos.actuator | grep -c "TurnService" || true; }
-session_audit() { adb shell "run-as com.vos.session cat files/audit/audit.jsonl" 2>/dev/null | tr -d '\r' || true; }  # append-only
+session_audit() { adb shell "run-as com.vos.session cat files/audit/audit.jsonl" 2>/dev/null | tr -d '\r\000' || true; }  # append-only
 # Waits up to 5 s for the notice to reach the wanted count (1 shown, 0 gone).
 wait_notice() { for _ in $(seq 25); do [ "$(notice)" -eq "$1" ] && return 0; sleep 0.2; done; return 1; }
 

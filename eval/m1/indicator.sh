@@ -206,7 +206,7 @@ read -r changes draw_max acting_held < <(sed 's/[a-z_]*=//g' "$out/leg1-draws.tx
 check "every state change was drawn <= 200 ms after the actuator decided it, or after ACTING's minimum time ($changes changes, max ${draw_max} ms)" "(( changes >= 3 && draw_max >= 0 && draw_max <= 200 ))"
 check "ACTING stayed on screen >= 100 ms before the next state (min ${acting_held} ms)" "(( acting_held >= 100 ))"
 turn="$(sed -n 's/.*turn opened in session turnId=\([0-9a-f-]*\).*/\1/p' "$out/leg1.txt" | head -1)"
-check "this turn's tool ran and was VERIFIED (turn ${turn:-?})" "[ -n '$turn' ] && adb shell 'run-as com.vos.actuator cat files/audit/audit.jsonl' | grep -F '\"turnId\":\"$turn\"' | grep '\"tool\":\"volume_set\"' | grep -q VERIFIED"
+check "this turn's tool ran and was VERIFIED (turn ${turn:-?})" "[ -n '$turn' ] && adb shell 'run-as com.vos.actuator cat files/audit/audit.jsonl' | tr -d '\000' | grep -F '\"turnId\":\"$turn\"' | grep '\"tool\":\"volume_set\"' | grep -q VERIFIED"
 pairs="$(python3 -I - "$out/leg1.txt" <<'PY'
 import re, sys
 started, ended = set(), set()
