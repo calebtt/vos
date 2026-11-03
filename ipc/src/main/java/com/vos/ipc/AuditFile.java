@@ -9,6 +9,7 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,6 +53,8 @@ public final class AuditFile {
     private final AtomicBoolean syncPending = new AtomicBoolean();
     /** Directories this instance created entries in (the log directory's parent, the log directory), synced once by the next sync, best effort. */
     private final Queue<File> dirsToSync = new ConcurrentLinkedQueue<>();
+    /** Files {@link #rotate} moved this log to, synced by the next sync before the directories. */
+    private final Queue<File> rotatedToSync = new ConcurrentLinkedQueue<>();
     /** False until this instance has checked the tail, and again after a write that failed. Guarded by this. */
     private boolean tailKnownClean;
 
@@ -100,6 +103,33 @@ public final class AuditFile {
             syncer.execute(this::syncNow);
         }
         return torn;
+    }
+
+    /**
+     * Rolls the log over: renames the file to {@code to} (replacing it), under the same lock as
+     * {@link #append}, so no write lands mid-rotation. The next sync, on the syncer and never on
+     * the caller's thread, fsyncs {@code to} (the outgoing data: the same inode, so its unsynced
+     * tail is covered) and then the directory, so the rename and the new file's entry are
+     * durable. The next append creates a fresh file. A missing file is not an error: there is
+     * nothing to rotate. {@code to} must be in the same directory (one rename, one directory).
+     */
+    public void rotate(File to) throws IOException {
+        synchronized (this) {
+            if (!file.exists()) {
+                return;
+            }
+            Files.move(file.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+            rotatedToSync.add(to);
+            File dir = file.getParentFile();
+            if (dir != null) {
+                dirsToSync.add(dir);
+            }
+            tailKnownClean = false; // the next append checks again (and finds a new file)
+        }
+        if (syncPending.compareAndSet(false, true)) {
+            syncer.execute(this::syncNow);
+        }
     }
 
     private synchronized boolean write(String json) throws IOException {
@@ -161,6 +191,15 @@ public final class AuditFile {
             // moved aside or deleted since the write: nothing of ours left to sync
         } catch (IOException e) {
             syncFailed.accept(e);
+        }
+        for (File r; (r = rotatedToSync.poll()) != null; ) {
+            try {
+                fsync.sync(r);
+            } catch (NoSuchFileException | FileNotFoundException e) {
+                // rotated again or deleted since: nothing of ours left to sync
+            } catch (IOException e) {
+                syncFailed.accept(e);
+            }
         }
         for (File d; (d = dirsToSync.poll()) != null; ) {
             try {

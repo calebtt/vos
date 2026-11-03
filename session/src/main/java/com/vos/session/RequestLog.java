@@ -77,9 +77,11 @@ public final class RequestLog {
 
     private void append(String line) {
         if (file.length() > MAX_BYTES) {
-            File old = new File(file.getParentFile(), "requests.1.jsonl");
-            old.delete();
-            file.renameTo(old);
+            try {
+                log.rotate(new File(file.getParentFile(), "requests.1.jsonl")); // the outgoing file is synced off this thread
+            } catch (IOException ignored) {
+                // keep appending to the current file; the next write tries again
+            }
         }
         try {
             log.append(line);

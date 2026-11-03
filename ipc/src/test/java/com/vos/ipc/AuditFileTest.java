@@ -252,4 +252,44 @@ public class AuditFileTest {
         queued.poll().run();
         assertEquals("the recreated entries are synced again", List.of(file, tmp.getRoot(), dir), syncs.done);
     }
+
+    @Test
+    public void rotateMovesTheFileAndSyncsTheOutgoingFileThenTheDirectoryOffTheCaller() throws IOException {
+        File dir = tmp.newFolder("logs");
+        file = new File(dir, "t.jsonl");
+        File old = new File(dir, "t.1.jsonl");
+        Queue<Runnable> queued = new ArrayDeque<>();
+        Syncs syncs = new Syncs();
+        AuditFile f = new AuditFile(file, queued::add, e -> fail("sync failed: " + e), syncs);
+        f.append("{\"n\":1}");
+        queued.poll().run();
+        syncs.done.clear();
+        assertTrue(old.createNewFile()); // an earlier rotation's file is replaced
+
+        f.append("{\"n\":2}");
+        f.rotate(old);
+        assertTrue("nothing synced on the caller's thread", syncs.done.isEmpty());
+        assertFalse(file.exists());
+        assertEquals(List.of(1, 2), ns(AuditFile.read(old)));
+        assertEquals("one sync queued for the append and the rotation", 1, queued.size());
+        queued.poll().run();
+        assertEquals("the (missing) live file, then the outgoing file, then the directory",
+                List.of(file, old, dir), syncs.done);
+
+        syncs.done.clear();
+        assertFalse("the new file has no torn tail", f.append("{\"n\":3}"));
+        assertEquals("{\"n\":3}\n", bytes());
+        queued.poll().run();
+        assertEquals("the new file and its new entry", List.of(file, dir), syncs.done);
+    }
+
+    @Test
+    public void rotatingAMissingFileDoesNothing() throws IOException {
+        file = new File(tmp.getRoot(), "none.jsonl");
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AuditFile f = new AuditFile(file, queued::add, e -> fail("sync failed: " + e), new Syncs());
+        f.rotate(new File(tmp.getRoot(), "none.1.jsonl"));
+        assertFalse(new File(tmp.getRoot(), "none.1.jsonl").exists());
+        assertTrue(queued.isEmpty());
+    }
 }
