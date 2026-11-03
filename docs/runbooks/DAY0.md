@@ -35,7 +35,7 @@ sudo cp /etc/fstab /etc/fstab.bak-$(date +%F)
 # add one line with sudoedit /etc/fstab:
 #   UUID=<disk-uuid> <data-disk> ntfs3 uid=1000,gid=1000,nosuid,nodev,nofail 0 0
 sudo findmnt --verify                # must report no errors
-sudo mount -a && findmnt <data-disk>
+sudo mount -a && findmnt "<data-disk>"
 ```
 
 The loop-mounted ext4 build volume (§7) can follow on Mon 10-12; it is not part of Day 0.
@@ -47,7 +47,7 @@ The loop-mounted ext4 build volume (§7) can follow on Mon 10-12; it is not part
 The command below carries every exclusion the 2026-10-18 run used. Checked 2026-10-20: its file list (`tar -cvf /dev/null` with the same arguments) is identical to the tarball's (`tar -tf`), 675 entries.
 
 ```bash
-a=<data-disk>/vos/archive/2026-10-10-pre-vos.tar.zst
+a="<data-disk>/vos/archive/2026-10-10-pre-vos.tar.zst"
 if [ -e "$a" ]; then
   echo "refusing: $a exists (read-only archive, never overwritten)" >&2
 else
