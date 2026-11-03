@@ -197,7 +197,7 @@ post_done=$turn_done
 adb logcat -d -s VOS_CONTEXT VOS_AUDIT | tr -d '\r' | sed 's/^/tail /' >> "$out/session.txt"
 ring_after="$(vol 2)"
 adb shell "run-as com.vos.session cat files/conversation/conversation.json" > "$out/conversation.json" 2>/dev/null || true
-adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" 2>/dev/null | tail -n +"$((${tr_before:-0} + 1))" > "$out/transcripts.jsonl" || true
+adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" 2>/dev/null | tail -n +"$((${tr_before:-0} + 1))" | tr -d '\000' > "$out/transcripts.jsonl" || true
 adb shell "run-as com.vos.session cat files/audit/audit.jsonl" 2>/dev/null | tail -n +"$((${audit_before:-0} + 1))" | tr -d '\000' > "$out/session-audit.jsonl" || true
 
 python3 -I - "$out" "$budget" > "$out/summary.txt" <<'PY'
@@ -223,7 +223,7 @@ counts_only = all(set(a) <= {"ts", "event", "context", "tokens_before", "tokens_
                              "compacted_vos", "compacted_tool_results", "compacted_notes", "model", "taint", "error",
                              "source"}
                   for a in compacts + failed)
-tr = [json.loads(l) for l in open(f"{out}/transcripts.jsonl") if l.strip().startswith("{")]
+tr = objects(f"{out}/transcripts.jsonl")
 turns = []
 for t in tr:
     if not turns or turns[-1]["id"] != t["turn_id"]:

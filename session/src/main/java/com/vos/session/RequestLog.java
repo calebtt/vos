@@ -1,16 +1,17 @@
 package com.vos.session;
 
+import com.vos.ipc.AuditFile;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
  * The session's egress log (§5.8): one JSONL line per HTTP request or WebSocket connection, in
  * {@code files/egress/requests.jsonl}. It records where traffic went and how much, never headers,
- * query strings or bodies. The file rotates to {@code requests.1.jsonl} past 2 MB.
+ * query strings or bodies. The file rotates to {@code requests.1.jsonl} past 2 MB. Written through
+ * {@link AuditFile} (#321): one synchronous write per line, fsync coalesced on the background sync
+ * thread, and a torn tail from a power cut starts the next line fresh.
  */
 public final class RequestLog {
     /** One finished (or refused) exchange. {@code status} is the HTTP status, or -1 if none. */
@@ -42,9 +43,13 @@ public final class RequestLog {
     static final long MAX_BYTES = 2L * 1024 * 1024;
 
     private final File file;
+    private final AuditFile log;
 
     public RequestLog(File dir) {
         this.file = new File(dir, "requests.jsonl");
+        this.log = new AuditFile(file, AuditFile.backgroundSyncer(), e -> {
+            // a lost line shows up as a gap in the field check, never as a broken request
+        });
     }
 
     public File file() {
@@ -71,17 +76,13 @@ public final class RequestLog {
     }
 
     private void append(String line) {
-        File dir = file.getParentFile();
-        if (!dir.isDirectory() && !dir.mkdirs()) {
-            return;
-        }
         if (file.length() > MAX_BYTES) {
-            File old = new File(dir, "requests.1.jsonl");
+            File old = new File(file.getParentFile(), "requests.1.jsonl");
             old.delete();
             file.renameTo(old);
         }
-        try (FileOutputStream out = new FileOutputStream(file, true)) {
-            out.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+        try {
+            log.append(line);
         } catch (IOException ignored) {
             // The log must never break a request; a lost line shows up as a gap in the field check.
         }

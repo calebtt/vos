@@ -73,7 +73,7 @@ check "the turn ended because the owner went quiet (reason: $reason)" "[[ '$reas
 adb shell "run-as com.vos.session cat files/audit/audit.jsonl" | tr -d '\r\000' | grep '"event":"model.pick"' | tail -1 > "$out/pick.json" || true
 check "chat_voice picked xai:grok-voice-3.0" "grep -q '\"model\":\"xai:grok-voice-3.0\"' '$out/pick.json'"
 
-adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" | tr -d '\r' | grep -F "\"turn_id\":\"$turn\"" > "$out/transcripts.jsonl" || true
+adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" | tr -d '\r\000' | grep -F "\"turn_id\":\"$turn\"" > "$out/transcripts.jsonl" || true
 echo "transcripts:"; sed 's/^/  /' "$out/transcripts.jsonl"
 check "the owner's question was transcribed" "grep '\"role\":\"owner\"' '$out/transcripts.jsonl' | grep -qi 'time'"
 check "a reply was transcribed" "grep -q '\"role\":\"vos\",\"text\":\"[^\"]' '$out/transcripts.jsonl'"
@@ -89,7 +89,7 @@ else
     check "reply audio reached the actuator (${bytes:-0} bytes)" "(( ${bytes:-0} > 16000 ))"
 fi
 
-adb shell "run-as com.vos.session cat files/egress/requests.jsonl" | tr -d '\r' > "$out/egress-all.jsonl" || true
+adb shell "run-as com.vos.session cat files/egress/requests.jsonl" | tr -d '\r\000' > "$out/egress-all.jsonl" || true
 grep -F "\"turn_id\":\"$turn\"" "$out/egress-all.jsonl" > "$out/egress.jsonl" || true
 check "egress: one WebSocket to api.x.ai for this turn" \
     "[[ \$(wc -l < '$out/egress.jsonl') == 1 ]] && grep -q '\"kind\":\"ws\",\"host\":\"api.x.ai\"' '$out/egress.jsonl'"
