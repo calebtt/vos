@@ -4,13 +4,14 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
 import com.vos.session.HighRiskRedactor.Released;
+import java.util.Arrays;
 import java.util.List;
 import org.junit.Test;
 
 /**
  * Decision 46 (#276): at task end every span matching a released high-risk string under decision 32's
- * normalization (case folded, whitespace and separators removed) becomes a placeholder naming the
- * source app, in single texts and across adjacent turns, and the string never survives.
+ * normalization (NFKC and case folded, whitespace, Unicode spaces, dashes, commas and separators
+ * removed) becomes a placeholder naming the source app, in single texts and across adjacent turns.
  */
 public class HighRiskRedactorTest {
     private static final Released OTP = new Released("482-913", "Messages");
@@ -28,6 +29,29 @@ public class HighRiskRedactorTest {
     }
 
     @Test
+    public void unicodeSpacesDashesAndCommasAreSeparatorsToo() {
+        // No-break and narrow spaces, an ideographic space, en dash, em dash, fullwidth hyphen,
+        // a fullwidth comma and an Arabic comma: all fold away like the ASCII separators.
+        for (String form : List.of("482\u00A0913", "482\u202F913", "482\u3000913", "482–913",
+                "482—913", "482－913", "482，913", "482\u060C913")) {
+            HighRiskRedactor.Result r = HighRiskRedactor.redact("code: " + form + "!", List.of(OTP));
+            assertEquals(form, "code: a code from Messages!", r.text());
+            assertEquals(form, 1, r.count());
+        }
+    }
+
+    @Test
+    public void nfkcFoldsFullWidthAndCircledFormsOfTheCode() {
+        // NFKC folds fullwidth digits and hyphen to ASCII, on both the text and the released string.
+        assertEquals("code: a code from Messages!",
+                HighRiskRedactor.redact("code: ４８２－９１３!", List.of(OTP)).text());
+        assertEquals("code: a code from Messages!",
+                HighRiskRedactor.redact("code: 482913!", List.of(new Released("４８２－９１３", "Messages"))).text());
+        Released circled = new Released("①②③", "Notes");
+        assertEquals("a code from Notes", HighRiskRedactor.redact("123", List.of(circled)).text());
+    }
+
+    @Test
     public void anAlphanumericCodeMatchesAnyCase() {
         Released code = new Released("AB-12cd", "Authenticator");
         assertEquals("a code from Authenticator", HighRiskRedactor.redact("ab12cd", List.of(code)).text());
@@ -37,15 +61,24 @@ public class HighRiskRedactorTest {
     }
 
     @Test
-    public void aCodeDoesNotMatchInsideALongerAlphanumericRun() {
+    public void aCodeIsBlockedOnlyByASameKindNeighbor() {
+        // A digit next to a digit is a longer run: not a match.
         assertEquals(0, HighRiskRedactor.redact("14829135", List.of(OTP)).count());
         assertEquals(0, HighRiskRedactor.redact("4829135", List.of(OTP)).count());
-        assertEquals(0, HighRiskRedactor.redact("x482-913", List.of(OTP)).count());
-        assertEquals(0, HighRiskRedactor.redact("482-913x", List.of(OTP)).count());
+        assertEquals(0, HighRiskRedactor.redact("5482913", List.of(OTP)).count());
         assertEquals("order 14829135 shipped", HighRiskRedactor.redact("order 14829135 shipped", List.of(OTP)).text());
+        // A letter next to the digits (or the reverse) is a label, not a longer run: still a match.
+        assertEquals("xa code from Messages", HighRiskRedactor.redact("x482-913", List.of(OTP)).text());
+        assertEquals("a code from Messagesx", HighRiskRedactor.redact("482-913x", List.of(OTP)).text());
         // Separators and punctuation on either end keep it a span of its own.
         assertEquals("1 a code from Messages 5", HighRiskRedactor.redact("1 482913 5", List.of(OTP)).text());
         assertEquals("(a code from Messages)", HighRiskRedactor.redact("(482-913)", List.of(OTP)).text());
+        // For an alphanumeric code the same rule holds per side: letters block letters only.
+        Released code = new Released("AB-12cd", "Authenticator");
+        assertEquals(0, HighRiskRedactor.redact("xab12cd", List.of(code)).count());
+        assertEquals(0, HighRiskRedactor.redact("ab12cda", List.of(code)).count());
+        assertEquals("1a code from Authenticator", HighRiskRedactor.redact("1ab12cd", List.of(code)).text());
+        assertEquals("a code from Authenticator3", HighRiskRedactor.redact("ab12cd3", List.of(code)).text());
     }
 
     @Test
@@ -65,14 +98,33 @@ public class HighRiskRedactorTest {
     }
 
     @Test
+    public void longerCodesWinOverShorterOnesThatEatTheirDigits() {
+        // The shorter code is first in the list but the longer one must still match: applying the
+        // codes longest-first keeps "291" from eating the middle of "482913".
+        HighRiskRedactor.Result r = HighRiskRedactor.redact("code 482913 and 291",
+                List.of(new Released("291", "Mail"), OTP));
+        assertEquals("code a code from Messages and a code from Mail", r.text());
+        assertEquals(2, r.count());
+    }
+
+    @Test
     public void noMatchAndNoOrBlankReleasedStringsChangeNothing() {
         HighRiskRedactor.Result none = HighRiskRedactor.redact("no codes here 482 913", List.of());
         assertEquals("no codes here 482 913", none.text());
         assertEquals(0, none.count());
         HighRiskRedactor.Result blank = HighRiskRedactor.redact("text 482-913",
-                List.of(new Released("   ", "Messages"), new Released("-.-/ ", "Messages")));
+                Arrays.asList(new Released("   ", "Messages"), new Released("-.-/ ", "Messages"), null));
         assertEquals("text 482-913", blank.text());
         assertEquals(0, blank.count());
+    }
+
+    @Test
+    public void theAppLabelIsSanitizedIntoThePlaceholder() {
+        // Control characters stripped, whitespace runs collapsed, length capped.
+        assertEquals("a code from Evil App",
+                new Released("1", "Evil\r\u0000   \t App").placeholder());
+        assertEquals("a code from " + "x".repeat(32), new Released("1", "x".repeat(100)).placeholder());
+        assertEquals("a released high-risk string", new Released("1", "\u0000\u0001").placeholder());
     }
 
     @Test
@@ -85,6 +137,27 @@ public class HighRiskRedactorTest {
         HighRiskRedactor.TurnsResult j = HighRiskRedactor.redactTurns(List.of("code 482 ", "-913."), List.of(OTP));
         assertEquals(List.of("code a code from Messages", "a code from Messages."), j.turns());
         assertEquals(1, j.count());
+    }
+
+    @Test
+    public void anAlphanumericCodeSplitAcrossAdjacentTurnsIsRedacted() {
+        Released code = new Released("AB-12cd", "Authenticator");
+        HighRiskRedactor.TurnsResult r = HighRiskRedactor.redactTurns(
+                List.of("here is ab", "12cd now"), List.of(code));
+        assertEquals(List.of("here is a code from Authenticator", "a code from Authenticator now"), r.turns());
+        assertEquals(1, r.count());
+    }
+
+    @Test
+    public void crossTurnMatchingTerminatesWhenAReplacementCouldRecreateItsOwnMatch() {
+        // The released string is the two turns joined, so the crossing match replaces both turns with
+        // the placeholder — and an uncapped re-scan of the rebuilt text is a known non-termination
+        // trap when the placeholder itself spells the code. The passes terminate and count once.
+        Released loop = new Released("a code from messages a code from messages", "Auth");
+        HighRiskRedactor.TurnsResult r = HighRiskRedactor.redactTurns(
+                List.of("a code from messages", "a code from messages"), List.of(loop));
+        assertEquals(1, r.count());
+        assertEquals(List.of("a code from Auth", "a code from Auth"), r.turns());
     }
 
     @Test
@@ -107,7 +180,14 @@ public class HighRiskRedactorTest {
     }
 
     @Test
-    public void emptyTurnListsAreANoOpAndThreeTurnSplitsAreNotHandledYet() {
+    public void nullAndEmptyTurnListsAreANoOpAndThreeTurnSplitsAreNotHandledYet() {
+        HighRiskRedactor.TurnsResult nullTurns = HighRiskRedactor.redactTurns(null, List.of(OTP));
+        assertEquals(List.of(), nullTurns.turns());
+        assertEquals(0, nullTurns.count());
+        HighRiskRedactor.TurnsResult nullElement = HighRiskRedactor.redactTurns(Arrays.asList(null, "482", "913"),
+                List.of(OTP));
+        assertEquals(List.of("", "a code from Messages", "a code from Messages"), nullElement.turns());
+        assertEquals(1, nullElement.count());
         HighRiskRedactor.TurnsResult empty = HighRiskRedactor.redactTurns(List.of(), List.of(OTP));
         assertEquals(List.of(), empty.turns());
         assertEquals(0, empty.count());
