@@ -1,23 +1,28 @@
 package com.vos.session;
 
+import com.vos.ipc.AuditFile;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
  * Turn transcripts, session-private ({@code files/transcripts/transcripts.jsonl}; §5.8: 30 days,
  * the retention job comes with the task record). One line per owner utterance and per reply. Never
- * written to logcat. Rotates to {@code transcripts.1.jsonl} past 2 MB.
+ * written to logcat. Rotates to {@code transcripts.1.jsonl} past 2 MB. Written through
+ * {@link AuditFile} (#321): one synchronous write per line, fsync coalesced on the background sync
+ * thread, and a torn tail from a power cut starts the next line fresh.
  */
 final class TranscriptLog {
     static final long MAX_BYTES = 2L * 1024 * 1024;
     private final File file;
+    private final AuditFile log;
 
     TranscriptLog(File dir) {
         this.file = new File(dir, "transcripts.jsonl");
+        this.log = new AuditFile(file, AuditFile.backgroundSyncer(), e -> {
+            // a lost transcript line never breaks the turn
+        });
     }
 
     File file() {
@@ -31,17 +36,13 @@ final class TranscriptLog {
         } catch (JSONException e) {
             throw new IllegalStateException(e);
         }
-        File dir = file.getParentFile();
-        if (!dir.isDirectory() && !dir.mkdirs()) {
-            return;
-        }
         if (file.length() > MAX_BYTES) {
-            File old = new File(dir, "transcripts.1.jsonl");
+            File old = new File(file.getParentFile(), "transcripts.1.jsonl");
             old.delete();
             file.renameTo(old);
         }
-        try (FileOutputStream out = new FileOutputStream(file, true)) {
-            out.write((o + "\n").getBytes(StandardCharsets.UTF_8));
+        try {
+            log.append(o.toString());
         } catch (IOException ignored) {
             // a lost transcript line never breaks the turn
         }

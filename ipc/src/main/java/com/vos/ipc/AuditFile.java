@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import org.json.JSONException;
@@ -23,7 +24,8 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 /**
- * The bytes of one JSONL audit file (#319). Each record is one line, written by one synchronous
+ * The bytes of one append-only JSONL log: the audit (#319), and the session's transcript and
+ * egress logs (#321). Each record is one line, written by one synchronous
  * {@code write()} before {@link #append} returns, so a crash of the app loses nothing. The fsync is
  * not on the caller's thread: a background syncer runs it after the write, and one sync covers
  * every write before it. A record is durable within one sync period, not when append returns: a
@@ -48,14 +50,28 @@ public final class AuditFile {
     private final Fsync fsync;
     /** Whether a sync is queued and has not started yet; the next append after it starts queues another. */
     private final AtomicBoolean syncPending = new AtomicBoolean();
-    /** Directories this instance created entries in (audit/'s parent, audit/), synced once by the next sync, best effort. */
+    /** Directories this instance created entries in (the log directory's parent, the log directory), synced once by the next sync, best effort. */
     private final Queue<File> dirsToSync = new ConcurrentLinkedQueue<>();
     /** False until this instance has checked the tail, and again after a write that failed. Guarded by this. */
     private boolean tailKnownClean;
 
+    /** The process's one background thread ({@code vos-jsonl-sync}) that runs every log's fsyncs. */
+    public static Executor backgroundSyncer() {
+        return SyncThread.EXECUTOR;
+    }
+
+    private static final class SyncThread {
+        static final Executor EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "vos-jsonl-sync");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
     /**
-     * {@code syncer} runs the fsyncs, and should be one background thread; {@code syncFailed}
-     * hears a failed file sync (on the syncer's thread).
+     * {@code syncer} runs the fsyncs, and should be one background thread, normally
+     * {@link #backgroundSyncer()}; {@code syncFailed} hears a failed file sync (on the syncer's
+     * thread).
      */
     public AuditFile(File file, Executor syncer, Consumer<IOException> syncFailed) {
         this(file, syncer, syncFailed, AuditFile::fsync);
@@ -209,6 +225,11 @@ public final class AuditFile {
      * next {@link #append} has given it a newline, a whole record there reads as kept.
      */
     public Read read() throws IOException {
+        return read(file);
+    }
+
+    /** {@link #read()} for any file in this format, without a writer. */
+    public static Read read(File file) throws IOException {
         byte[] raw;
         try {
             raw = Files.readAllBytes(file.toPath());

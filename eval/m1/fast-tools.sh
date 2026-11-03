@@ -84,7 +84,7 @@ read -r vol_now _ <<<"$(media_volume)"
 want=$(( (30 * vol_max + 50) / 100 ))
 check "media volume is now $vol_now of $vol_max (30% is $want)" "(( vol_now == want ))"
 check "the earcon was the actuator's VERIFIED" "grep -q 'earcon VERIFIED' '$out/logcat.txt'"
-adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" | tr -d '\r' | grep -F "\"turn_id\":\"$turn\"" > "$out/transcripts.jsonl" || true
+adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" | tr -d '\r\000' | grep -F "\"turn_id\":\"$turn\"" > "$out/transcripts.jsonl" || true
 echo "transcripts:"; sed 's/^/  /' "$out/transcripts.jsonl"
 check "the reply came after the result and names the level" "grep '\"role\":\"vos\"' '$out/transcripts.jsonl' | grep -q -E '3[0-9]|thirty'"
 reason="$(sed -n "s/.*turn $turn over after_ms=[0-9]* reason=//p" "$out/logcat.txt" | tr -d '\r' | head -1)"
