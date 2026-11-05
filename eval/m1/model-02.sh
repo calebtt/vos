@@ -10,7 +10,11 @@
 # Needs com.vos.actuator and com.vos.session installed (any build), and a session that has used the
 # network at least once (any voice or typed turn), so netstats has VOS traffic to compare against.
 #
-# Usage: eval/m1/model-02.sh
+# A session with no netstats records yet (a fresh device) is a missing precondition: "SKIP ..." and
+# exit 3, unless a check failed. Actuator records are a FAIL either way (#312).
+#
+# Usage: eval/m1/model-02.sh [--self-test]
+#   --self-test checks the netstats verdict and the shared verdict with no device.
 #   ANDROID_SERIAL picks the device. Results go to $VOS_EVAL_OUT if set, else to
 #   $VOS_EVAL_ROOT/<date>/m1-model-02-<time>, else under eval/runs/ in this checkout (gitignored).
 
@@ -18,7 +22,24 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/eval/m1/lib.sh"
-if (( $# )); then echo "usage: $0" >&2; exit 2; fi
+
+# netstats_verdict SESSION_RECORDS ACTUATOR_RECORDS: FAIL if the actuator has any record (a defect,
+# whatever else), SKIP if the session has none (netstats has no VOS traffic to compare yet), else PASS.
+netstats_verdict() {
+    if (( $2 > 0 )); then echo FAIL; elif (( $1 == 0 )); then echo SKIP; else echo PASS; fi
+}
+
+if [[ "${1:-}" == "--self-test" ]]; then
+    for c in "3 0 PASS" "0 0 SKIP" "0 2 FAIL" "5 1 FAIL"; do
+        read -r s a want <<<"$c"
+        got="$(netstats_verdict "$s" "$a")"
+        [[ $got == "$want" ]] || { echo "self-test FAIL: netstats_verdict $s $a: $got, want $want" >&2; exit 1; }
+    done
+    vos_lib_self_test
+    echo "self-test PASS"
+    exit 0
+fi
+if (( $# )); then echo "usage: $0 [--self-test]" >&2; exit 2; fi
 
 vos_run_dir m1-model-02
 
@@ -77,7 +98,11 @@ session_records=$(grep -c " uid=$UID_SESSION " "$out/netstats-uid.txt" || true)
 actuator_records=$(grep -c " uid=$UID_ACTUATOR " "$out/netstats-uid.txt" || true)
 echo "netstats records: session=$session_records actuator=$actuator_records"
 check "the actuator requests no INTERNET permission" "! grep -q 'android.permission.INTERNET' '$out/actuator-package.txt'"
-check "netstats sees VOS traffic (the session has records)" "(( session_records > 0 ))"
 check "the actuator UID has 0 network records" "(( actuator_records == 0 ))"
+skip=""
+case "$(netstats_verdict "$session_records" "$actuator_records")" in
+    SKIP) skip="netstats has no records for the session yet (run one voice or typed turn first), so 0 for the actuator shows nothing" ;;
+    PASS) echo "PASS netstats sees VOS traffic (the session has records)" ;;
+esac
 
-if (( fails == 0 )); then echo "M1-MODEL-02: PASS"; else echo "M1-MODEL-02: FAIL ($fails)"; exit 1; fi
+vos_verdict M1-MODEL-02 "$fails" "$skip"

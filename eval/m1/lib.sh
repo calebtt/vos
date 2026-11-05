@@ -67,6 +67,50 @@ vos_volume() {
         | sed -n 's/.*volume is \([0-9]*\) in range \[\([0-9]*\)\.\.\([0-9]*\)\].*/\1 \3/p'
 }
 
+# Exit codes the runners share (#312): 0 PASS, 1 FAIL (a defect), 2 usage, 3 SKIP (a precondition the
+# device does not meet yet, e.g. a fresh emulator with no sealed key: nothing was judged).
+VOS_EXIT_SKIP=3
+
+# vos_verdict NAME FAILS [SKIP_REASON]: the run's last line and exit. Any failed check wins (exit 1);
+# else a skip reason prints "SKIP <reason>" and exits 3; else PASS (exit 0).
+vos_verdict() {
+    if (( $2 > 0 )); then
+        echo "$1: FAIL ($2)"; exit 1
+    elif [[ -n ${3:-} ]]; then
+        echo "SKIP $3"; echo "$1: SKIP"; exit "$VOS_EXIT_SKIP"
+    fi
+    echo "$1: PASS"; exit 0
+}
+
+# vos_low_target BEFORE LOW: the volume a quiet run sets a stream to: LOW, or BEFORE if that is
+# already lower, so a stream never ends up louder than it was. An unreadable BEFORE gives LOW.
+vos_low_target() {
+    if [[ $1 =~ ^[0-9]+$ ]] && (( $1 < $2 )); then echo "$1"; else echo "$2"; fi
+}
+
+# vos_volume_is_low NOW TARGET: the stream reads a number at or below TARGET. Below is fine: on the
+# API 35 emulator STREAM_ASSISTANT (11) aliases STREAM_MUSIC (3), so setting one moves the other.
+vos_volume_is_low() {
+    [[ $1 =~ ^[0-9]+$ ]] && (( $1 <= $2 ))
+}
+
+# vos_lib_self_test: the decisions above, with no device. Returns 1 (and says which) on a wrong one.
+vos_lib_self_test() {
+    local rc case f reason want
+    for case in "0||0" "2||1" "0|no key yet|3" "1|no key yet|1"; do
+        IFS='|' read -r f reason want <<<"$case"
+        rc=0; ( vos_verdict T "$f" "$reason" ) >/dev/null || rc=$?
+        [[ $rc == "$want" ]] || { echo "lib self-test FAIL: vos_verdict $f '$reason' exit $rc, want $want" >&2; return 1; }
+    done
+    [[ "$( ( vos_verdict T 0 "no key yet" ) || true)" == $'SKIP no key yet\nT: SKIP' ]] \
+        || { echo "lib self-test FAIL: the SKIP lines" >&2; return 1; }
+    [[ $(vos_low_target 7 2) == 2 && $(vos_low_target 1 2) == 1 && $(vos_low_target "" 2) == 2 ]] \
+        || { echo "lib self-test FAIL: vos_low_target" >&2; return 1; }
+    if ! { vos_volume_is_low 1 2 && vos_volume_is_low 2 2 && ! vos_volume_is_low 3 2 && ! vos_volume_is_low "" 2; }; then
+        echo "lib self-test FAIL: vos_volume_is_low" >&2; return 1
+    fi
+}
+
 # vos_restore_media_volume INDEX: sets the media volume back. The shell's own volume command does not
 # apply on Phone B's Android 17, so the actuator's debug summon activity sets it. Never fails.
 vos_restore_media_volume() {

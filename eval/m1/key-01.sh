@@ -8,9 +8,10 @@
 #
 # Needs the debug builds installed (run-as) and a session that has sealed its key (any earlier
 # voice-roundtrip or assistant run), so there is a key the actuator could have been handed. Makes no
-# sound, calls no vendor, and changes nothing on the device. The data copied off the device (audit
-# and transcript logs) stays in a private temp dir that is deleted on exit; only counts and file
-# names are written to the results.
+# sound, calls no vendor, and changes nothing on the device. With no sealed key (a fresh device) it
+# reports "SKIP ..." and exits 3, unless a check already failed (#312). The data copied off the
+# device (audit and transcript logs) stays in a private temp dir that is deleted on exit; only counts
+# and file names are written to the results.
 #
 # A scanner error or any unreadable file or directory fails the run. A partial scan does not
 # report that no key was found.
@@ -191,6 +192,7 @@ EOF
     [[ "$got" == "p16 p8 " ]]
     log="$(verdict "$t/clean")"
     [[ "$log" == "PASS M1-KEY-01: $phrase" ]]
+    vos_lib_self_test # the shared verdict: FAIL beats SKIP (exit 3), a missing key is a SKIP (#312)
     echo "self-test PASS"
 }
 
@@ -236,7 +238,11 @@ rm -rf "$work/control"
 
 echo "installed actuator: $(adb shell dumpsys package com.vos.actuator | tr -d '\r' | grep -m1 -o 'lastUpdateTime=.*')"
 check "the actuator is a debug build (run-as works)" "adb shell run-as com.vos.actuator true"
-check "the session holds a sealed key (there is a key to leak)" "adb shell run-as com.vos.session test -s files/keys/xai.bin"
+if ! adb shell run-as com.vos.session test -s files/keys/xai.bin; then
+    # A precondition, not a defect (a fresh device, #312): with no key there is nothing to leak.
+    vos_verdict M1-KEY-01 "$fails" "the session holds no sealed key yet (run one voice or typed turn first)"
+fi
+echo "PASS the session holds a sealed key (there is a key to leak)"
 
 # 1. The installed actuator APK(s), every entry.
 mkdir -p "$work/apk"
@@ -296,4 +302,4 @@ if [[ -s "$keyfile" ]]; then
     check "the key is not in logcat" "! grep -q -F -f '$keyfile' '$work/logcat.txt'"
 fi
 
-if (( fails == 0 )); then echo "M1-KEY-01: PASS"; else echo "M1-KEY-01: FAIL ($fails)"; exit 1; fi
+vos_verdict M1-KEY-01 "$fails"
