@@ -75,6 +75,7 @@ if [[ $mode == self ]]; then
         done
     done
     # Exit 1 is expected (the tampered copies fail); the verdicts are in the output.
+    # shellcheck disable=SC2034 # read by the check strings below, through eval
     verdicts="$(tool verify --head "$head" "$work/audit.jsonl" "${files[@]}" || true)"
     check "the untouched chain verifies" "grep -qF '$work/audit.jsonl: OK records=6 legacy=0' <<<\"\$verdicts\""
     for i in "${!files[@]}"; do
