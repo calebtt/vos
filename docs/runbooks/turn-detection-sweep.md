@@ -20,6 +20,21 @@ The values it picks replace the provisional ones in `model_policy.json`. Drop `"
 - **One device:** `ANDROID_SERIAL` picks it, as in every `eval/m1` runner.
 - **Paid API calls:** the session must hold a sealed xAI key (`vos_seal_key_if_missing` in `eval/m1/lib.sh`). Each trial is one real `grok-voice-3.0` turn. Fixture synthesis is also a paid call: make the fixtures once and reuse them.
 
+## Setup (once, before any trial)
+Same order as `eval/m1/voice-roundtrip.sh`. From the repo root:
+
+```bash
+ROOT="$(pwd)"
+source "$ROOT/eval/m1/lib.sh"
+./gradlew :actuator:assembleDebug :session:assembleDebug
+vos_install_apps
+vos_grant_mic   # needed even when the mic is a file (foreground service)
+vos_seal_key_if_missing
+vos_clear_debug_overrides   # drops a stale files/debug/chat_voice (e.g. debug:echo from turn-pipes)
+```
+
+Without the mic grant the summon is refused and the trial produces nothing. Without clearing `chat_voice`, a leftover `debug:echo` override makes every trial skip xAI.
+
 ## 1. Build a pause fixture (once)
 A trial needs owner audio with natural mid-sentence pauses of 0.5–1.5 s. Build it from short spoken clips joined by silence.
 
@@ -53,6 +68,13 @@ A trial needs owner audio with natural mid-sentence pauses of 0.5–1.5 s. Build
 ## 2. Each trial
 Use at least three `silence_duration_ms` values per patience level, bracketing the provisional value. For example: standard 500/600/800, long 1000/1200/1500, extra_long 1600/2000/2500. Run each value against each pause fixture a few times.
 
+0. **Confirm no stale chat_voice override** (also done in Setup; repeat if you ran another eval):
+
+   ```bash
+   adb shell "run-as com.vos.session rm -f files/debug/chat_voice"
+   # or: vos_clear_debug_overrides
+   ```
+
 1. **Set the patience.** The session reads it from `files/debug/patience`: `standard`, `long` or `extra_long`.
 
    ```bash
@@ -67,7 +89,7 @@ Use at least three `silence_duration_ms` values per patience level, bracketing t
 
    Both files are read when each turn's backend is built, so a new value applies from the next turn.
 
-3. **Push the fixture as the mic.** This is the same command `eval/m1/voice-roundtrip.sh` uses:
+3. **Push the fixture as the mic.** This is the same command `eval/m1/voice-roundtrip.sh` uses. It begins with `rm -rf files/debug` on the actuator, so any other actuator debug file set for the sweep is wiped each trial:
 
    ```bash
    adb shell "run-as com.vos.actuator sh -c 'rm -rf files/debug; umask 077 && mkdir -p files/debug && cat > files/debug/mic-inject.pcm'" < "$d/pause-1.2.pcm"
@@ -95,7 +117,7 @@ Every line names the turn (`turn <turnId>`) and the settings in use: `patience=�
 
 ## 4. What to record per trial
 - **The settings:** patience, `silence_duration_ms`, `prefix_padding_ms`, the fixture's pause length, and the turnId.
-- **False cut-ins:** a `speech end` line, or a `first reply audio` line, before the fixture's last clip has played. With N clips there should be exactly one speech end, after the last clip. Count any earlier ones.
+- **False cut-ins:** the log has no clip-boundary timestamps, so count lines. With one joined utterance there should be exactly one `speech end` line (after the last clip). More than one `speech end`, or a `first reply audio` before the last `speech end`, is a false cut-in.
 - **Speech end to first audio:** `speech_end_to_audio_ms` from the reply that answers the whole utterance.
 - **The transcript:** whether the owner transcript (`files/transcripts/transcripts.jsonl` in the session) holds the whole sentence or a fragment.
 
