@@ -90,6 +90,11 @@ public final class AuditFile {
         this.fsync = fsync;
     }
 
+    /** The log's path (for {@link AuditChain.Writer}'s bounded tail read). */
+    File file() {
+        return file;
+    }
+
     /**
      * Appends {@code json} (one JSON object, no newline) as one write of one complete line on an
      * {@code O_APPEND} stream, then queues a sync on the syncer unless one is already queued.
@@ -243,12 +248,6 @@ public final class AuditFile {
         /** The whole records, in file order. */
         public final List<JSONObject> records;
         /**
-         * The stored line of each record, same size and order as {@link #records}, without its
-         * newline: what {@link AuditChain.Writer} hashes on a restart to chain the next record to
-         * the last one. Records found on one line with NULs share that line.
-         */
-        public final List<String> lines;
-        /**
          * Pieces that were not one whole record: a line with NULs (counted once, however long
          * the run), a line that is not exactly one JSON object, and an unfinished last line.
          * Blank lines are not counted.
@@ -257,9 +256,8 @@ public final class AuditFile {
         /** Whether the file ended in an unfinished line (no final newline). It counts in skipped. */
         public final boolean tornTail;
 
-        Read(List<JSONObject> records, List<String> lines, int skipped, boolean tornTail) {
+        Read(List<JSONObject> records, int skipped, boolean tornTail) {
             this.records = Collections.unmodifiableList(records);
-            this.lines = Collections.unmodifiableList(lines);
             this.skipped = skipped;
             this.tornTail = tornTail;
         }
@@ -283,18 +281,17 @@ public final class AuditFile {
         try {
             raw = Files.readAllBytes(file.toPath());
         } catch (NoSuchFileException e) {
-            return new Read(new ArrayList<>(), new ArrayList<>(), 0, false);
+            return new Read(new ArrayList<>(), 0, false);
         }
         String text = new String(raw, StandardCharsets.UTF_8);
         List<JSONObject> records = new ArrayList<>();
-        List<String> lines = new ArrayList<>();
         int skipped = 0;
         int start = 0;
         while (start < text.length()) {
             int nl = text.indexOf('\n', start);
             if (nl < 0) { // the unfinished last line
                 skipped++;
-                return new Read(records, lines, skipped, true);
+                return new Read(records, skipped, true);
             }
             String line = text.substring(start, nl);
             start = nl + 1;
@@ -304,20 +301,18 @@ public final class AuditFile {
                     JSONObject o = piece.isBlank() ? null : object(piece);
                     if (o != null) {
                         records.add(o);
-                        lines.add(line);
                     }
                 }
             } else if (!line.isBlank()) {
                 JSONObject o = object(line);
                 if (o != null) {
                     records.add(o);
-                    lines.add(line);
                 } else {
                     skipped++;
                 }
             }
         }
-        return new Read(records, lines, skipped, false);
+        return new Read(records, skipped, false);
     }
 
     /** {@code s} as one JSON object with nothing after it, or null. */

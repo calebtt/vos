@@ -18,7 +18,9 @@ import org.json.JSONObject;
  * coalesced, so a line is durable within one sync period. A torn tail left by a power cut is
  * repaired on the next write ({@link AuditFile}, #319). Every line is hash-chained to the one
  * before it ({@link AuditChain}, audit v2, #154): its {@code prev} is the SHA-256 of that line as
- * stored, and the {@code audit.torn_tail} note is a chained record too.
+ * stored, and the {@code audit.torn_tail} note is a chained record too. The chain's head is
+ * recovered on the first write from a bounded read of the file's end, never the whole file. Lines
+ * from before the chain verify as breaks ({@link AuditChain} lists the known limits).
  */
 public final class JsonlAudit implements BinderGuard.Audit {
     public static final String TAG = "VOS_AUDIT";

@@ -1,7 +1,9 @@
 package com.vos.ipc;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -33,6 +35,13 @@ import org.json.JSONObject;
  * changed; if it does not, this line did. The newest record has no next link, so a change to it is
  * seen only against the writer's {@link Writer#head()} passed to {@link #verify(byte[], String)};
  * without it, a change there goes unseen, or is reported as ambiguous.
+ *
+ * <p>Known limits. Audit lines written before the chain existed have no {@code prev}: each verifies
+ * as a break, and the chain starts at the first chained record (there is no chain-start marker;
+ * acceptable while the audit is unreleased). A whole record that lost only its newline in a power
+ * cut is an unfinished line when the writer recovers, so the writer chains past it; once the next
+ * append's repair gives it a newline it is a record, and the link after it reads as a change rather
+ * than a gap.
  */
 public final class AuditChain {
     /** The {@code prev} of the first record: 64 zero hex digits. */
@@ -60,6 +69,88 @@ public final class AuditChain {
         return sha256Hex((line + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
+    /** The first tail window {@link #recoverHead} reads. */
+    static final int TAIL_WINDOW = 64 * 1024;
+    /** The most {@link #recoverHead} reads before it gives up and starts from {@link #GENESIS}. */
+    static final int MAX_TAIL = 4 * 1024 * 1024;
+
+    /** {@link #recoverHead(File, int)} from a {@link #TAIL_WINDOW} first window. */
+    static String recoverHead(File file) throws IOException {
+        return recoverHead(file, TAIL_WINDOW);
+    }
+
+    /**
+     * The hash of the file's last complete record as stored, read from the end: the last
+     * {@code window} bytes, doubled until a whole record is in them, up to {@link #MAX_TAIL}. The
+     * cost is bounded however large the audit grows. A record is a line that ends in a newline, has
+     * no NULs, and is exactly one JSON object; an unfinished last line, a NUL run, a blank line and
+     * anything else are passed over, as gaps (the verifier breaks the chain at them anyway). A file
+     * that is missing, empty or has no record within {@link #MAX_TAIL} gives {@link #GENESIS}; in the
+     * last case the next record's link breaks, which the verifier reports.
+     */
+    static String recoverHead(File file, int window) throws IOException {
+        try (RandomAccessFile r = new RandomAccessFile(file, "r")) {
+            long len = r.length();
+            long size = Math.min(len, window);
+            while (size > 0) {
+                long start = len - size;
+                byte[] buf = new byte[(int) size];
+                r.seek(start);
+                r.readFully(buf);
+                String h = lastRecordHash(buf, start == 0);
+                if (h != null) {
+                    return h;
+                }
+                if (start == 0 || size >= MAX_TAIL) {
+                    break;
+                }
+                size = Math.min(len, Math.min((long) MAX_TAIL, size * 2));
+            }
+            return GENESIS;
+        } catch (FileNotFoundException e) {
+            return GENESIS;
+        }
+    }
+
+    /**
+     * The hash of the last complete record in {@code buf}, a file's tail, or null if there is none
+     * whose start is inside it. {@code fromStart}: {@code buf} begins at the file's first byte, so
+     * its first line is whole.
+     */
+    private static String lastRecordHash(byte[] buf, boolean fromStart) {
+        int end = lastNewline(buf, buf.length - 1) + 1; // an unfinished last line is passed over
+        while (end > 0) {
+            int before = lastNewline(buf, end - 2);
+            if (before < 0 && !fromStart) {
+                return null; // this line may begin before the window
+            }
+            int s = before + 1;
+            if (isRecord(buf, s, end - 1)) {
+                return sha256Hex(Arrays.copyOfRange(buf, s, end));
+            }
+            end = s;
+        }
+        return null;
+    }
+
+    private static int lastNewline(byte[] buf, int from) {
+        for (int i = from; i >= 0; i--) {
+            if (buf[i] == '\n') {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** Whether {@code buf[from, to)} (one line, no newline) is a record: no NULs, one JSON object. */
+    private static boolean isRecord(byte[] buf, int from, int to) {
+        if (indexOfNul(buf, from, to) >= 0) {
+            return false;
+        }
+        String text = new String(buf, from, to - from, StandardCharsets.UTF_8);
+        return !text.isBlank() && AuditFile.object(text) != null;
+    }
+
     private static boolean isSha256Hex(String s) {
         if (s == null || s.length() != 64) {
             return false;
@@ -76,8 +167,8 @@ public final class AuditChain {
     /**
      * Appends chained records to one {@link AuditFile}. The head (the hash of the last line this
      * writer wrote) lives in memory. On the first append, and after a failed one, it is recovered
-     * from the file: the last record {@link AuditFile#read} keeps, hashed as stored, or
-     * {@link #GENESIS} for a file with none. A record's own {@code prev} key, if it has one, is
+     * from the end of the file ({@link #recoverHead}: a bounded tail read, never the whole file):
+     * the last complete record, its stored bytes hashed, or {@link #GENESIS} for a file with none. A record's own {@code prev} key, if it has one, is
      * replaced. When the append finds a torn tail, a chained {@code audit.torn_tail} record follows
      * the record. Thread-safe.
      */
@@ -116,8 +207,7 @@ public final class AuditChain {
 
         private boolean appendOne(JSONObject o, List<String> written) throws IOException {
             if (head == null) {
-                List<String> lines = file.read().lines;
-                head = lines.isEmpty() ? GENESIS : hashOfLine(lines.get(lines.size() - 1));
+                head = recoverHead(file.file());
             }
             try {
                 o.put("prev", head);

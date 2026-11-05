@@ -233,4 +233,71 @@ public class AuditChainTest {
         assertEquals(1, r.first().line);
         assertTrue(r.first().reason, r.first().reason.startsWith("no prev"));
     }
+
+    /** A chained file written in one go: {@code n} records, the last one carrying {@code bigTail} bytes. */
+    private List<String> writeChained(int n, int bigTail) throws Exception {
+        file.getParentFile().mkdirs();
+        List<String> out = new java.util.ArrayList<>();
+        StringBuilder all = new StringBuilder();
+        String prev = AuditChain.GENESIS;
+        for (int i = 1; i <= n; i++) {
+            JSONObject o = rec(i).put("prev", prev);
+            if (i == n && bigTail > 0) {
+                o.put("detail", "d".repeat(bigTail));
+            }
+            String line = o.toString();
+            out.add(line);
+            all.append(line).append('\n');
+            prev = AuditChain.hashOfLine(line);
+        }
+        Files.write(file.toPath(), all.toString().getBytes(StandardCharsets.UTF_8));
+        return out;
+    }
+
+    @Test
+    public void recoveryOnALargeFileReadsItsTailAndChainsToTheLastLine() throws Exception {
+        newFile();
+        List<String> l = writeChained(12_000, 100_000); // ~1.5 MiB; the last line alone outgrows the window
+        assertTrue(file.length() > 1_000_000);
+        String want = AuditChain.hashOfLine(l.get(l.size() - 1));
+        assertEquals(want, AuditChain.recoverHead(file));
+        assertEquals("a window smaller than the last line grows until it holds it", want,
+                AuditChain.recoverHead(file, 1024));
+
+        AuditChain.Writer w = writer();
+        w.append(rec(99));
+        AuditChain.Result r = AuditChain.verify(file, w.head());
+        assertTrue(String.valueOf(r.breaks), r.ok());
+        assertEquals(12_001, r.records);
+    }
+
+    @Test
+    public void recoveryFindsTheLastRecordBehindATornPieceLongerThanTheWindow() throws Exception {
+        newFile();
+        List<String> l = writeChained(50, 0);
+        appendRaw("\0".repeat(200_000)); // a NUL run past the 64 KiB window, no newline
+        assertEquals(AuditChain.hashOfLine(l.get(49)), AuditChain.recoverHead(file));
+
+        appendRaw("\n{\"ts\":7,\"event\":\"x\"}"); // and a whole record missing only its newline
+        assertEquals("the unfinished line and the NUL line are passed over", AuditChain.hashOfLine(l.get(49)),
+                AuditChain.recoverHead(file, 16));
+
+        AuditChain.Writer w = writer();
+        List<String> written = w.append(rec(51));
+        assertEquals("the record, then the torn-tail note", 2, written.size());
+        assertEquals(AuditChain.hashOfLine(l.get(49)), prevOf(written.get(0)));
+        AuditChain.Result r = AuditChain.verify(file, w.head());
+        assertEquals("the NUL line is the first break", 51, r.first().line);
+        assertFalse(r.ok());
+    }
+
+    @Test
+    public void noRecordWithinTheTailCapStartsFromGenesisAndTheVerifierReportsIt() throws Exception {
+        newFile();
+        writeChained(3, 0);
+        appendRaw("not json\n".repeat(AuditChain.MAX_TAIL / 9 + 10)); // a tail of only gaps, past the cap
+        assertEquals(AuditChain.GENESIS, AuditChain.recoverHead(file));
+        assertEquals("a missing file", AuditChain.GENESIS,
+                AuditChain.recoverHead(new File(tmp.getRoot(), "nothing.jsonl")));
+    }
 }
