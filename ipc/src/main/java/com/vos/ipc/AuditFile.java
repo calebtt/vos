@@ -34,10 +34,13 @@ import org.json.JSONTokener;
  * tail (a cut-off line or NULs where unsynced data was), which the next append repairs and
  * {@link #read} skips.
  *
- * <p>There is no hash chain yet (audit v2). When it comes, every piece {@link #read} skips is a
- * gap: the verifier must report the chain broken at the next record it keeps and never link
- * across the gap. A skipped piece is counted in {@link Read#skipped}, never dropped silently, and
- * {@link JsonlAudit} writes an {@code audit.torn_tail} line when it repairs a torn tail.
+ * <p>The actuator audit is hash-chained (audit v2, M2-AUDIT-01, #154): {@link AuditChain.Writer}
+ * gives every record a {@code prev}, the SHA-256 of the line before it as stored. Every piece
+ * {@link #read} skips is a gap: {@link AuditChain#verify} reports the chain broken there and at the
+ * next record it keeps, and never links across the gap. A skipped piece is counted in
+ * {@link Read#skipped}, never dropped silently, and {@link JsonlAudit} writes a chained
+ * {@code audit.torn_tail} line when it repairs a torn tail. The session's transcript and egress
+ * logs share the file format but are not chained.
  */
 public final class AuditFile {
     /** One fsync of a file or a directory; injectable for tests. */
@@ -240,6 +243,12 @@ public final class AuditFile {
         /** The whole records, in file order. */
         public final List<JSONObject> records;
         /**
+         * The stored line of each record, same size and order as {@link #records}, without its
+         * newline: what {@link AuditChain.Writer} hashes on a restart to chain the next record to
+         * the last one. Records found on one line with NULs share that line.
+         */
+        public final List<String> lines;
+        /**
          * Pieces that were not one whole record: a line with NULs (counted once, however long
          * the run), a line that is not exactly one JSON object, and an unfinished last line.
          * Blank lines are not counted.
@@ -248,8 +257,9 @@ public final class AuditFile {
         /** Whether the file ended in an unfinished line (no final newline). It counts in skipped. */
         public final boolean tornTail;
 
-        Read(List<JSONObject> records, int skipped, boolean tornTail) {
+        Read(List<JSONObject> records, List<String> lines, int skipped, boolean tornTail) {
             this.records = Collections.unmodifiableList(records);
+            this.lines = Collections.unmodifiableList(lines);
             this.skipped = skipped;
             this.tornTail = tornTail;
         }
@@ -273,17 +283,18 @@ public final class AuditFile {
         try {
             raw = Files.readAllBytes(file.toPath());
         } catch (NoSuchFileException e) {
-            return new Read(new ArrayList<>(), 0, false);
+            return new Read(new ArrayList<>(), new ArrayList<>(), 0, false);
         }
         String text = new String(raw, StandardCharsets.UTF_8);
         List<JSONObject> records = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
         int skipped = 0;
         int start = 0;
         while (start < text.length()) {
             int nl = text.indexOf('\n', start);
             if (nl < 0) { // the unfinished last line
                 skipped++;
-                return new Read(records, skipped, true);
+                return new Read(records, lines, skipped, true);
             }
             String line = text.substring(start, nl);
             start = nl + 1;
@@ -293,22 +304,24 @@ public final class AuditFile {
                     JSONObject o = piece.isBlank() ? null : object(piece);
                     if (o != null) {
                         records.add(o);
+                        lines.add(line);
                     }
                 }
             } else if (!line.isBlank()) {
                 JSONObject o = object(line);
                 if (o != null) {
                     records.add(o);
+                    lines.add(line);
                 } else {
                     skipped++;
                 }
             }
         }
-        return new Read(records, skipped, false);
+        return new Read(records, lines, skipped, false);
     }
 
     /** {@code s} as one JSON object with nothing after it, or null. */
-    private static JSONObject object(String s) {
+    static JSONObject object(String s) {
         try {
             JSONTokener t = new JSONTokener(s.strip());
             Object v = t.nextValue();
