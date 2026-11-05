@@ -54,9 +54,10 @@ vos_seal_key_if_missing() {
     fi
 }
 
-# vos_clear_debug_overrides: no debug chat_voice override, so each turn runs on the policy's backend.
+# vos_clear_debug_overrides: no debug chat_voice, patience or silence_duration_ms override (#247's
+# sweep), so each turn runs on the policy's backend and its turn-detection values.
 vos_clear_debug_overrides() {
-    adb shell "run-as com.vos.session rm -f files/debug/chat_voice"
+    adb shell "run-as com.vos.session rm -f files/debug/chat_voice files/debug/patience files/debug/silence_duration_ms"
 }
 
 # vos_volume STREAM: prints "index max" for an audio stream (3 media, 0 voice call, 2 ring, 11

@@ -181,13 +181,15 @@ final class Conversation {
      * Decision 46 (#276): at task end, replaces every match of a high-risk string released during
      * the task (decision 32) in the kept items and in the summary with its placeholder ("a code
      * from Messages"), saves the result, and writes one audit line, {@code high_risk_redact}, with
-     * the number of replacements only, never the string. Items are redacted as one list of turns,
-     * so a code split across two adjacent items is caught too ({@link HighRiskRedactor#redactTurns}).
+     * the number of replacements only, never the string. The summary and the items are redacted as
+     * one list of turns, summary first, so a code split across two adjacent items, or across the
+     * summary's end and the first item, is caught too ({@link HighRiskRedactor#redactTurns}).
      * Returns the number of replacements. An empty or null list does nothing and writes no line; a
      * non-empty list always writes the line, with {@code replaced=0} when nothing matched. The line's
      * {@code saved} says whether the redacted conversation reached disk (true when nothing was
-     * replaced); when it is false the old file may still hold the string, and the in-memory
-     * conversation is redacted all the same.
+     * replaced). A failed save is retried once; if it fails again the stale file, which still holds
+     * the strings, is deleted or truncated so a restart cannot restore them, and the line's
+     * {@code stale_removed} says whether that worked. The in-memory conversation is redacted either way.
      *
      * <p>Waits for a compaction in flight: the summarizer works on a copy of the oldest items, so a
      * redaction that ran meanwhile would be undone by the summary it returns. Already-seeded
@@ -200,28 +202,38 @@ final class Conversation {
         synchronized (fitLock) { // same lock order as fit(): fitLock, then this
             synchronized (this) {
                 int before = ContextBudget.tokens(summary, items);
+                // The summary is turn 0: it comes before the first kept item when seeded, so a code
+                // split between its end and the first item is a split across two adjacent turns.
+                int first = summary == null ? 0 : 1;
                 List<String> texts = new ArrayList<>();
+                if (summary != null) {
+                    texts.add(summary);
+                }
                 for (Item i : items) {
                     texts.add(i.text);
                 }
                 HighRiskRedactor.TurnsResult turns = HighRiskRedactor.redactTurns(texts, released);
                 int count = turns.count();
+                if (summary != null) {
+                    summary = turns.turns().get(0);
+                }
                 for (int k = 0; k < items.size(); k++) {
                     Item i = items.get(k);
-                    String text = turns.turns().get(k);
+                    String text = turns.turns().get(first + k);
                     if (!text.equals(i.text)) {
                         items.set(k, new Item(i.role, i.turnId, text));
                     }
                 }
-                if (summary != null) {
-                    HighRiskRedactor.Result r = HighRiskRedactor.redact(summary, released);
-                    summary = r.text();
-                    count += r.count();
-                }
-                boolean saved = count == 0 || save(); // nothing replaced: the file already holds no match
+                boolean saved = count == 0 || save() || save(); // nothing replaced: the file holds no match
+                boolean staleRemoved = !saved && removeStale();
                 Map<String, Object> line = line("high_risk_redact", before, ContextBudget.tokens(summary, items));
                 line.put("replaced", count); // the count, never the string (§3.8)
-                line.put("saved", saved); // false: the file on disk may still hold the string
+                line.put("saved", saved);
+                if (!saved) {
+                    // true: the unredacted file is gone (a restart starts empty rather than restore it);
+                    // false: it could be neither saved over, deleted nor truncated, and may still hold the string
+                    line.put("stale_removed", staleRemoved);
+                }
                 audit.accept(line);
                 return count;
             }
@@ -363,6 +375,26 @@ final class Conversation {
         } catch (IOException | JSONException | IllegalArgumentException e) {
             items.clear(); // a damaged file starts a fresh conversation rather than seeding garbage
             summary = null;
+        }
+    }
+
+    /**
+     * After a redaction could not be saved (twice), the file on disk still holds the strings it
+     * removed, and load() would bring them back on the next start. Fails safe: deletes the file
+     * (and the temp file), or if that fails truncates it to nothing, which load() reads as a fresh
+     * conversation. The in-memory conversation, already redacted, still serves this process.
+     * Returns whether no stale copy is left.
+     */
+    private boolean removeStale() {
+        new File(file.getParentFile(), "conversation.json.tmp").delete();
+        if (file.delete() || !file.exists()) {
+            return true;
+        }
+        try (FileOutputStream out = new FileOutputStream(file)) { // truncates
+            out.getFD().sync();
+            return file.length() == 0;
+        } catch (IOException e) {
+            return false;
         }
     }
 

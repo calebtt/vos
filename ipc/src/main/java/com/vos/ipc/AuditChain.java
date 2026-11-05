@@ -36,9 +36,15 @@ import org.json.JSONObject;
  * seen only against the writer's {@link Writer#head()} passed to {@link #verify(byte[], String)};
  * without it, a change there goes unseen, or is reported as ambiguous.
  *
- * <p>Known limits. Audit lines written before the chain existed have no {@code prev}: each verifies
- * as a break, and the chain starts at the first chained record (there is no chain-start marker;
- * acceptable while the audit is unreleased). A whole record that lost only its newline in a power
+ * <p>Legacy prefix. Audit lines written before the chain existed have no {@code prev} key. A leading
+ * run of them, before the first chained record, is accepted as a legacy prefix and counted in
+ * {@link Result#legacy}, not reported as breaks; its links are not checked (it was never chained),
+ * though a gap inside it is still a break at the gap's line. The first chained record must link to
+ * the last legacy record as stored, which is what {@link Writer} recovers to on such a file; with no
+ * legacy prefix it must carry {@link #GENESIS}. A record without {@code prev} after the first chained
+ * one is a break, as before.
+ *
+ * <p>Known limit. A whole record that lost only its newline in a power
  * cut is an unfinished line when the writer recovers, so the writer chains past it; once the next
  * append's repair gives it a newline it is a record, and the link after it reads as a change rather
  * than a gap.
@@ -71,7 +77,7 @@ public final class AuditChain {
 
     /** The first tail window {@link #recoverHead} reads. */
     static final int TAIL_WINDOW = 64 * 1024;
-    /** The most {@link #recoverHead} reads before it gives up and starts from {@link #GENESIS}. */
+    /** The most {@link #recoverHead} reads before it gives up (and fails closed). */
     static final int MAX_TAIL = 4 * 1024 * 1024;
 
     /** {@link #recoverHead(File, int)} from a {@link #TAIL_WINDOW} first window. */
@@ -85,8 +91,10 @@ public final class AuditChain {
      * cost is bounded however large the audit grows. A record is a line that ends in a newline, has
      * no NULs, and is exactly one JSON object; an unfinished last line, a NUL run, a blank line and
      * anything else are passed over, as gaps (the verifier breaks the chain at them anyway). A file
-     * that is missing, empty or has no record within {@link #MAX_TAIL} gives {@link #GENESIS}; in the
-     * last case the next record's link breaks, which the verifier reports.
+     * that is missing or empty, or that was read whole and holds no record, gives {@link #GENESIS}.
+     * A file whose last {@link #MAX_TAIL} bytes hold no complete record fails closed: it throws
+     * rather than chain the next record to genesis in the middle of a log, so the writer appends
+     * nothing it cannot link.
      */
     static String recoverHead(File file, int window) throws IOException {
         try (RandomAccessFile r = new RandomAccessFile(file, "r")) {
@@ -101,8 +109,12 @@ public final class AuditChain {
                 if (h != null) {
                     return h;
                 }
-                if (start == 0 || size >= MAX_TAIL) {
-                    break;
+                if (start == 0) {
+                    break; // the whole file, and no record in it: the chain starts here
+                }
+                if (size >= MAX_TAIL) {
+                    throw new IOException("audit chain: no complete record in the last " + MAX_TAIL
+                            + " bytes of " + file.getName() + "; not chaining to genesis mid-log");
                 }
                 size = Math.min(len, Math.min((long) MAX_TAIL, size * 2));
             }
@@ -166,11 +178,15 @@ public final class AuditChain {
 
     /**
      * Appends chained records to one {@link AuditFile}. The head (the hash of the last line this
-     * writer wrote) lives in memory. On the first append, and after a failed one, it is recovered
+     * writer wrote) lives in memory. It is recovered eagerly, when the writer is built at startup,
      * from the end of the file ({@link #recoverHead}: a bounded tail read, never the whole file):
-     * the last complete record, its stored bytes hashed, or {@link #GENESIS} for a file with none. A record's own {@code prev} key, if it has one, is
-     * replaced. When the append finds a torn tail, a chained {@code audit.torn_tail} record follows
-     * the record. Thread-safe.
+     * the last complete record, its stored bytes hashed, or {@link #GENESIS} for a file with none,
+     * so {@link #head()} names the chain's end before anything is appended. If that fails (an
+     * unreadable file, or no complete record within {@link #MAX_TAIL}), the head stays null and
+     * every append retries the recovery and throws until it succeeds: the writer fails closed
+     * rather than append a record it cannot link. A failed append also re-recovers. A record's own
+     * {@code prev} key, if it has one, is replaced. When the append finds a torn tail, a chained
+     * {@code audit.torn_tail} record follows the record. Thread-safe.
      */
     public static final class Writer {
         private final AuditFile file;
@@ -178,6 +194,11 @@ public final class AuditChain {
 
         public Writer(AuditFile file) {
             this.file = file;
+            try {
+                head = recoverHead(file.file());
+            } catch (IOException e) {
+                head = null; // the first append retries, and fails closed while it cannot recover
+            }
         }
 
         /**
@@ -200,7 +221,7 @@ public final class AuditChain {
             return written;
         }
 
-        /** The hash of the last line this writer wrote or recovered, or null before the first append. */
+        /** The hash of the last line this writer wrote or recovered; null only while recovery fails. */
         public synchronized String head() {
             return head;
         }
@@ -249,12 +270,15 @@ public final class AuditChain {
     public static final class Result {
         /** The records it saw (lines that are one JSON object), linked or not. */
         public final int records;
-        /** Every break, by line; empty when the whole file chains from genesis. */
+        /** Every break, by line; empty when the whole file chains (from genesis, or from a legacy prefix). */
         public final List<Break> breaks;
+        /** The leading records without {@code prev}, written before the chain existed (the legacy prefix). */
+        public final int legacy;
 
-        Result(int records, List<Break> breaks) {
+        Result(int records, List<Break> breaks, int legacy) {
             this.records = records;
             this.breaks = Collections.unmodifiableList(breaks);
+            this.legacy = legacy;
         }
 
         public boolean ok() {
@@ -276,7 +300,7 @@ public final class AuditChain {
         }
     }
 
-    private enum Link { OK, MISMATCH, BAD_PREV, GAP, NONE }
+    private enum Link { OK, MISMATCH, BAD_PREV, GAP, NONE, LEGACY }
 
     private static final class Rec {
         final int line;
@@ -336,10 +360,16 @@ public final class AuditChain {
         }
 
         int n = recs.size();
+        int legacy = 0; // the leading records with no prev key at all: written before the chain
+        while (legacy < n && recs.get(legacy).prev == null) {
+            legacy++;
+        }
         Link[] links = new Link[n + 1]; // links[i]: into record i; links[n]: the newest record to head
         for (int i = 0; i < n; i++) {
             Rec r = recs.get(i);
-            if (r.gapBefore != 0) {
+            if (i < legacy) {
+                links[i] = Link.LEGACY; // never chained, so no link to check (a gap in it is still a break)
+            } else if (r.gapBefore != 0) {
                 links[i] = Link.GAP;
             } else if (!isSha256Hex(r.prev)) {
                 links[i] = Link.BAD_PREV;
@@ -399,7 +429,7 @@ public final class AuditChain {
         for (Map.Entry<Integer, String> e : breaks.entrySet()) {
             out.add(new Break(e.getKey(), e.getValue()));
         }
-        return new Result(n, out);
+        return new Result(n, out, legacy);
     }
 
     /** Whether a gap follows the newest record (then the head cannot be checked against it). */

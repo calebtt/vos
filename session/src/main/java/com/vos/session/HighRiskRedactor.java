@@ -2,6 +2,7 @@ package com.vos.session;
 
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
@@ -316,17 +317,25 @@ final class HighRiskRedactor {
             this.rawStart = rawStart;
         }
 
+        /**
+         * NFKC can expand one raw character into several (U+FB01 "ﬁ" into "fi", U+FDFA into 18),
+         * so the map grows with the normalized text, not with the raw one; every normalized
+         * character of an expansion maps back to the raw character it came from.
+         */
         static Norm of(String raw) {
             StringBuilder b = new StringBuilder(raw.length());
-            int[] starts = new int[raw.length()];
+            int[] starts = new int[Math.max(16, raw.length())];
             for (int i = 0; i < raw.length(); i++) {
                 int before = b.length();
                 normalizeChar(raw.charAt(i), b);
+                if (b.length() > starts.length) {
+                    starts = Arrays.copyOf(starts, Math.max(b.length(), starts.length * 2));
+                }
                 for (int k = before; k < b.length(); k++) {
                     starts[k] = i;
                 }
             }
-            return new Norm(b.toString(), starts);
+            return new Norm(b.toString(), Arrays.copyOf(starts, b.length()));
         }
     }
 

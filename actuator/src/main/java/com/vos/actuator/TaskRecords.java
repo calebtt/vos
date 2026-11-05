@@ -47,10 +47,11 @@ final class TaskRecords {
             "no_undo", "image_count", "text_bytes", "thermal_status", "work_log", "owner_step");
     /**
      * §3.8's compaction line (decision 46). For a high-risk redaction, {@code replaced} is the count,
-     * never the string, and {@code saved} says whether the redacted context reached disk.
+     * never the string, {@code saved} says whether the redacted context reached disk, and
+     * {@code stale_removed} (only when it did not) whether the unredacted copy on disk is gone.
      */
     static final Set<String> COMPACTION_FIELDS = Set.of("context", "tokens_before", "tokens_after", "budget",
-            "dropped_kinds", "sources", "model", "taint", "replaced", "saved");
+            "dropped_kinds", "sources", "model", "taint", "replaced", "saved", "stale_removed");
     private static final Set<String> FIXED_SOURCES = Set.of("owner_voice", "owner_chat", "owner_demo", "agent", "eval");
     private static final Pattern PREFIXED_SOURCE = Pattern.compile("(app_agent|vtb):[A-Za-z0-9._-]{1,128}");
     private static final Pattern TASK_ID = Pattern.compile("[A-Za-z0-9_-]{1,64}");

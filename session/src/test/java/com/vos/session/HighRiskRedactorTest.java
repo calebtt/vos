@@ -29,6 +29,25 @@ public class HighRiskRedactorTest {
     }
 
     @Test
+    public void nfkcExpansionsBeforeOrInsideTheTextDoNotBreakTheMapBack() {
+        // U+FB01 (fi ligature) folds to two characters and U+FDFA to eighteen: more normalized
+        // characters than raw ones, which overran the raw-sized map before.
+        assertEquals("ﬁle: a code from Messages",
+                HighRiskRedactor.redact("ﬁle: 482913", List.of(OTP)).text());
+        assertEquals("ﬁﬁﬁ a code from Messages ﬁ",
+                HighRiskRedactor.redact("ﬁﬁﬁ 482-913 ﬁ", List.of(OTP)).text());
+        HighRiskRedactor.Result r = HighRiskRedactor.redact("ﷺﷺ 482 913 ﷺ", List.of(OTP));
+        assertEquals("ﷺﷺ a code from Messages ﷺ", r.text());
+        assertEquals(1, r.count());
+        Released lig = new Released("ﬁx7", "Messages"); // the code itself holds an expansion
+        assertEquals("code a code from Messages.", HighRiskRedactor.redact("code FIX7.", List.of(lig)).text());
+        assertEquals("code a code from Messages.", HighRiskRedactor.redact("code ﬁx7.", List.of(lig)).text());
+        HighRiskRedactor.TurnsResult t = HighRiskRedactor.redactTurns(List.of("ﬁﬁ 482", "913 ﷺ"),
+                List.of(OTP));
+        assertEquals(1, t.count());
+    }
+
+    @Test
     public void unicodeSpacesDashesAndCommasAreSeparatorsToo() {
         // No-break and narrow spaces, an ideographic space, en dash, em dash, fullwidth hyphen,
         // a fullwidth comma and an Arabic comma: all fold away like the ASCII separators.

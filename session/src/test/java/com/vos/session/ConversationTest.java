@@ -180,10 +180,37 @@ public class ConversationTest {
         assertEquals("high_risk_redact", line.get("event"));
         assertEquals(1, line.get("replaced"));
         assertEquals("the line says the redaction did not reach disk", false, line.get("saved"));
+        assertEquals("but the unredacted copy is gone", true, line.get("stale_removed"));
         assertEquals("The code is a code from Messages.", c.items().get(0).text);
-        String file = new String(Files.readAllBytes(new File(dir, "conversation.json").toPath()),
-                java.nio.charset.StandardCharsets.UTF_8);
-        assertTrue("the old file is untouched, which is what saved=false reports", file.contains("482913"));
+        assertFalse("fail safe: the stale file that held the code is removed",
+                new File(dir, "conversation.json").exists());
+        Conversation restarted = conversation(dir);
+        assertTrue("a restart starts empty rather than restore the code", restarted.items().isEmpty());
+        for (JSONObject seeded : restarted.seed()) {
+            assertFalse(seeded.toString().contains("482913"));
+        }
+    }
+
+    @Test
+    public void aCodeSplitBetweenTheSummaryAndTheFirstItemIsRedactedInBoth() throws Exception {
+        // A summary that ends with the first half of the code, and a first kept item with the rest:
+        // seeded in that order, the model reads "482-913".
+        File dir = tmp.newFolder("split");
+        Files.write(new File(dir, "conversation.json").toPath(), new JSONObject()
+                .put("summary", "The owner said their code starts 482").put("summary_has_app_data", false)
+                .put("items", new org.json.JSONArray()
+                        .put(new JSONObject().put("role", "OWNER").put("turn_id", "t20").put("text", "-913 and that is all."))
+                        .put(new JSONObject().put("role", "VOS").put("turn_id", "t20").put("text", "Noted.")))
+                .toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Conversation split = conversation(dir);
+
+        assertEquals("one code across the summary's end and the first item", 1, split.redactHighRisk(CODE));
+        assertEquals("The owner said their code starts a code from Messages", split.summary());
+        assertEquals("a code from Messages and that is all.", split.items().get(0).text);
+        assertEquals("the rest is untouched", "Noted.", split.items().get(1).text);
+        Conversation reloaded = conversation(dir);
+        assertEquals(split.summary(), reloaded.summary());
+        assertFalse(HighRiskRedactor.normalize(reloaded.items().get(0).text).contains("913"));
     }
 
     @Test(timeout = 20_000)

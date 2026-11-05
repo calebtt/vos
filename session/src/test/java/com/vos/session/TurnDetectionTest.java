@@ -91,6 +91,27 @@ public class TurnDetectionTest {
     }
 
     @Test
+    public void anyWholeNumberTypeIsAValueAndAFractionIsNot() throws Exception {
+        org.json.JSONObject levels = new org.json.JSONObject()
+                .put("standard", new org.json.JSONObject().put("silence_duration_ms", 600L).put("prefix_padding_ms", 300.0))
+                .put("long", new org.json.JSONObject().put("silence_duration_ms", new java.math.BigDecimal("1200"))
+                        .put("prefix_padding_ms", 250.5))
+                .put("extra_long", new org.json.JSONObject().put("silence_duration_ms", 2000.0f));
+        ModelPolicy.Entry e = entry(levels.toString());
+        TurnDetection s = TurnDetection.forPatience(e, "standard");
+        assertEquals(Integer.valueOf(600), s.silenceMs);
+        assertEquals("1200.0 or 300.0 parses as a Double: still a whole number", Integer.valueOf(300), s.prefixPaddingMs);
+        TurnDetection l = TurnDetection.forPatience(e, "long");
+        assertEquals(Integer.valueOf(1200), l.silenceMs);
+        assertNull("a fraction is rejected, not rounded", l.prefixPaddingMs);
+        assertEquals(Integer.valueOf(2000), TurnDetection.forPatience(e, "extra_long").silenceMs);
+        // Straight from JSON text too: a long literal and a decimal one.
+        ModelPolicy.Entry text = entry("{\"standard\":{\"silence_duration_ms\":700.0,\"prefix_padding_ms\":2147483648}}");
+        assertEquals(Integer.valueOf(700), TurnDetection.forPatience(text, "standard").silenceMs);
+        assertNull("out of range, whatever the type", TurnDetection.forPatience(text, "standard").prefixPaddingMs);
+    }
+
+    @Test
     public void theSweepOverrideReplacesOnlyTheSilenceAndOnlyInRange() {
         TurnDetection base = TurnDetection.forPatience(entry(LEVELS), "standard");
         TurnDetection swept = base.withSilenceMs(900);

@@ -19,8 +19,9 @@ import org.json.JSONObject;
  * repaired on the next write ({@link AuditFile}, #319). Every line is hash-chained to the one
  * before it ({@link AuditChain}, audit v2, #154): its {@code prev} is the SHA-256 of that line as
  * stored, and the {@code audit.torn_tail} note is a chained record too. The chain's head is
- * recovered on the first write from a bounded read of the file's end, never the whole file. Lines
- * from before the chain verify as breaks ({@link AuditChain} lists the known limits).
+ * recovered when the audit is built, from a bounded read of the file's end, never the whole
+ * file. Lines from before the chain are accepted as a legacy prefix ({@link AuditChain} lists the
+ * rules).
  */
 public final class JsonlAudit implements BinderGuard.Audit {
     public static final String TAG = "VOS_AUDIT";
@@ -33,7 +34,11 @@ public final class JsonlAudit implements BinderGuard.Audit {
                 AuditFile.backgroundSyncer(), e -> Log.e(TAG, "audit sync failed", e)));
     }
 
-    /** The hash of the newest line written, for {@link AuditChain#verify(java.io.File, String)}; null before the first. */
+    /**
+     * The hash of the newest line, for {@link AuditChain#verify(java.io.File, String)}: recovered from
+     * the file when this audit is built, so it is set from startup on; null only while that recovery
+     * fails (then every write fails closed and is logged, never appended unlinked).
+     */
     public String chainHead() {
         return chain.head();
     }
