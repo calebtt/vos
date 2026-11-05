@@ -47,11 +47,16 @@ final class TurnDetection {
 
     private static Integer ms(JSONObject o, String key) {
         Object v = o.opt(key);
-        if (!(v instanceof Integer)) {
+        if (!(v instanceof Number)) {
+            return null; // a string ("300") or anything else is not a value
+        }
+        // Any Number the JSON parser hands back (Integer, Long, Double, BigDecimal) counts if it is
+        // a whole number of ms in range; a fractional value (1.5) is rejected, not rounded.
+        double d = ((Number) v).doubleValue();
+        if (Double.isNaN(d) || d != Math.rint(d) || d <= 0 || d > MAX_MS) {
             return null;
         }
-        int ms = (Integer) v;
-        return ms > 0 && ms <= MAX_MS ? ms : null;
+        return (int) d;
     }
 
     /** For the turn's log line, next to its speech-end and first-audio times. */

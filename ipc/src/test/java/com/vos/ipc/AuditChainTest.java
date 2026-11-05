@@ -83,7 +83,7 @@ public class AuditChainTest {
         newFile();
         assertTrue("a missing file is an empty chain", AuditChain.verify(file, null).ok());
         AuditChain.Writer w = writer();
-        assertNull(w.head());
+        assertEquals("recovered at construction: a missing file is genesis", AuditChain.GENESIS, w.head());
         w.append(rec(1));
         assertEquals(AuditChain.GENESIS, prevOf(lines().get(0)));
         AuditChain.Result r = AuditChain.verify(file, w.head());
@@ -221,17 +221,57 @@ public class AuditChainTest {
     }
 
     @Test
-    public void aLegacyLineWithoutPrevIsABreakAndTheChainResumesAfterIt() throws Exception {
+    public void preChainLinesAreALegacyPrefixAndTheChainLinksToTheLastOfThem() throws Exception {
         newFile();
         file.getParentFile().mkdirs();
-        Files.write(file.toPath(), "{\"ts\":1,\"event\":\"binder.unauthorized\"}\n".getBytes(StandardCharsets.UTF_8));
+        String legacy = "{\"ts\":1,\"event\":\"binder.unauthorized\"}\n{\"ts\":2,\"event\":\"role.assistant\"}\n";
+        Files.write(file.toPath(), legacy.getBytes(StandardCharsets.UTF_8));
         AuditChain.Writer w = writer();
-        w.append(rec(2));
         w.append(rec(3));
+        w.append(rec(4));
+        assertEquals("the first chained record links to the last legacy line as stored",
+                AuditChain.hashOfLine("{\"ts\":2,\"event\":\"role.assistant\"}"), prevOf(lines().get(2)));
         AuditChain.Result r = AuditChain.verify(file, w.head());
-        assertEquals(1, r.breaks.size());
-        assertEquals(1, r.first().line);
+        assertTrue(String.valueOf(r.breaks), r.ok());
+        assertEquals(2, r.legacy);
+        assertEquals(4, r.records);
+    }
+
+    @Test
+    public void aLineWithoutPrevAfterTheChainStartedIsStillABreak() throws Exception {
+        newFile();
+        AuditChain.Writer w = writer();
+        w.append(rec(1));
+        appendRaw("{\"ts\":2,\"event\":\"inserted\"}\n");
+        AuditChain.Result r = AuditChain.verify(file, null);
+        assertEquals(0, r.legacy);
+        assertEquals(2, r.first().line);
         assertTrue(r.first().reason, r.first().reason.startsWith("no prev"));
+    }
+
+    @Test
+    public void aChangedLegacyLineBreaksTheFirstChainedLink() throws Exception {
+        newFile();
+        file.getParentFile().mkdirs();
+        Files.write(file.toPath(), "{\"ts\":1,\"event\":\"a\"}\n{\"ts\":2,\"event\":\"b\"}\n"
+                .getBytes(StandardCharsets.UTF_8));
+        AuditChain.Writer w = writer();
+        w.append(rec(3));
+        w.append(rec(4));
+        byte[] bad = bytes();
+        bad[new String(bad, StandardCharsets.UTF_8).indexOf("\"b\"") + 1] = 'c'; // line 2, the last legacy line
+        AuditChain.Result r = AuditChain.verify(bad, w.head());
+        assertFalse(r.ok());
+        assertEquals("the last legacy line is what the chain hangs on", 2, r.first().line);
+    }
+
+    @Test
+    public void theHeadIsRecoveredWhenTheWriterIsBuiltNotOnTheFirstAppend() throws Exception {
+        newFile();
+        writer().append(rec(1));
+        writer().append(rec(2));
+        AuditChain.Writer restarted = writer();
+        assertEquals("set at startup, before any append", AuditChain.hashOfLine(lines().get(1)), restarted.head());
     }
 
     /** A chained file written in one go: {@code n} records, the last one carrying {@code bigTail} bytes. */
@@ -292,12 +332,36 @@ public class AuditChainTest {
     }
 
     @Test
-    public void noRecordWithinTheTailCapStartsFromGenesisAndTheVerifierReportsIt() throws Exception {
+    public void noRecordWithinTheTailCapFailsClosedAndNothingIsAppended() throws Exception {
         newFile();
         writeChained(3, 0);
         appendRaw("not json\n".repeat(AuditChain.MAX_TAIL / 9 + 10)); // a tail of only gaps, past the cap
-        assertEquals(AuditChain.GENESIS, AuditChain.recoverHead(file));
-        assertEquals("a missing file", AuditChain.GENESIS,
+        try {
+            AuditChain.recoverHead(file);
+            org.junit.Assert.fail("recovery must throw, not fall back to genesis mid-log");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("no complete record"));
+        }
+        long before = file.length();
+        AuditChain.Writer w = writer();
+        assertNull("recovery failed at construction: no head", w.head());
+        try {
+            w.append(rec(4));
+            org.junit.Assert.fail("the append must fail closed");
+        } catch (IOException expected) {
+            // nothing unlinked was written
+        }
+        assertEquals("nothing was appended", before, file.length());
+        assertEquals("a missing file is genesis", AuditChain.GENESIS,
                 AuditChain.recoverHead(new File(tmp.getRoot(), "nothing.jsonl")));
+    }
+
+    @Test
+    public void aFileReadWholeWithNoRecordStartsAtGenesis() throws Exception {
+        newFile();
+        file.getParentFile().mkdirs();
+        Files.write(file.toPath(), "{\"ts\":1,\"event\":\"cut".getBytes(StandardCharsets.UTF_8)); // the first record, torn
+        assertEquals(AuditChain.GENESIS, AuditChain.recoverHead(file));
+        assertEquals(AuditChain.GENESIS, writer().head());
     }
 }

@@ -125,5 +125,5 @@ Pick, per patience level, the smallest silence with no false cut-ins at that lev
 
 ## 5. After the sweep
 1. Put the chosen values in `model_policy.json` under `xai:grok-voice-3.0` → `turn_detection`. Remove `"provisional": true` and the `_comment`, update the file's top `_comment`, and update `ModelPolicyTest`'s expected values.
-2. Clear the overrides: `adb shell "run-as com.vos.session rm -f files/debug/patience files/debug/silence_duration_ms"` (`vos_clear_debug_overrides` clears only `chat_voice`).
+2. Clear the overrides: `vos_clear_debug_overrides` (from `eval/m1/lib.sh`; it removes `chat_voice`, `patience` and `silence_duration_ms`).
 3. Record the trial table in #247 and close it.

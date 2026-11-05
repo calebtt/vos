@@ -95,6 +95,8 @@ public class TaskRecordsTest {
         r.open("t1", null, null, "owner_voice", "read me the code from Messages");
         assertNull(r.compaction("t1", step("context", "conversation", "tokens_before", 120, "tokens_after", 118,
                 "replaced", 2, "saved", true)));
+        assertNull("a redaction that could not be saved says whether the stale copy is gone",
+                r.compaction("t1", step("replaced", 1, "saved", false, "stale_removed", true)));
         assertEquals("no compaction field released", r.compaction("t1", step("replaced", 1, "released", "482913")));
         r.close("t1", "pass", "VERIFIED", null);
         JSONObject c = lines(r.read("t1")).get(1);
