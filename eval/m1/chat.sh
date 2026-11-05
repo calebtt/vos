@@ -82,10 +82,10 @@ vos_seal_key_if_missing
 
 vol() { vos_volume "$1" | cut -d' ' -f1; }
 declare -A vol_before low=([3]=2 [0]=1 [11]=1)
-for s in 3 0 11; do vol_before[$s]="$(vol "$s")"; done
+for s in 3 0 11; do vol_before[$s]="$(vol "$s")"; low[$s]="$(vos_low_target "${vol_before[$s]}" "${low[$s]}")"; done
 for s in 3 0 11; do adb shell cmd audio set-volume "$s" "${low[$s]}" >/dev/null 2>&1 || true; done
-for s in 3 0 11; do
-    if [ "$(vol "$s")" != "${low[$s]}" ]; then
+for s in 3 0 11; do # at or below its target: aliased streams (11 on 3, API 35 emulator) may go lower (#312)
+    if ! vos_volume_is_low "$(vol "$s")" "${low[$s]}"; then
         echo "stream $s did not go down to ${low[$s]}; not running with the volume up" >&2
         exit 1
     fi
