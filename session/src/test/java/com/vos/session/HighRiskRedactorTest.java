@@ -197,4 +197,22 @@ public class HighRiskRedactorTest {
         assertEquals(List.of("482", "of course", "913"), three.turns());
         assertEquals(0, three.count());
     }
+
+    @Test
+    public void minusSignAndInvisibleFormatCharactersAreSeparators() {
+        for (String form : new String[] {"482\u2212913", "482\u200B913", "482\u00AD913"}) {
+            HighRiskRedactor.Result r = HighRiskRedactor.redact("code: " + form + "!", List.of(OTP));
+            assertEquals(form, "code: a code from Messages!", r.text());
+            assertEquals(form, 1, r.count());
+        }
+    }
+
+    @Test
+    public void appLabelDropsFormatCharactersAndNeverSplitsSurrogates() {
+        assertEquals("a code from Messages",
+                new Released("1", "Mess\u202Eages").placeholder());
+        String label = "a".repeat(31) + "\uD83D\uDE00";
+        String p = new Released("1", label).placeholder();
+        assertFalse(Character.isHighSurrogate(p.charAt(p.length() - 1)));
+    }
 }

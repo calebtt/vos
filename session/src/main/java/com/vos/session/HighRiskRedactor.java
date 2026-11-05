@@ -57,6 +57,8 @@ final class HighRiskRedactor {
         return Character.isWhitespace(c)
                 || Character.getType(c) == Character.SPACE_SEPARATOR
                 || Character.getType(c) == Character.DASH_PUNCTUATION
+                || Character.getType(c) == Character.FORMAT // zero-width space, soft hyphen, bidi marks
+                || c == '\u2212' // minus sign
                 || c == '-' || c == '.' || c == '_' || c == '/' || c == ',' || c == '\u060C';
     }
 
@@ -106,7 +108,7 @@ final class HighRiskRedactor {
         boolean pendingSpace = false;
         for (int i = 0; i < sourceApp.length(); i++) {
             char c = sourceApp.charAt(i);
-            if (Character.isISOControl(c)) {
+            if (Character.isISOControl(c) || Character.getType(c) == Character.FORMAT) {
                 continue; // a control character may separate words, it never breaks the label apart
             }
             if (Character.isWhitespace(c)) {
@@ -120,7 +122,14 @@ final class HighRiskRedactor {
             b.append(c);
         }
         String app = b.toString();
-        return app.length() <= MAX_APP_LABEL ? app : app.substring(0, MAX_APP_LABEL).stripTrailing();
+        if (app.length() <= MAX_APP_LABEL) {
+            return app;
+        }
+        int end = MAX_APP_LABEL;
+        if (Character.isHighSurrogate(app.charAt(end - 1))) {
+            end--; // never split a surrogate pair
+        }
+        return app.substring(0, end).stripTrailing();
     }
 
     /** The released strings worth applying, longest normalized code first: a shorter code must not
