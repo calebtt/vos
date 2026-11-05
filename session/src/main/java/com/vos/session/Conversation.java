@@ -183,7 +183,11 @@ final class Conversation {
      * from Messages"), saves the result, and writes one audit line, {@code high_risk_redact}, with
      * the number of replacements only, never the string. Items are redacted as one list of turns,
      * so a code split across two adjacent items is caught too ({@link HighRiskRedactor#redactTurns}).
-     * Returns the number of replacements. An empty or null list does nothing and writes no line.
+     * Returns the number of replacements. An empty or null list does nothing and writes no line; a
+     * non-empty list always writes the line, with {@code replaced=0} when nothing matched. The line's
+     * {@code saved} says whether the redacted conversation reached disk (true when nothing was
+     * replaced); when it is false the old file may still hold the string, and the in-memory
+     * conversation is redacted all the same.
      *
      * <p>Waits for a compaction in flight: the summarizer works on a copy of the oldest items, so a
      * redaction that ran meanwhile would be undone by the summary it returns. Already-seeded
@@ -214,11 +218,10 @@ final class Conversation {
                     summary = r.text();
                     count += r.count();
                 }
-                if (count > 0) {
-                    save();
-                }
+                boolean saved = count == 0 || save(); // nothing replaced: the file already holds no match
                 Map<String, Object> line = line("high_risk_redact", before, ContextBudget.tokens(summary, items));
                 line.put("replaced", count); // the count, never the string (§3.8)
+                line.put("saved", saved); // false: the file on disk may still hold the string
                 audit.accept(line);
                 return count;
             }
@@ -363,7 +366,8 @@ final class Conversation {
         }
     }
 
-    private void save() {
+    /** Writes the conversation atomically; returns whether it reached disk. */
+    private boolean save() {
         try {
             JSONArray a = new JSONArray();
             for (Item i : items) {
@@ -373,7 +377,7 @@ final class Conversation {
                     .put("summary_has_app_data", summaryHasAppData).put("items", a);
             File dir = file.getParentFile();
             if (!dir.isDirectory() && !dir.mkdirs()) {
-                return;
+                return false;
             }
             File tmp = new File(dir, "conversation.json.tmp");
             try (FileOutputStream out = new FileOutputStream(tmp)) {
@@ -382,8 +386,9 @@ final class Conversation {
             }
             Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING,
                     StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException | JSONException ignored) {
-            // the in-memory conversation still serves this process
+            return true;
+        } catch (IOException | JSONException e) {
+            return false; // the in-memory conversation still serves this process
         }
     }
 }

@@ -11,6 +11,10 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONObject;
 import org.junit.Rule;
 import org.junit.Test;
@@ -148,6 +152,7 @@ public class ConversationTest {
         assertEquals("high_risk_redact", line.get("event"));
         assertEquals("conversation", line.get("context"));
         assertEquals(3, line.get("replaced"));
+        assertEquals(true, line.get("saved"));
         for (Object v : line.values()) {
             assertFalse("the count, never the string", String.valueOf(v).contains("482"));
         }
@@ -159,6 +164,83 @@ public class ConversationTest {
                 java.nio.charset.StandardCharsets.UTF_8);
         assertFalse(file.contains("482913"));
         assertFalse(file.contains("482-913"));
+    }
+
+    @Test
+    public void aFailedSaveIsRecordedOnTheLineAndTheMemoryIsRedactedAnyway() throws Exception {
+        File dir = tmp.newFolder("conversation");
+        Conversation c = conversation(dir);
+        c.add(Conversation.Role.OWNER, "t1", "The code is 482913.");
+        assertTrue("the temp file cannot be written: a directory sits at its path",
+                new File(dir, "conversation.json.tmp").mkdir());
+
+        assertEquals(1, c.redactHighRisk(CODE));
+
+        Map<String, Object> line = audit.get(audit.size() - 1);
+        assertEquals("high_risk_redact", line.get("event"));
+        assertEquals(1, line.get("replaced"));
+        assertEquals("the line says the redaction did not reach disk", false, line.get("saved"));
+        assertEquals("The code is a code from Messages.", c.items().get(0).text);
+        String file = new String(Files.readAllBytes(new File(dir, "conversation.json").toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue("the old file is untouched, which is what saved=false reports", file.contains("482913"));
+    }
+
+    @Test(timeout = 20_000)
+    public void aRedactionDuringACompactionWaitsAndTheNewSummaryIsRedactedToo() throws Exception {
+        CountDownLatch inSummarize = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<String> inFlight = new AtomicReference<>();
+        Conversation.Compactor blocking = new Conversation.Compactor() {
+            @Override
+            public String model() {
+                return fake.model();
+            }
+
+            @Override
+            public String summarize(String previous, List<Conversation.Item> slice, int maxTokens)
+                    throws IOException {
+                inFlight.set(Conversation.summarizerInput(previous, slice));
+                inSummarize.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    throw new IOException(e);
+                }
+                return fake.summarize(previous, slice, maxTokens);
+            }
+        };
+        Conversation c = conversation(tmp.getRoot());
+        c.add(Conversation.Role.OWNER, "t0", "My code was 482913, keep it handy.");
+        for (int n = 1; n <= 12; n++) {
+            exchange(c, n);
+        }
+        ContextBudget b = new ContextBudget(c.tokens() / 2);
+        Thread fitter = new Thread(() -> c.fit(b, blocking));
+        fitter.start();
+        assertTrue(inSummarize.await(5, TimeUnit.SECONDS));
+        assertTrue("the slice in flight holds the code", inFlight.get().contains("482913"));
+
+        AtomicInteger replaced = new AtomicInteger(-1);
+        Thread redactor = new Thread(() -> replaced.set(c.redactHighRisk(CODE)));
+        redactor.start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (redactor.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+        assertEquals("the redaction waits for the compaction", Thread.State.BLOCKED, redactor.getState());
+
+        release.countDown();
+        fitter.join(5_000);
+        redactor.join(5_000);
+        assertFalse(fitter.isAlive() || redactor.isAlive());
+
+        assertTrue("the summary built from the code was redacted after it landed", replaced.get() >= 1);
+        assertFalse(c.summary(), c.summary().contains("482913"));
+        assertTrue(c.summary(), c.summary().contains("a code from Messages"));
+        for (Conversation.Item i : c.items()) {
+            assertFalse(i.text, i.text.contains("482913"));
+        }
     }
 
     @Test
