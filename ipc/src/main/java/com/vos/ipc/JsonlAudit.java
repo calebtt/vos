@@ -16,16 +16,26 @@ import org.json.JSONObject;
  * writer with rotation, the owner view and export (§3.8). Each line is one write on the caller's
  * thread. The fsync runs on the process's one sync thread ({@link AuditFile#backgroundSyncer()}),
  * coalesced, so a line is durable within one sync period. A torn tail left by a power cut is
- * repaired on the next write ({@link AuditFile}, #319).
+ * repaired on the next write ({@link AuditFile}, #319). Every line is hash-chained to the one
+ * before it ({@link AuditChain}, audit v2, #154): its {@code prev} is the SHA-256 of that line as
+ * stored, and the {@code audit.torn_tail} note is a chained record too. The chain's head is
+ * recovered on the first write from a bounded read of the file's end, never the whole file. Lines
+ * from before the chain verify as breaks ({@link AuditChain} lists the known limits).
  */
 public final class JsonlAudit implements BinderGuard.Audit {
     public static final String TAG = "VOS_AUDIT";
 
-    private final AuditFile file;
+    private final AuditChain.Writer chain;
 
     public JsonlAudit(Context context) {
-        this.file = new AuditFile(new File(new File(context.getFilesDir(), "audit"), "audit.jsonl"),
-                AuditFile.backgroundSyncer(), e -> Log.e(TAG, "audit sync failed", e));
+        this.chain = new AuditChain.Writer(new AuditFile(
+                new File(new File(context.getFilesDir(), "audit"), "audit.jsonl"),
+                AuditFile.backgroundSyncer(), e -> Log.e(TAG, "audit sync failed", e)));
+    }
+
+    /** The hash of the newest line written, for {@link AuditChain#verify(java.io.File, String)}; null before the first. */
+    public String chainHead() {
+        return chain.head();
     }
 
     @Override
@@ -45,7 +55,7 @@ public final class JsonlAudit implements BinderGuard.Audit {
         } catch (JSONException e) {
             throw new IllegalStateException(e);
         }
-        append(o.toString());
+        append(o);
     }
 
     /**
@@ -70,25 +80,16 @@ public final class JsonlAudit implements BinderGuard.Audit {
         } catch (JSONException e) {
             throw new IllegalStateException(e);
         }
-        append(o.toString());
+        append(o);
     }
 
-    private synchronized void append(String line) {
-        Log.w(TAG, line);
-        try { // the write only: the fsync is on the syncer thread, never here or under this lock
-            if (file.append(line)) { // the tail was torn (#319): say so in the trail, after the record
-                String note;
-                try {
-                    note = new JSONObject().put("ts", System.currentTimeMillis()).put("event", "audit.torn_tail")
-                            .put("detail", "the file ended in an unfinished line or NULs; the record before this started a fresh line")
-                            .toString();
-                } catch (JSONException e) {
-                    throw new IllegalStateException(e);
-                }
-                Log.w(TAG, note);
-                file.append(note);
+    private void append(JSONObject o) {
+        try { // the write only: the fsync is on the syncer thread, never here or under a lock
+            for (String line : chain.append(o)) { // the record, then the torn-tail note if one was due
+                Log.w(TAG, line);
             }
         } catch (IOException e) {
+            Log.w(TAG, o.toString());
             Log.e(TAG, "audit write failed", e);
         }
     }

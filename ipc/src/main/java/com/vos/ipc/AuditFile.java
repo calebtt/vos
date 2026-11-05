@@ -34,10 +34,13 @@ import org.json.JSONTokener;
  * tail (a cut-off line or NULs where unsynced data was), which the next append repairs and
  * {@link #read} skips.
  *
- * <p>There is no hash chain yet (audit v2). When it comes, every piece {@link #read} skips is a
- * gap: the verifier must report the chain broken at the next record it keeps and never link
- * across the gap. A skipped piece is counted in {@link Read#skipped}, never dropped silently, and
- * {@link JsonlAudit} writes an {@code audit.torn_tail} line when it repairs a torn tail.
+ * <p>The actuator audit is hash-chained (audit v2, M2-AUDIT-01, #154): {@link AuditChain.Writer}
+ * gives every record a {@code prev}, the SHA-256 of the line before it as stored. Every piece
+ * {@link #read} skips is a gap: {@link AuditChain#verify} reports the chain broken there and at the
+ * next record it keeps, and never links across the gap. A skipped piece is counted in
+ * {@link Read#skipped}, never dropped silently, and {@link JsonlAudit} writes a chained
+ * {@code audit.torn_tail} line when it repairs a torn tail. The session's transcript and egress
+ * logs share the file format but are not chained.
  */
 public final class AuditFile {
     /** One fsync of a file or a directory; injectable for tests. */
@@ -85,6 +88,11 @@ public final class AuditFile {
         this.syncer = syncer;
         this.syncFailed = syncFailed;
         this.fsync = fsync;
+    }
+
+    /** The log's path (for {@link AuditChain.Writer}'s bounded tail read). */
+    File file() {
+        return file;
     }
 
     /**
@@ -308,7 +316,7 @@ public final class AuditFile {
     }
 
     /** {@code s} as one JSON object with nothing after it, or null. */
-    private static JSONObject object(String s) {
+    static JSONObject object(String s) {
         try {
             JSONTokener t = new JSONTokener(s.strip());
             Object v = t.nextValue();
