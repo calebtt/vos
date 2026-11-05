@@ -117,6 +117,75 @@ public class ConversationTest {
         assertTrue(first, first.contains("What the owner said in it still holds"));
     }
 
+    private static final List<HighRiskRedactor.Released> CODE =
+            List.of(new HighRiskRedactor.Released("482913", "Messages"));
+
+    @Test
+    public void aReleasedCodeIsRedactedFromItemsAndSummaryPersistedAndCountedOnly() throws Exception {
+        Conversation c = conversation(tmp.getRoot());
+        c.add(Conversation.Role.OWNER, "t0", "My code was 482913, keep it handy.");
+        for (int n = 1; n <= 12; n++) {
+            exchange(c, n);
+        }
+        assertTrue(c.fit(new ContextBudget(c.tokens() / 2), fake));
+        assertTrue("the fake summarizer carried the code", c.summary().contains("482913"));
+        c.add(Conversation.Role.VOS, "t13", "Your code is 482-913.");
+        c.add(Conversation.Role.OWNER, "t14", "Thanks, 482913 worked.");
+        audit.clear();
+
+        assertEquals("summary, then two items", 3, c.redactHighRisk(CODE));
+
+        assertFalse(c.summary(), c.summary().contains("482913"));
+        assertTrue(c.summary(), c.summary().contains("a code from Messages"));
+        List<Conversation.Item> items = c.items();
+        assertEquals("Your code is a code from Messages.", items.get(items.size() - 2).text);
+        assertEquals("Thanks, a code from Messages worked.", items.get(items.size() - 1).text);
+        assertEquals("t13", items.get(items.size() - 2).turnId);
+        assertEquals(Conversation.Role.OWNER, items.get(items.size() - 1).role);
+
+        assertEquals(1, audit.size());
+        Map<String, Object> line = audit.get(0);
+        assertEquals("high_risk_redact", line.get("event"));
+        assertEquals("conversation", line.get("context"));
+        assertEquals(3, line.get("replaced"));
+        for (Object v : line.values()) {
+            assertFalse("the count, never the string", String.valueOf(v).contains("482"));
+        }
+
+        Conversation reloaded = conversation(tmp.getRoot());
+        assertEquals(c.summary(), reloaded.summary());
+        assertEquals("Your code is a code from Messages.", reloaded.items().get(reloaded.items().size() - 2).text);
+        String file = new String(Files.readAllBytes(new File(tmp.getRoot(), "conversation.json").toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertFalse(file.contains("482913"));
+        assertFalse(file.contains("482-913"));
+    }
+
+    @Test
+    public void aCodeSplitAcrossTwoItemsIsRedactedInBothAndCountedOnce() {
+        Conversation c = conversation(tmp.getRoot());
+        c.add(Conversation.Role.VOS, "t1", "The code starts 482");
+        c.add(Conversation.Role.VOS, "t1", "-913 and that is all.");
+        assertEquals(1, c.redactHighRisk(CODE));
+        for (Conversation.Item i : c.items()) {
+            assertFalse(i.text, HighRiskRedactor.normalize(i.text).contains("482")
+                    || HighRiskRedactor.normalize(i.text).contains("913"));
+        }
+    }
+
+    @Test
+    public void nothingReleasedOrNothingMatchedChangesNothing() throws Exception {
+        Conversation c = conversation(tmp.getRoot());
+        c.add(Conversation.Role.OWNER, "t1", "Call me at 14829135 later.");
+        assertEquals(0, c.redactHighRisk(List.of()));
+        assertEquals(0, c.redactHighRisk(null));
+        assertTrue("no line when nothing was released", audit.isEmpty());
+        assertEquals("a longer digit run is not the code", 0, c.redactHighRisk(CODE));
+        assertEquals("Call me at 14829135 later.", c.items().get(0).text);
+        assertEquals(1, audit.size());
+        assertEquals(0, audit.get(0).get("replaced"));
+    }
+
     @Test
     public void theSummarizerSeesEveryLineQuotedWithItsOrigin() {
         Conversation c = conversation(tmp.getRoot());
