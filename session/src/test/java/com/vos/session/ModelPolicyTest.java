@@ -30,6 +30,24 @@ public class ModelPolicyTest {
     }
 
     @Test
+    public void theShippedProvisionalTurnDetectionReachesTheSessionUpdatePerPatience() throws Exception {
+        ModelPolicy.Entry e = shipped().pick("chat_voice", null, false, x -> true);
+        org.json.JSONObject td = e.fields.getJSONObject("turn_detection");
+        assertTrue("the values are marked provisional until the Phone B sweep (#247)", td.getBoolean("provisional"));
+        String[][] want = {{"standard", "600", "300"}, {"long", "1200", "300"}, {"extra_long", "2000", "400"}};
+        for (String[] w : want) {
+            org.json.JSONObject vad = new org.json.JSONObject(XaiRealtime.sessionUpdate("x", "ara", 16000,
+                    new org.json.JSONArray(), TurnDetection.forPatience(e, w[0])))
+                    .getJSONObject("session").getJSONObject("turn_detection");
+            assertEquals(w[0], "server_vad", vad.getString("type"));
+            assertEquals(w[0], Integer.parseInt(w[1]), vad.getInt("silence_duration_ms"));
+            assertEquals(w[0], Integer.parseInt(w[2]), vad.getInt("prefix_padding_ms"));
+            assertTrue(w[0] + ": never idle_timeout_ms", !vad.has("idle_timeout_ms"));
+            assertEquals(w[0], 3, vad.length());
+        }
+    }
+
+    @Test
     public void anUnavailableBackendIsSkippedAndNothingLeftIsNull() throws Exception {
         assertNull(shipped().pick("chat_voice", null, false, x -> false));
         assertNull(shipped().pick("ui_step", null, true, x -> true));

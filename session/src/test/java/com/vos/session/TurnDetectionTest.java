@@ -62,6 +62,35 @@ public class TurnDetectionTest {
     }
 
     @Test
+    public void withTheShippedPolicyPatienceChangesTheSilenceAndTheSweepOverridesIt() throws Exception {
+        ModelPolicy.Entry e = new ModelPolicy(new String(java.nio.file.Files.readAllBytes(
+                java.nio.file.Path.of("src/main/res/raw/model_policy.json")), java.nio.charset.StandardCharsets.UTF_8))
+                .entry("xai:grok-voice-3.0");
+        int standard = TurnDetection.forPatience(e, "standard").silenceMs;
+        int lng = TurnDetection.forPatience(e, "long").silenceMs;
+        int extra = TurnDetection.forPatience(e, "extra_long").silenceMs;
+        org.junit.Assert.assertTrue("more patience waits longer: " + standard + " < " + lng + " < " + extra,
+                standard < lng && lng < extra);
+        TurnDetection swept = TurnDetection.forPatience(e, "long").withSilenceMs(900);
+        assertEquals("the debug sweep (files/debug/silence_duration_ms) still wins", Integer.valueOf(900), swept.silenceMs);
+        assertEquals("patience=long silence_duration_ms=900 prefix_padding_ms=300", swept.toString());
+    }
+
+    @Test
+    public void theSpeechEndAndFirstAudioLinesCarryTheValuesInUse() {
+        TurnDetection td = new TurnDetection("extra_long", 2000, 400);
+        assertEquals("turn t-1 speech end patience=extra_long silence_duration_ms=2000 prefix_padding_ms=400",
+                XaiRealtimeBackend.speechEndLine("t-1", td));
+        String first = XaiRealtimeBackend.firstAudioLine("t-1", 812, td);
+        org.junit.Assert.assertTrue("the eval scripts' match still holds",
+                first.startsWith("turn t-1 first reply audio speech_end_to_audio_ms=812 "));
+        org.junit.Assert.assertTrue(first, first.endsWith("patience=extra_long silence_duration_ms=2000 prefix_padding_ms=400"));
+        assertEquals("turn t-2 first reply audio speech_end_to_audio_ms=-1 patience=standard "
+                + "silence_duration_ms=vendor prefix_padding_ms=vendor",
+                XaiRealtimeBackend.firstAudioLine("t-2", -1, TurnDetection.VENDOR_DEFAULT));
+    }
+
+    @Test
     public void theSweepOverrideReplacesOnlyTheSilenceAndOnlyInRange() {
         TurnDetection base = TurnDetection.forPatience(entry(LEVELS), "standard");
         TurnDetection swept = base.withSilenceMs(900);
