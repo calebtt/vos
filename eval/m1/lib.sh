@@ -71,3 +71,27 @@ vos_volume() {
 vos_restore_media_volume() {
     adb shell am start -n com.vos.actuator/.DebugSummonActivity --es op volume --ei stream 3 --ei index "$1" >/dev/null 2>&1 || true
 }
+
+# vos_actuator_audit: the actuator's audit, CRs and NULs stripped (a torn tail, #319). The offline
+# self-test (ci/tests/test_wait_audit_state.py) redefines it to read a local file.
+vos_actuator_audit() {
+    adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r\000'
+}
+
+# vos_wait_audit_state TURN_ID STATE SECONDS FILE: writes this turn's audit lines to FILE, re-reading
+# every 0.2 s until one is in STATE or SECONDS pass (#310: the AudioPlane writes IDLE just after the
+# turn's stop, so a single read can miss it). Returns 1 on a timeout; FILE then holds the last read,
+# so the caller's own check still fails honestly.
+vos_wait_audit_state() {
+    local i
+    for (( i = 0; i <= $3 * 5; i++ )); do
+        { vos_actuator_audit || true; } | grep -F "\"turnId\":\"$1\"" > "$4" || true
+        if grep -q "\"state\":\"$2\"" "$4"; then
+            return 0
+        fi
+        if (( i < $3 * 5 )); then
+            sleep 0.2
+        fi
+    done
+    return 1
+}

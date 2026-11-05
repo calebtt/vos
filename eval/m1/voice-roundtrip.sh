@@ -78,7 +78,7 @@ echo "transcripts:"; sed 's/^/  /' "$out/transcripts.jsonl"
 check "the owner's question was transcribed" "grep '\"role\":\"owner\"' '$out/transcripts.jsonl' | grep -qi 'time'"
 check "a reply was transcribed" "grep -q '\"role\":\"vos\",\"text\":\"[^\"]' '$out/transcripts.jsonl'"
 
-adb shell "run-as com.vos.actuator cat files/audit/audit.jsonl" | tr -d '\r\000' | grep -F "\"turnId\":\"$turn\"" > "$out/audit.jsonl" || true
+vos_wait_audit_state "$turn" IDLE 5 "$out/audit.jsonl" || echo "no IDLE audit line for this turn after 5 s"
 states="$(sed -n 's/.*"state":"\([A-Z_]*\)".*/\1/p' "$out/audit.jsonl" | tr '\n' ' ')"
 check "AudioPlane audit CAPTURE CONVERSE RESTORE IDLE ($states)" "[[ '$states' == 'CAPTURE CONVERSE RESTORE IDLE ' ]]"
 check "RESTORE was the session's idle end" "grep '\"state\":\"RESTORE\"' '$out/audit.jsonl' | grep -q 'session: idle'"
