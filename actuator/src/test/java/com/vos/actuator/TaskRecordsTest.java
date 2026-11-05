@@ -90,6 +90,21 @@ public class TaskRecordsTest {
     }
 
     @Test
+    public void aHighRiskRedactionIsACompactionLineWithTheCountOnly() throws Exception {
+        TaskRecords r = records();
+        r.open("t1", null, null, "owner_voice", "read me the code from Messages");
+        assertNull(r.compaction("t1", step("context", "conversation", "tokens_before", 120, "tokens_after", 118,
+                "replaced", 2, "saved", true)));
+        assertEquals("no compaction field released", r.compaction("t1", step("replaced", 1, "released", "482913")));
+        r.close("t1", "pass", "VERIFIED", null);
+        JSONObject c = lines(r.read("t1")).get(1);
+        assertEquals("compaction", c.getString("entry"));
+        assertEquals(2, c.getInt("replaced"));
+        assertTrue(c.getBoolean("saved"));
+        assertFalse(r.read("t1").contains("482913"));
+    }
+
+    @Test
     public void aVetoIsTypedWithAReasonFromQ23() throws Exception {
         TaskRecords r = records();
         r.open("t1", null, null, "owner_chat", "text Alex");

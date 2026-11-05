@@ -28,7 +28,8 @@ import org.json.JSONObject;
  * {@code compact} task class. Raw tool output is reduced to one line before the summarizer sees it.
  * The summary goes back as quoted data with its sources' origins, never as instructions; that framing
  * is advisory (§3.2), and the actuator still decides every act. Each compaction is one audit line with
- * counts only, never text. Thread-safe.
+ * counts only, never text. At task end, high-risk strings released during the task are redacted
+ * from the items and the summary ({@link #redactHighRisk}). Thread-safe.
  */
 final class Conversation {
     /**
@@ -176,6 +177,57 @@ final class Conversation {
         }
     }
 
+    /**
+     * Decision 46 (#276): at task end, replaces every match of a high-risk string released during
+     * the task (decision 32) in the kept items and in the summary with its placeholder ("a code
+     * from Messages"), saves the result, and writes one audit line, {@code high_risk_redact}, with
+     * the number of replacements only, never the string. Items are redacted as one list of turns,
+     * so a code split across two adjacent items is caught too ({@link HighRiskRedactor#redactTurns}).
+     * Returns the number of replacements. An empty or null list does nothing and writes no line; a
+     * non-empty list always writes the line, with {@code replaced=0} when nothing matched. The line's
+     * {@code saved} says whether the redacted conversation reached disk (true when nothing was
+     * replaced); when it is false the old file may still hold the string, and the in-memory
+     * conversation is redacted all the same.
+     *
+     * <p>Waits for a compaction in flight: the summarizer works on a copy of the oldest items, so a
+     * redaction that ran meanwhile would be undone by the summary it returns. Already-seeded
+     * realtime sessions and requests already sent are out of reach here.
+     */
+    int redactHighRisk(List<HighRiskRedactor.Released> released) {
+        if (released == null || released.isEmpty()) {
+            return 0;
+        }
+        synchronized (fitLock) { // same lock order as fit(): fitLock, then this
+            synchronized (this) {
+                int before = ContextBudget.tokens(summary, items);
+                List<String> texts = new ArrayList<>();
+                for (Item i : items) {
+                    texts.add(i.text);
+                }
+                HighRiskRedactor.TurnsResult turns = HighRiskRedactor.redactTurns(texts, released);
+                int count = turns.count();
+                for (int k = 0; k < items.size(); k++) {
+                    Item i = items.get(k);
+                    String text = turns.turns().get(k);
+                    if (!text.equals(i.text)) {
+                        items.set(k, new Item(i.role, i.turnId, text));
+                    }
+                }
+                if (summary != null) {
+                    HighRiskRedactor.Result r = HighRiskRedactor.redact(summary, released);
+                    summary = r.text();
+                    count += r.count();
+                }
+                boolean saved = count == 0 || save(); // nothing replaced: the file already holds no match
+                Map<String, Object> line = line("high_risk_redact", before, ContextBudget.tokens(summary, items));
+                line.put("replaced", count); // the count, never the string (§3.8)
+                line.put("saved", saved); // false: the file on disk may still hold the string
+                audit.accept(line);
+                return count;
+            }
+        }
+    }
+
     /** The realtime API items that carry this conversation into a new session, oldest first. */
     synchronized List<JSONObject> seed() {
         List<JSONObject> out = new ArrayList<>();
@@ -271,11 +323,7 @@ final class Conversation {
                 tool++;
             }
         }
-        Map<String, Object> line = new LinkedHashMap<>();
-        line.put("event", event);
-        line.put("context", "conversation");
-        line.put("tokens_before", before);
-        line.put("tokens_after", after);
+        Map<String, Object> line = line(event, before, after);
         line.put("budget", budget.budget);
         line.put("compacted_owner", owner);
         line.put("compacted_vos", vos);
@@ -287,6 +335,16 @@ final class Conversation {
             line.put("error", error);
         }
         audit.accept(line);
+    }
+
+    /** The fields every conversation audit line starts with. */
+    private static Map<String, Object> line(String event, int before, int after) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("event", event);
+        line.put("context", "conversation");
+        line.put("tokens_before", before);
+        line.put("tokens_after", after);
+        return line;
     }
 
     private void load() {
@@ -308,7 +366,8 @@ final class Conversation {
         }
     }
 
-    private void save() {
+    /** Writes the conversation atomically; returns whether it reached disk. */
+    private boolean save() {
         try {
             JSONArray a = new JSONArray();
             for (Item i : items) {
@@ -318,7 +377,7 @@ final class Conversation {
                     .put("summary_has_app_data", summaryHasAppData).put("items", a);
             File dir = file.getParentFile();
             if (!dir.isDirectory() && !dir.mkdirs()) {
-                return;
+                return false;
             }
             File tmp = new File(dir, "conversation.json.tmp");
             try (FileOutputStream out = new FileOutputStream(tmp)) {
@@ -327,8 +386,9 @@ final class Conversation {
             }
             Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING,
                     StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException | JSONException ignored) {
-            // the in-memory conversation still serves this process
+            return true;
+        } catch (IOException | JSONException e) {
+            return false; // the in-memory conversation still serves this process
         }
     }
 }

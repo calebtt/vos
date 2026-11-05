@@ -45,9 +45,12 @@ final class TaskRecords {
     static final Set<String> STEP_FIELDS = Set.of("foreground", "observation", "model", "prefill_tokens",
             "decode_tokens", "latency_ms", "proposed_action", "veto", "executed_action", "oracle", "inverse",
             "no_undo", "image_count", "text_bytes", "thermal_status", "work_log", "owner_step");
-    /** §3.8's compaction line (decision 46). */
+    /**
+     * §3.8's compaction line (decision 46). For a high-risk redaction, {@code replaced} is the count,
+     * never the string, and {@code saved} says whether the redacted context reached disk.
+     */
     static final Set<String> COMPACTION_FIELDS = Set.of("context", "tokens_before", "tokens_after", "budget",
-            "dropped_kinds", "sources", "model", "taint");
+            "dropped_kinds", "sources", "model", "taint", "replaced", "saved");
     private static final Set<String> FIXED_SOURCES = Set.of("owner_voice", "owner_chat", "owner_demo", "agent", "eval");
     private static final Pattern PREFIXED_SOURCE = Pattern.compile("(app_agent|vtb):[A-Za-z0-9._-]{1,128}");
     private static final Pattern TASK_ID = Pattern.compile("[A-Za-z0-9_-]{1,64}");
