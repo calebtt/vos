@@ -14,6 +14,9 @@
 # report requested, granted, pass=false and outcome=recorded. pass=false alone is not enough: the
 # probe's pass bit is false whenever the permission is granted, including when nothing was recorded.
 # That opens the real mic for one 0.2 s read into memory, discarded; nothing is stored or played.
+# It grants the actuator RECORD_AUDIO first (vos_grant_mic, #311). On an emulator (ro.kernel.qemu=1),
+# a control that held the permission but recorded nothing is reported as SKIP, not counted: the
+# emulator often has no usable audio input. On a real device that stays a FAIL.
 #
 # Usage: eval/m1/aud-02.sh [--no-build] [--control] [--self-test]
 #   ANDROID_SERIAL picks the device. Results go to $VOS_EVAL_OUT if set, else to
@@ -33,8 +36,23 @@ control_recorded() {
         && grep -q 'INSTRUMENTATION_RESULT: outcome=recorded' <<<"$ctl"
 }
 
+# The control's verdict (#311): PASS when it recorded. On an emulator (ro.kernel.qemu=1), which often
+# has no usable audio input, a probe that held the permission (requested and granted) but did not
+# record is a SKIP. On a real device that is a FAIL, and so is a missing grant anywhere.
+control_verdict() { # probe-output is-emulator(0|1)
+    if control_recorded "$1"; then
+        echo PASS
+    elif [[ $2 == 1 ]] && grep -q 'INSTRUMENTATION_RESULT: requested=true' <<<"$1" \
+            && grep -q 'INSTRUMENTATION_RESULT: granted=true' <<<"$1"; then
+        echo SKIP
+    else
+        echo FAIL
+    fi
+}
+
 self_test() {
     local line=$'INSTRUMENTATION_RESULT: requested=true\nINSTRUMENTATION_RESULT: granted=true\nINSTRUMENTATION_RESULT: pass=false\n'
+    local ungranted=$'INSTRUMENTATION_RESULT: requested=true\nINSTRUMENTATION_RESULT: granted=false\nINSTRUMENTATION_RESULT: pass=false\n'
     control_recorded "${line}INSTRUMENTATION_RESULT: outcome=recorded"
     if control_recorded "${line}INSTRUMENTATION_RESULT: outcome=not_recording"; then
         echo "self-test FAIL: a refusal with the permission was accepted" >&2
@@ -44,6 +62,19 @@ self_test() {
         echo "self-test FAIL: silence was accepted as a recording" >&2
         exit 1
     fi
+    local want got outcome emu probe
+    # want|ungranted?|outcome|emulator: the control's verdict on each.
+    for want in "PASS|0|recorded|0" "PASS|0|recorded|1" "FAIL|0|not_recording|0" "SKIP|0|not_recording|1" \
+            "SKIP|0|recording_silenced|1" "FAIL|0|recording_silenced|0" "FAIL|1|not_initialized|1" \
+            "FAIL|1|not_initialized|0"; do
+        IFS='|' read -r want probe outcome emu <<<"$want"
+        if (( probe )); then probe="$ungranted"; else probe="$line"; fi
+        got="$(control_verdict "${probe}INSTRUMENTATION_RESULT: outcome=$outcome" "$emu")"
+        if [[ $got != "$want" ]]; then
+            echo "self-test FAIL: control outcome=$outcome emulator=$emu$([[ $probe == "$ungranted" ]] && echo ' granted=false'): $got, want $want" >&2
+            exit 1
+        fi
+    done
     echo "self-test PASS"
 }
 
@@ -105,12 +136,20 @@ check "the probe ran in the session's UID ($uid_session)" "grep -q \"INSTRUMENTA
 check "M1-AUD-02: the session cannot record (no permission, no audio)" "grep -q 'INSTRUMENTATION_RESULT: pass=true' <<<\"\$probe\""
 
 if (( control )); then
+    vos_grant_mic # a fresh device has not granted the actuator RECORD_AUDIO yet (#311)
     adb install -r -t "$ACTUATOR_TEST_APK" >/dev/null
     ctl="$(adb shell am instrument -w -r -e probe mic com.vos.actuator.test/com.vos.eval.auth.AuthProbe | tr -d '\r')"
     echo "$ctl" > "$out/control-actuator-probe.txt"
     echo "$ctl" | grep -E "INSTRUMENTATION_RESULT: (outcome|requested|granted)" | sed 's/^/  control: /' || true
-    check "control: in the actuator (holds RECORD_AUDIO) the probe records" \
-        "control_recorded \"\$ctl\""
+    emulator=0
+    if [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]]; then emulator=1; fi
+    what="control: in the actuator (holds RECORD_AUDIO) the probe records"
+    case "$(control_verdict "$ctl" "$emulator")" in
+        PASS) echo "PASS $what" ;;
+        SKIP) echo "SKIP control: an emulator (ro.kernel.qemu=1) has no usable audio input" \
+                "($(grep -o 'outcome=[a-z_]*' <<<"$ctl" | head -1 || true)); not counted" ;;
+        *) echo "FAIL $what"; fails=$((fails + 1)) ;;
+    esac
 fi
 
 if (( fails == 0 )); then echo "M1-AUD-02: PASS"; else echo "M1-AUD-02: FAIL ($fails)"; exit 1; fi
