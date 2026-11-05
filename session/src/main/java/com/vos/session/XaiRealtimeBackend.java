@@ -72,6 +72,22 @@ import org.json.JSONObject;
  */
 final class XaiRealtimeBackend implements SessionTurns.Backend {
     static final String TAG = "VOS_VOICE";
+
+    /**
+     * The log line at each speech end (one per owner utterance): the end-of-turn settings in use
+     * next to it, so the pause sweep (#247) can read which values ended the utterance.
+     */
+    static String speechEndLine(String turnId, TurnDetection td) {
+        return "turn " + turnId + " speech end " + td;
+    }
+
+    /**
+     * The log line at a reply's first audio (one per reply). It starts as before ("first reply audio
+     * speech_end_to_audio_ms=N", which the eval scripts match), then the settings in use.
+     */
+    static String firstAudioLine(String turnId, long speechEndToAudioMs, TurnDetection td) {
+        return "turn " + turnId + " first reply audio speech_end_to_audio_ms=" + speechEndToAudioMs + " " + td;
+    }
     static final String END_TURN = "end_turn";
     /** The OpenAI-shaped error for a response.create while a response is active; not fatal here. */
     static final String ACTIVE_RESPONSE = "conversation_already_has_active_response";
@@ -737,6 +753,7 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             }
             speechEndedAt = now();
             firstAudioOfReply = true;
+            Log.i(TAG, speechEndLine(turnId, timing.turnDetection));
             for (Reply r : waitingNotes()) {
                 note(r, false); // no done for the cut reply yet: the note goes with the transcript so far
             }
@@ -765,8 +782,8 @@ final class XaiRealtimeBackend implements SessionTurns.Backend {
             }
             if (firstAudioOfReply) {
                 firstAudioOfReply = false;
-                Log.i(TAG, "turn " + turnId + " first reply audio speech_end_to_audio_ms="
-                        + (speechEndedAt > 0 ? now() - speechEndedAt : -1));
+                Log.i(TAG, firstAudioLine(turnId, speechEndedAt > 0 ? now() - speechEndedAt : -1,
+                        timing.turnDetection));
             }
             replyQueue.add(new Chunk(responseId, pcm, reply));
         }
