@@ -28,19 +28,20 @@ echo "rc=$rc"
 
 
 def line(turn, state):
-    return '{"ts":1,"event":"audio.plane","turnId":"%s","state":"%s","mode":0}' % (turn, state)
+    return '{"ts":1,"event":"audio.transition","turnId":"%s","state":"%s","mode":0}' % (turn, state)
 
 
 class WaitAuditStateTest(unittest.TestCase):
-    def run_wait(self, initial, seconds, late_after="", late_line=""):
-        d = Path(tempfile.mkdtemp())
-        audit, out = d / "audit.jsonl", d / "turn.jsonl"
-        audit.write_bytes(initial)
-        start = time.monotonic()
-        p = subprocess.run(["bash", "-c", SCRIPT, "self-test", str(ROOT), str(audit), TURN, str(seconds),
-                            late_after, late_line, str(out)], capture_output=True, text=True, timeout=30)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        return p.stdout.strip().splitlines()[-1], out.read_text(), time.monotonic() - start
+    def run_wait(self, initial, seconds, late_after="", late_line="", turn=TURN):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            audit, out = d / "audit.jsonl", d / "turn.jsonl"
+            audit.write_bytes(initial)
+            start = time.monotonic()
+            p = subprocess.run(["bash", "-c", SCRIPT, "self-test", str(ROOT), str(audit), turn, str(seconds),
+                                late_after, late_line, str(out)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            return p.stdout.strip().splitlines()[-1], out.read_text(), time.monotonic() - start
 
     def test_waits_for_an_idle_line_written_after_the_first_read(self):
         first = "\n".join(line(TURN, s) for s in ("CAPTURE", "CONVERSE", "RESTORE")) + "\n"
@@ -61,6 +62,15 @@ class WaitAuditStateTest(unittest.TestCase):
         rc, got, _ = self.run_wait(first, 1)
         self.assertEqual(rc, "rc=0")
         self.assertIn('"state":"IDLE"', got)
+
+
+    def test_an_empty_turn_id_fails_at_once(self):
+        first = (line(TURN, "IDLE") + "\n").encode()
+        start = time.monotonic()
+        rc, got, took = self.run_wait(first, 5, turn="")
+        self.assertEqual(rc, "rc=1")
+        self.assertEqual(got, "")
+        self.assertLess(took, 1.0)
 
 
 if __name__ == "__main__":

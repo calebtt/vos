@@ -81,17 +81,26 @@ vos_actuator_audit() {
 # vos_wait_audit_state TURN_ID STATE SECONDS FILE: writes this turn's audit lines to FILE, re-reading
 # every 0.2 s until one is in STATE or SECONDS pass (#310: the AudioPlane writes IDLE just after the
 # turn's stop, so a single read can miss it). Returns 1 on a timeout; FILE then holds the last read,
-# so the caller's own check still fails honestly.
+# so the caller's own check still fails honestly. An empty TURN_ID fails at once (nothing to match).
 vos_wait_audit_state() {
-    local i
+    local i err
+    : > "$4"
+    [[ -n "$1" ]] || return 1
+    # Count sleeps, not wall-clock SECONDS: bash SECONDS is whole seconds, so a 1 s budget can end
+    # after a few hundred ms if we start near a tick.
     for (( i = 0; i <= $3 * 5; i++ )); do
-        { vos_actuator_audit || true; } | grep -F "\"turnId\":\"$1\"" > "$4" || true
+        err="$(mktemp)"
+        { vos_actuator_audit 2>"$err" || true; } | grep -F "\"turnId\":\"$1\"" > "$4" || true
         if grep -q "\"state\":\"$2\"" "$4"; then
+            rm -f "$err"
             return 0
         fi
-        if (( i < $3 * 5 )); then
-            sleep 0.2
+        if (( i == $3 * 5 )); then
+            [[ -s "$err" ]] && cat "$err" >&2
+            rm -f "$err"
+            return 1
         fi
+        rm -f "$err"
+        sleep 0.2
     done
-    return 1
 }
