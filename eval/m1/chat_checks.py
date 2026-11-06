@@ -24,7 +24,13 @@ run shows as that and not only as unrelated FAIL lines:
   summon.txt           VOS_TURN logcat of the summon leg; summon-typed.txt: its VOS_TYPED logcat
   stop.txt             logcat of the stop leg (VOS_TYPED, VOS_AUDIT, VOS_TURN), from its typed send to past
                        the session's hold
-  recording.txt        the "### Recording Activity" section of `dumpsys audio`
+  recording.txt        the whole of `dumpsys audio`; the checks read its recording log (#333): the
+                       EventLogger that RecordingActivityMonitor.dump prints after its
+                       "RecordActivityMonitor dump time:" header, titled "Events log: recording activity
+                       received by AudioService" ("Audio event log: ..." before Android 14), one event per
+                       line up to a blank line. No such log, more than one, a line in it that is not an
+                       event, or a full log that may have dropped events from a leg: that leg's AudioRecord
+                       check fails, never reads as zero recordings.
 """
 import contextlib
 import io
@@ -39,9 +45,14 @@ TYPED_TURNS = 8
 # VoiceTurn's VOS_TURN lines when a voice turn starts (the session opened it; the live mic started).
 VOICE_START = re.compile(r"capture turnId=|turn opened in session turnId=")
 STAMP = re.compile(r"\d\d-\d\d \d\d:\d\d:\d\d")
-# The audio service's recording log (RecordingActivityMonitor.RecordingEvent in an EventLogger):
-# "MM-dd HH:mm:ss:SSS rec start riid:N uid:N session:N src:NAME not silenced pack:NAME".
-REC = re.compile(r"(\d\d-\d\d \d\d:\d\d:\d\d)[:.]\d{3} rec (?:start|update) (.*)")
+# The audio service's recording log in `dumpsys audio` (#333): RecordingActivityMonitor's EventLogger,
+# its title (the tag has varied by release, hence "recording activity" and anything after it), then
+# its events, oldest first, each "MM-dd HH:mm:ss:SSS " and the event, e.g. a RecordingEvent's
+# "rec start riid:N uid:N session:N src:NAME not silenced pack:NAME".
+REC_LOG_TITLE = re.compile(r"(?:Events log|Audio event log): recording activity\b.*")
+REC_EVENT = re.compile(r"(\d\d-\d\d \d\d:\d\d:\d\d)[:.]\d{3} (.*)")
+REC_START = re.compile(r"rec (?:start|update) .*")
+REC_LOG_CAPACITY = 50  # the EventLogger keeps the last 50 events; a full one may have dropped older ones
 TIME = re.compile(r"\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)|\b\d{1,2}:\d{2}\b")
 ACTUATOR = "com.vos.actuator"
 # The stop leg's press: DebugSummonActivity op tile, a "Stop VOS" press from source debug_tile.
@@ -83,6 +94,24 @@ def parse(lines):
         else:
             bad += 1
     return out, bad
+
+
+def recording_log(dump):
+    """The recording log in a `dumpsys audio` dump: ([(MM-DD HH:MM:SS, event)], None), oldest first, or
+    (None, why it cannot be read). Its events run from the title to the next blank line or the end."""
+    lines = [line.strip() for line in dump.splitlines()]
+    titles = [i for i, line in enumerate(lines) if REC_LOG_TITLE.fullmatch(line)]
+    if len(titles) != 1:
+        return None, "missing" if not titles else f"unreadable: {len(titles)} recording logs"
+    events = []
+    for line in lines[titles[0] + 1:]:
+        if not line:
+            break
+        m = REC_EVENT.fullmatch(line)
+        if not m:  # e.g. a dumpsys timeout cut it short
+            return None, f"unreadable: not an event: {line[:60]!r}"
+        events.append((m.group(1), m.group(2)))
+    return events, None
 
 
 def facts_of(text):
@@ -151,21 +180,24 @@ def evaluate(d):
                and a.get("turnId") not in own]
     foreign += [o for o in opened if o.get("turnId") in forged_ids]
 
-    rec_seen = "### Recording Activity" in rec_log
+    rec_events, rec_problem = recording_log(rec_log)
     uid = facts.get("actuator_uid", "")
     actuator_rec = re.compile(r"\bpack:" + re.escape(ACTUATOR) + r"(\s|$)"
                               + (r"|\buid:" + re.escape(uid) + r"\b" if uid.isdigit() else ""))
 
     def rec_since(stamp):
-        """The actuator's AudioRecord starts in the recording log at or after stamp (None: no stamp)."""
+        """(the actuator's AudioRecord starts in the recording log at or after stamp, a note on the log).
+        The count is None when there is no stamp, no readable log, or the log is full and its oldest
+        event is not before stamp: it may have dropped some from then."""
+        if rec_events is None:
+            return None, f"recording log {rec_problem}"
+        note = f"recording log: {len(rec_events)} events"
         if not STAMP.fullmatch(stamp or ""):
-            return None
-        n = 0
-        for line in rec_log.splitlines():
-            m = REC.fullmatch(line.strip())
-            if m and m.group(1) >= stamp and actuator_rec.search(m.group(2)):
-                n += 1
-        return n
+            return None, note
+        if len(rec_events) >= REC_LOG_CAPACITY and rec_events[0][0] >= stamp:
+            return None, f"{note}, full since {rec_events[0][0]}: it may have dropped some from {stamp}"
+        return sum(1 for t, e in rec_events
+                   if t >= stamp and REC_START.fullmatch(e) and actuator_rec.search(e)), note
 
     # The stop leg: the turn the tile press stopped, and everything of it after the stop.
     stops = events(audit, "typed.turn_stop")
@@ -188,9 +220,8 @@ def evaluate(d):
                           if m and m.group(1) == "VOS_TURN")
     stop_logged = sid is not None and t_stop is not None  # the press reached TypedChat.stop: in the same log
 
-    rec_typed = rec_since(facts.get("typed_from"))
-    rec_summon = rec_since(facts.get("summon_from"))
-    rec_note = "recording log " + ("present" if rec_seen else "missing")
+    rec_typed, rec_typed_note = rec_since(facts.get("typed_from"))
+    rec_summon, rec_summon_note = rec_since(facts.get("summon_from"))
     voice_control = VOICE_START.search(voice) is not None
 
     gaps = unread(d)
@@ -225,8 +256,8 @@ def evaluate(d):
           "the typed follow-up names Dana from the voice turn (shared conversation)")
     check("direct_reply", now_id and sources.get(now_id) == "debug_notification" and now_reply.strip(),
           f"the direct-reply turn was answered (its source: {sources.get(now_id)})")
-    check("rec_typed", rec_seen and rec_typed == 0,
-          f"no AudioRecord started for the actuator during the typed turns ({rec_typed}; {rec_note})")
+    check("rec_typed", rec_typed == 0,
+          f"no AudioRecord started for the actuator during the typed turns ({rec_typed}; {rec_typed_note})")
     check("forged_refused", leg_ok and forged,
           f"the session's forged reply was refused and audited ({len(forged)} in its leg)")
     check("forged_no_turn", leg_ok and forged and len(leg_opened) == 1 and not leg_voice and not foreign
@@ -242,8 +273,8 @@ def evaluate(d):
     check("summon_no_turn", voice_control and not VOICE_START.search(summon),
           "the refused summon started no voice turn (the same lines show the voice leg's turn: "
           f"{'yes' if voice_control else 'no'})")
-    check("rec_summon", rec_seen and rec_summon == 0,
-          f"no AudioRecord started for the refused summon ({rec_summon}; {rec_note})")
+    check("rec_summon", rec_summon == 0,
+          f"no AudioRecord started for the refused summon ({rec_summon}; {rec_summon_note})")
     check("stop_during", facts.get("stop_pressed") == "1" and facts.get("stop_in_session") == "1"
           and stop_line is not None and stop_line.get("in_session") is True,
           "the stop came while the typed turn was open in the session (pressed: "
@@ -346,12 +377,37 @@ def write_passing(d):
         f"10-31 12:01:21.000 100 100 I VOS_TYPED: typed turn stop turnId={sid} source=debug_tile t_up=500000\n"
         f"10-31 12:01:21.010 300 301 I VOS_TYPED: typed turn {sid} closed by the actuator ms=4\n"
         f"10-31 12:01:21.040 100 100 I VOS_TYPED: typed turn ended turnId={sid} t_up=500040 reason={STOP_REASON}\n")
-    # Controls that must not count: the actuator recording before the typed legs, another app during them.
-    (d / "recording.txt").write_text(
-        "### Recording Activity\n"
-        f"10-31 11:00:00:000 rec start riid:1 uid:{UID} session:9 src:VOICE_COMMUNICATION not silenced "
-        f"pack:{ACTUATOR}\n"
-        "10-31 12:00:30:000 rec start riid:2 uid:10111 session:10 src:MIC not silenced pack:com.example.recorder\n")
+    (d / "recording.txt").write_text(DUMPSYS_AUDIO)
+
+
+# `dumpsys audio` as AOSP's AudioService.dump prints it (#333), cut down: the sections around the
+# recording log, RecordingActivityMonitor.dump's header, its recorders and two blank lines, then its
+# EventLogger. Controls in the log that must not count: the actuator recording before the typed legs,
+# another app during them, and stops and releases.
+DUMPSYS_AUDIO = f"""\
+Events log: focus commands as seen by MediaFocusControl
+10-31 11:00:00:010 requestAudioFocus() from uid/pid {UID}/4321 AA=USAGE_ASSISTANT/CONTENT_TYPE_SPEECH \
+clientId=android.media.AudioManager@1a2b3c focusReq=AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE flags=0x0 sdk:35
+
+PlaybackActivityMonitor dump time: 12:02:30 PM
+
+  players:
+  ducked players piids:
+
+RecordActivityMonitor dump time: 12:02:30 PM
+riid 1; active false
+
+
+Events log: recording activity received by AudioService
+10-31 11:00:00:000 rec start riid:1 uid:{UID} session:9 src:VOICE_COMMUNICATION not silenced pack:{ACTUATOR}
+10-31 11:00:07:500 rec stop riid:1 uid:{UID} session:9 src:VOICE_COMMUNICATION pack:{ACTUATOR}
+10-31 11:00:07:520 rec release riid:1 uid:{UID} session:9 src:VOICE_COMMUNICATION pack:{ACTUATOR}
+10-31 12:00:30:000 rec start riid:2 uid:10111 session:10 src:MIC not silenced pack:com.example.recorder
+10-31 12:00:40:000 rec stop riid:2 uid:10111 session:10 src:MIC pack:com.example.recorder
+
+AudioDeviceBroker:
+  Message handler (watch for unhandled messages):
+"""
 
 
 def edit(name, fn):
@@ -422,9 +478,53 @@ def reply(owner_text, new_reply):
     return edit("transcripts.jsonl", fn)
 
 
+def rec_log_edit(fn):
+    """fn(events) edits the event lines of the dump's recording log (a list of str), in place."""
+    def apply(t):
+        lines = t.split("\n")
+        start = next(i for i, line in enumerate(lines) if REC_LOG_TITLE.fullmatch(line)) + 1
+        end = next(i for i in range(start, len(lines)) if not lines[i].strip())
+        lines[start:end] = fn(lines[start:end])
+        return "\n".join(lines)
+    return edit("recording.txt", apply)
+
+
 def rec_line(stamp, pack=ACTUATOR, uid=UID):
     line = f"{stamp}:250 rec start riid:7 uid:{uid} session:11 src:VOICE_COMMUNICATION not silenced"
-    return edit("recording.txt", lambda t: t + line + (f" pack:{pack}" if pack else "") + "\n")
+    return rec_log_edit(lambda ev: ev + [line + (f" pack:{pack}" if pack else "")])
+
+
+def full_rec_log(minute, second=0):
+    """The recording log full: REC_LOG_CAPACITY events of another app's, one a second from minute
+    (MM-DD HH:MM) and second on."""
+    return rec_log_edit(lambda ev: [
+        f"{minute}:{s:02d}:000 rec {'start' if s % 2 == 0 else 'stop'} riid:{100 + s // 2} uid:10111 "
+        f"session:{20 + s // 2} src:MIC{' not silenced' if s % 2 == 0 else ''} pack:com.example.recorder"
+        for s in range(second, second + REC_LOG_CAPACITY)])
+
+
+def dump_edit(old, new):
+    return edit("recording.txt", lambda t: t.replace(old, new))
+
+
+REC_TITLE = "Events log: recording activity received by AudioService"
+# The section that only the old self-test's fixture had (#333): a dump with this and no recording log.
+FABRICATED_HEADING = "### Recording Activity"
+# What a sed range from the monitor's header to the first blank line keeps: no events, and no title.
+MONITOR_ONLY = "RecordActivityMonitor dump time: 12:02:30 PM\nriid 1; active false\n"
+# Variants of the passing run's dump that real devices print: every check must still PASS.
+VARIANTS = [  # (what, how)
+    ("the recording log's title as before Android 14 (\"Audio event log: \")",
+     dump_edit(REC_TITLE, "Audio event log: recording activity received by AudioService")),
+    ("the recording log's title with an older tag",
+     dump_edit(REC_TITLE, "Audio event log: recording activity as reported through "
+                          "AudioSystem.dispatchRecordingConfigChange")),
+    ("no recording since boot: the log has its title and no event", rec_log_edit(lambda ev: [])),
+    ("the recording log ends the dump (no blank line after it)",
+     edit("recording.txt", lambda t: t[:t.index("\nAudioDeviceBroker:")])),
+    ("the recording log is full, from before the typed legs", full_rec_log("10-31 11:59")),
+]
+DUMPSYS_TIMEOUT = "*** SERVICE 'audio' DUMP TIMEOUT (10000ms) EXPIRED ***"
 
 
 SUMMON_TURN = f"10-31 12:01:00.700 100 103 I VOS_TURN: turn opened in session turnId={VOICE_ID} after_ms=90\n"
@@ -448,6 +548,16 @@ BREAKS = [  # (check id, what is broken, how)
     ("rec_typed", "the actuator recorded during the typed turns", rec_line("10-31 12:00:20")),
     ("rec_typed", "the actuator recorded, logged by uid with no package name", rec_line("10-31 12:00:20", pack=None)),
     ("rec_typed", "no start time for the typed legs", fact("typed_from", "")),
+    ("rec_typed", "dumpsys audio printed nothing", edit("recording.txt", lambda t: "")),
+    ("rec_typed", "the dump has the old self-test's \"### Recording Activity\" heading, not the recording log",
+     dump_edit(REC_TITLE, FABRICATED_HEADING)),
+    ("rec_typed", "only the monitor's header and recorders were kept (a sed range to the first blank line)",
+     edit("recording.txt", lambda t: MONITOR_ONLY)),
+    ("rec_typed", "dumpsys timed out inside the recording log", rec_log_edit(lambda ev: ev[:2] + [DUMPSYS_TIMEOUT])),
+    ("rec_typed", "a line of the recording log is cut short", rec_log_edit(lambda ev: ev + ["10-31 12:00:2"])),
+    ("rec_typed", "two recording logs in the dump", edit("recording.txt", lambda t: t + "\n" + REC_TITLE + "\n")),
+    ("rec_typed", "the recording log is full from the typed legs' start (it may have dropped their events)",
+     full_rec_log("10-31 12:00", 10)),
     ("forged_refused", "the forged reply was not refused (accepted)", drop_event("typed.reply_refused")),
     ("forged_refused", "the only refusal is for a turn the actuator opened (a late reply), not the forgery",
      set_field("typed.reply_refused", None, "turnId", IDS[3])),
@@ -475,6 +585,11 @@ BREAKS = [  # (check id, what is broken, how)
     ("rec_summon", "the recording log is missing", remove("recording.txt")),
     ("rec_summon", "the actuator recorded at the summon", rec_line("10-31 12:01:01")),
     ("rec_summon", "no start time for the summon", fact("summon_from", "12:01")),
+    ("rec_summon", "the dump has the old self-test's \"### Recording Activity\" heading, not the recording log",
+     dump_edit(REC_TITLE, FABRICATED_HEADING)),
+    ("rec_summon", "dumpsys timed out inside the recording log", rec_log_edit(lambda ev: ev[:2] + [DUMPSYS_TIMEOUT])),
+    ("rec_summon", "the recording log is full from the summon (it may have dropped its events)",
+     full_rec_log("10-31 12:01")),
     ("stop_during", "the shell did not press the tile (the turn had already ended)", fact("stop_pressed", "0")),
     ("stop_during", "the typed turn was not yet open in the session at the press", fact("stop_in_session", "0")),
     ("stop_during", "the actuator stopped the turn before the session had it",
@@ -534,6 +649,17 @@ def self_test():
             print("self-test FAIL: no break for " + ", ".join(untested), file=sys.stderr)
             return 1
         bad = 0
+        for n, (what, how) in enumerate(VARIANTS):  # dumps real devices print: still a passing run (#333)
+            d = root / f"variant-{n}"
+            shutil.copytree(base, d)
+            how(d)
+            _, results = evaluate(d)
+            failed = [text for _, ok, text in results if not ok]
+            if failed:
+                bad += 1
+                print(f"self-test FAIL: {what}: the passing run fails: " + "; ".join(failed), file=sys.stderr)
+            else:
+                print(f"variant: {what}: PASS")
         for n, (cid, what, how) in enumerate(BREAKS):
             d = root / f"break-{n}"
             shutil.copytree(base, d)
@@ -568,9 +694,9 @@ def self_test():
                   file=sys.stderr)
         if bad:
             return 1
-        print(f"self-test PASS: the {len(ids)} checks pass on the passing run, and each fails on its breaks "
-              f"({len(BREAKS)} in all); an empty run directory names all {len(RUN_FILES)} run files as "
-              "missing, and a missing one exits 2")
+        print(f"self-test PASS: the {len(ids)} checks pass on the passing run and its {len(VARIANTS)} variants, "
+              f"and each fails on its breaks ({len(BREAKS)} in all); an empty run directory names all "
+              f"{len(RUN_FILES)} run files as missing, and a missing one exits 2")
         return 0
     finally:
         shutil.rmtree(root, ignore_errors=True)

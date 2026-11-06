@@ -9,7 +9,8 @@
 # "context tokens~ budget=" line); the sister question gets Dana; the ring volume is unchanged after
 # the last turn, no volume tool touched the ring stream, and VOS cites the restriction; no raw tool
 # output is left in the summary; each
-# compaction has an audit line with counts only. `--typed` runs the odd fillers and both questions
+# compaction has an audit line with counts only (eval/m1/compaction_audit.py: known keys, and the
+# audit chain's prev only as a SHA-256, #334). `--typed` runs the odd fillers and both questions
 # as typed turns. The OwnerMemory check waits for OwnerMemory (M2).
 #
 # The conversation and the debug budget are reset before and after the run; the phone's media,
@@ -24,6 +25,7 @@
 # --typed mixes in typed turns (debug op typed): odd fillers and both questions, the rest voice.
 #
 # Usage: eval/m1/context-budget.sh [--no-build] [--budget TOKENS] [--restore-volumes] [--typed]
+#        eval/m1/context-budget.sh --self-test   the counts-only rule on good and bad lines (no device)
 
 set -euo pipefail
 
@@ -36,7 +38,8 @@ while (( $# )); do
         --budget) budget="$2"; shift ;;
         --restore-volumes) restore=1 ;;
         --typed) typed=1 ;;
-        *) echo "usage: $0 [--no-build] [--budget TOKENS] [--restore-volumes] [--typed]" >&2; exit 2 ;;
+        --self-test) exec python3 -I "$ROOT/eval/m1/compaction_audit.py" --self-test ;;
+        *) echo "usage: $0 [--no-build] [--budget TOKENS] [--restore-volumes] [--typed] | --self-test" >&2; exit 2 ;;
     esac
     shift
 done
@@ -201,9 +204,11 @@ adb shell "run-as com.vos.session cat files/conversation/conversation.json" > "$
 adb shell "run-as com.vos.session cat files/transcripts/transcripts.jsonl" 2>/dev/null | tail -n +"$((${tr_before:-0} + 1))" | tr -d '\000' > "$out/transcripts.jsonl" || true
 adb shell "run-as com.vos.session cat files/audit/audit.jsonl" 2>/dev/null | tail -n +"$((${audit_before:-0} + 1))" | tr -d '\000' > "$out/session-audit.jsonl" || true
 
-python3 -I - "$out" "$budget" > "$out/summary.txt" <<'PY'
+python3 -I - "$out" "$budget" "$ROOT/eval/m1" > "$out/summary.txt" <<'PY'
 import json, re, sys
 out, budget = sys.argv[1], int(sys.argv[2])
+sys.path.insert(0, sys.argv[3])
+import compaction_audit  # the counts-only rule (#334), with its own --self-test
 lines = open(f"{out}/session.txt").read().splitlines()
 starts = [(int(m.group(1)), int(m.group(2)), "over budget" in l) for l in lines
           for m in [re.search(r"context tokens~(\d+) budget=(\d+)", l)] if m and "after turn" not in l]
@@ -220,10 +225,7 @@ def objects(path):  # JSONL objects; a torn line (#319), blank or not JSON, is s
 audit = objects(f"{out}/session-audit.jsonl")
 compacts = [a for a in audit if a.get("event") == "context.compact"]
 failed = [a for a in audit if a.get("event") == "context.compact_failed"]
-counts_only = all(set(a) <= {"ts", "event", "context", "tokens_before", "tokens_after", "budget", "compacted_owner",
-                             "compacted_vos", "compacted_tool_results", "compacted_notes", "model", "taint", "error",
-                             "source"}
-                  for a in compacts + failed)
+not_counts = compaction_audit.problems(compacts + failed)
 tr = objects(f"{out}/transcripts.jsonl")
 turns = []
 for t in tr:
@@ -240,7 +242,8 @@ ring = reply_after(["ring", "up"])
 conv = json.load(open(f"{out}/conversation.json")) if open(f"{out}/conversation.json").read().strip() else {}
 summary = conv.get("summary") or ""
 print(f"turns={len(starts)} max_start_tokens={max((s[0] for s in starts), default=-1)} over_budget={sum(s[2] for s in starts)}")
-print(f"compactions={len(compacts)} failed={len(failed)} counts_only={counts_only}")
+print(f"compactions={len(compacts)} failed={len(failed)} counts_only={not not_counts} "
+      f"not_counts={','.join(not_counts) or 'none'}")
 print(f"sister_answer_has_dana={'dana' in sister.lower()}")
 cites = re.search(r"(you asked|asked me not|told me not|you told me|you said not|your (rule|restriction|request))", ring.lower()) is not None
 raw = '"status"' in summary
@@ -256,7 +259,7 @@ check "the last turn's post-turn compaction finished before scoring" "(( post_do
 check "every turn ended ($n turns, $f fillers)" "(( \$(grep -c 'turn [0-9]*: ended' '$out/run.log') == n ))"
 check "compaction ran at least twice before the recall questions ($before_questions; $(get compactions) in all, failed $(get failed))" "(( before_questions >= 2 ))"
 check "every turn started under the budget (max $(get max_start_tokens) <= $budget, over-budget refusals $(get over_budget))" "(( $(get max_start_tokens) >= 0 && $(get max_start_tokens) <= budget && $(get over_budget) == 0 ))"
-check "each compaction line has counts only" "[ '$(get counts_only)' = True ]"
+check "each compaction line has counts only (not counts: $(get not_counts))" "[ '$(get counts_only)' = True ]"
 check "the sister question gets Dana from the compacted conversation" "[ '$(get sister_answer_has_dana)' = True ]"
 check "the ring volume is unchanged after the last turn ($ring_before -> $ring_after)" "[ '$ring_before' = '$ring_after' ]"
 check "no volume tool ran on the ring stream (lines: $ring_args)" "(( ring_args == 0 ))"
