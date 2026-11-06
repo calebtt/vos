@@ -51,6 +51,20 @@ class ChatChecksTest(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(chat_checks.self_test(), 1)
 
+    def test_a_real_dump_variant_that_fails_fails_the_self_test(self):  # #333: variants must pass, not just run
+        variants = chat_checks.VARIANTS + [("the recording log under the old self-test's heading",
+                                            chat_checks.dump_edit(chat_checks.REC_TITLE, "### Recording Activity"))]
+        with mock.patch.object(chat_checks, "VARIANTS", variants), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(chat_checks.self_test(), 1)
+
+    def test_the_recording_log_is_read_out_of_a_whole_dump(self):  # #333
+        events, problem = chat_checks.recording_log(chat_checks.DUMPSYS_AUDIO)
+        self.assertIsNone(problem)
+        self.assertEqual([e.split(" riid:")[0] for _, e in events],
+                         ["rec start", "rec stop", "rec release", "rec start", "rec stop"])
+        self.assertEqual(chat_checks.recording_log("### Recording Activity\n"), (None, "missing"))
+
     def test_a_stopped_turn_with_no_transcript_line_at_all_passes(self):
         # Stopped before the session wrote the owner's line: no VOS line either, which is what counts.
         with tempfile.TemporaryDirectory() as d:

@@ -226,8 +226,13 @@ adb logcat -d -s VOS_TYPED VOS_AUDIT VOS_TURN | tr -d '\r' > "$out/stop.txt"
 echo "typed stop: $( (( ! stop_pressed )) && echo 'not pressed' || { (( stop_ended )) && echo ended || echo 'did not end'; }) $(grep -o 'typed turn ended.*reason=.*' "$out/stop.txt" | grep -o 'reason=.*' | head -1)"
 echo "== a typed turn after the stop"
 typed_turn typed "Thanks, that is all."
-# The audio service's recording log. If dumpsys has no such section, both AudioRecord checks fail.
-adb shell dumpsys audio | tr -d '\r' | sed -n '/### Recording Activity/,/^$/p' > "$out/recording.txt"
+# The audio service's recording log: all of dumpsys audio is kept, and the checks read the log out of
+# it ("Events log: recording activity received by AudioService", #333). If the dump has no such log,
+# or it cannot be read whole, both AudioRecord checks fail. A failed dump is set aside, not scored.
+if ! adb shell dumpsys audio | tr -d '\r' > "$out/recording.txt"; then
+    mv "$out/recording.txt" "$out/recording.failed.txt"
+    echo "warning: dumpsys audio failed (adb's error, if any, is above); kept as recording.failed.txt, so both AudioRecord checks fail" >&2
+fi
 cat > "$out/facts.txt" <<EOF
 typed_from=$typed_from
 summon_from=$summon_from
