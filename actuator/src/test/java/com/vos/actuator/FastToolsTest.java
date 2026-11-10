@@ -220,6 +220,33 @@ public class FastToolsTest {
     }
 
     @Test
+    public void everyStateChangingToolFailsClosedWhileTheAuditCannotBeWritten() throws Exception {
+        boolean[] writable = {false};
+        FastTools gated = new FastTools(platform, () -> writable[0]);
+        String[][] acts = {
+            {"volume_set", "{\"percent\":30}"},
+            {"volume_step", "{\"direction\":\"up\"}"},
+            {"media_control", "{\"action\":\"pause\"}"},
+            {"shell_nav", "{\"action\":\"home\"}"},
+            {"app_open", "{\"name\":\"Maps\"}"},
+        };
+        for (String[] a : acts) {
+            assertTrue(a[0], FastTools.changesState(a[0]));
+            JSONObject r = gated.run(a[0], a[1], media).json;
+            assertEquals(a[0], "FAILED", r.getString("status"));
+            assertEquals(a[0], FastTools.AUDIT_REFUSED, r.getString("detail"));
+        }
+        assertTrue("nothing was done", platform.acts.isEmpty());
+        assertTrue("no owner intent reached the AudioPlane", intents.isEmpty());
+        assertEquals("a read is not an act: it still runs", "VERIFIED",
+                gated.run("time_get", "{}", media).json.getString("status"));
+
+        writable[0] = true; // the audit healed: the same calls act as before
+        assertEquals("VERIFIED", gated.run("volume_set", "{\"percent\":30}", media).json.getString("status"));
+        assertEquals(List.of("volume 3 8"), platform.acts);
+    }
+
+    @Test
     public void pauseIsVerifiedByTheSessionStateAndTellsTheAudioPlane() throws Exception {
         JSONObject r = run("media_control", "{\"action\":\"pause\"}");
         assertEquals("VERIFIED", r.getString("status"));

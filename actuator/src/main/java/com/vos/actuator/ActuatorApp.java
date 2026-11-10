@@ -28,7 +28,8 @@ public final class ActuatorApp extends Application {
                 new AndroidGuardPlatform(getPackageManager()), audit);
         audioPlatform = new AndroidAudioPlatform(this);
         audioPlane = new AudioPlane(audioPlatform, line -> audit.record(line));
-        fastTools = new FastTools(new AndroidFastToolsPlatform(this));
+        // Fails closed (#340): a state-changing tool is refused while the audit cannot take its line.
+        fastTools = new FastTools(new AndroidFastToolsPlatform(this), audit::writable);
         roleWatch = new RoleWatch(new AndroidRolePlatform(this), line -> audit.record(line));
         roleWatch.check("actuator start");
         // Device-protected storage: the agent mode is honored before the first unlock (decision 20).

@@ -16,7 +16,8 @@ import org.json.JSONObject;
  * actuator's own oracle (P3: "oracle over confession"). A result is VERIFIED only when the oracle
  * saw the effect, UNVERIFIED when the act was done but its effect could not be observed, and FAILED
  * when it was refused or did not happen. Arguments come from the session and are validated here:
- * an unknown tool, an unknown argument or a value out of range is FAILED without acting.
+ * an unknown tool, an unknown argument or a value out of range is FAILED without acting. So is a
+ * state-changing tool while the audit cannot be written ({@link AuditGate}, #340).
  *
  * <p>v0: {@code time_get}, {@code volume_set} (a percentage), {@code volume_step} (up or down),
  * {@code media_control}, {@code shell_nav} (home, back, recents, notifications, quick settings),
@@ -146,10 +147,31 @@ public final class FastTools {
     static final int MAX_CANDIDATES = 5;
     private static final long POLL_MS = 100;
 
+    /**
+     * Whether the audit can record an act now (#340). Every tool that changes the device's state asks
+     * before it acts; false refuses it as FAILED without acting (fail closed), so no act goes
+     * unaudited while the audit is known to be broken. Reads ({@code time_get}) never ask.
+     */
+    public interface AuditGate {
+        boolean writable();
+
+        /** No audit to consult (the JVM tests). */
+        AuditGate OPEN = () -> true;
+    }
+
+    /** The detail of a tool refused because the audit cannot take its line. */
+    static final String AUDIT_REFUSED = "refused: the audit log cannot be written, so VOS does not act";
+
     private final Platform platform;
+    private final AuditGate audit;
 
     public FastTools(Platform platform) {
+        this(platform, AuditGate.OPEN);
+    }
+
+    public FastTools(Platform platform, AuditGate audit) {
         this.platform = platform;
+        this.audit = audit;
     }
 
     private interface Handler {
@@ -196,8 +218,12 @@ public final class FastTools {
         if (!knows(name)) {
             return Result.of(Status.FAILED, "detail", "unknown tool");
         }
+        Tool tool = TOOLS.get(name);
+        if (tool.changesState && !audit.writable()) {
+            return Result.of(Status.FAILED, "detail", AUDIT_REFUSED); // fail closed: nothing was done
+        }
         try {
-            return TOOLS.get(name).handler.run(this, args, media);
+            return tool.handler.run(this, args, media);
         } catch (BadArgs e) {
             return Result.of(Status.FAILED, "detail", e.getMessage());
         } catch (InterruptedException e) {

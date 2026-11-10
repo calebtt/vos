@@ -44,6 +44,12 @@ import org.json.JSONObject;
  * legacy prefix it must carry {@link #GENESIS}. A record without {@code prev} after the first chained
  * one is a break, as before.
  *
+ * <p>What the chain cannot see (#340). Every check is relative to the file itself, so a tail cut at
+ * a line boundary (the last N records gone) and a whole file rewritten from genesis both verify,
+ * unless {@link #verify(byte[], String)} gets a head kept somewhere the editor could not change; the
+ * writer's own head is recovered from the file at startup, so it is no such anchor.
+ * {@link AuditCheckpoint} and docs/design/audit-chain-anchor.md cover that.
+ *
  * <p>Known limit. A whole record that lost only its newline in a power
  * cut is an unfinished line when the writer recovers, so the writer chains past it; once the next
  * append's repair gives it a newline it is a record, and the link after it reads as a change rather
@@ -63,7 +69,12 @@ public final class AuditChain {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
-        StringBuilder b = new StringBuilder(64);
+        return hex(d);
+    }
+
+    /** Lowercase hex of {@code d}. */
+    static String hex(byte[] d) {
+        StringBuilder b = new StringBuilder(d.length * 2);
         for (byte x : d) {
             b.append(Character.forDigit((x >> 4) & 0xf, 16)).append(Character.forDigit(x & 0xf, 16));
         }

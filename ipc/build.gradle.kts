@@ -12,6 +12,7 @@ android {
 
     buildFeatures {
         aidl = true
+        buildConfig = true // BuildConfig.DEBUG: only a debug build mirrors audit lines to logcat (#340)
     }
 
     compileOptions {
