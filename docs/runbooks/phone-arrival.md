@@ -43,7 +43,7 @@ image/build.sh --device panther \
 vos_ota="$(ls -t "${VOS_IMAGE_OUT:-out/images}"/*/vos-panther-"$build"-s01-hello-*.zip | head -1)"   # the image just built
 ```
 
-0.4 **If the build changed** [desk-verified only as the DAY0 §6–7 recipe that ran 2026-10-18 for `2026101600`/`2026101601`; for a newer build **not yet verified**]: download and verify the new build's factory zip and full OTA (DAY0 §6), `avbroot ota verify` the OTA against `image/pins/grapheneos-ota-panther.crt` (DAY0 §7), add the firmware rows to `docs/DEVICES.md`, then 0.3.
+0.4 **If the build changed** [not yet verified for a new build; DAY0 §6–7 ran 2026-10-18 for 2026101600/01]: download and verify the new build's factory zip and full OTA (DAY0 §6), `avbroot ota verify` the OTA against `image/pins/grapheneos-ota-panther.crt` (DAY0 §7), add the firmware rows to `docs/DEVICES.md`, then 0.3.
 
 ## 1. First connection
 
@@ -150,7 +150,7 @@ What is installed (S-01.md, 2026-10-18): sandboxed Play, `com.google.android.gms
 4.1 **Remove** [phone only; **not yet verified**, minimal standard steps]. Sandboxed Play is an optional, unprivileged app on GrapheneOS (TARGET-PLAN "Decisions on one screen", §4), so uninstall it like one: Settings › Apps › each Google package › Uninstall, or
 
 ```bash
-adb shell pm list packages | grep -i google    # see what is there first; GrapheneOS's sandboxed Play may include more than the two above
+adb shell pm list packages | grep -iE 'google|com\.android\.vending'    # see what is there first; GrapheneOS's sandboxed Play may include more than the two above
 adb shell pm uninstall com.android.vending
 adb shell pm uninstall com.google.android.gms
 # and any other Google package the list showed (e.g. com.google.android.gsf: not recorded in the repo)
@@ -161,34 +161,35 @@ Apps that depend on Play (banking, push) may stop working; that inventory is S-2
 4.2 **Verify Play is absent** [phone only]: no Google package in `pm list packages` (the oracle M4-GOOG-01 uses, TARGET-PLAN §6 M4):
 
 ```bash
-adb shell pm list packages | grep -i google    # expect: no output
+adb shell pm list packages | grep -iE 'google|com\.android\.vending'    # expect: no output
 ```
 
-4.3 **Install the debug pair for the M1 suite** [phone only; the fixed install path is tested offline only, `ci/tests/test_install_apps.py`, not yet on any device]. A freshly wiped or Play-removed phone is a fresh device for VOS: install through `vos_install_apps` (session first, then actuator, both cross grants checked, #341), which every `eval/m1` runner does. By hand, the same order:
+4.3 **Install the debug pair for the M1 suite** [phone only; the fixed install path is tested offline only, `ci/tests/test_install_apps.py`, not yet on any device]. A freshly wiped or Play-removed phone is a fresh device for VOS: install through `vos_install_apps` (session first, then actuator, then the session again on a fresh device, both cross grants checked, #341), which every `eval/m1` runner does. On a fresh device the app installed first always lacks its grant (session first: the session lacks `SESSION`), so one reinstall of the session is expected. By hand: session, actuator, session again, then check both grants:
 
 ```bash
 adb install -r -t session/build/outputs/apk/debug/session-debug.apk
 adb install -r -t actuator/build/outputs/apk/debug/actuator-debug.apk
+adb install -r -t session/build/outputs/apk/debug/session-debug.apk
 adb shell dumpsys package com.vos.actuator | grep 'com.vos.permission.ACTUATOR: granted=true'
 adb shell dumpsys package com.vos.session  | grep 'com.vos.permission.SESSION: granted=true'
-# a missing line: reinstall that app once with adb install -r -t
+# on a fresh device the session line is missing until the session is reinstalled
 ```
 
 4.4 **The M1 suite**: the runners in eval/README.md's table, each with its own preconditions there. Mechanics proven on the emulator, still to be proven on the phone:
 
 | Mechanic | Emulator (API 36 lane) | Phone B |
 |---|---|---|
-| `cmd role add-role-holder android.app.role.ASSISTANT com.vos.actuator 0` gives the actuator the role; `KEYCODE_ASSIST` opens a turn (`m1/assistant.sh`, M1-ROLE-01) | [emulator-verified 2026-11-10] | [phone only]: the timing to the first mic buffer means something only on the real mic (eval/README.md) |
-| `cmd role clear-role-holders` gives the lost-role notice (`assistant.sh --stand-in`) | [emulator-verified 2026-11-10] | [phone only] |
+| `cmd role add-role-holder android.app.role.ASSISTANT com.vos.actuator 0` gives the actuator the role; `KEYCODE_ASSIST` opens a turn (`m1/assistant.sh`, M1-ROLE-01; the mechanic only; the runner itself is Phone B, eval/README.md) | [emulator-verified 2026-11-10] | [phone only]: the timing to the first mic buffer means something only on the real mic (eval/README.md) |
+| `cmd role clear-role-holders android.app.role.ASSISTANT 0` gives the lost-role notice. `assistant.sh --stand-in` covers the same notice through `add-role-holder`/`remove-role-holder` with a stand-in app | [emulator-verified 2026-11-10] | [phone only] |
 | Keyguard set/clear through `locksettings` (locked and unlocked legs) | [emulator-verified 2026-11-10] | [phone only]: lock and unlock by hand; never put the owner's PIN on a command line |
-| SMS and call signaling (`adb emu sms send`, `adb emu gsm call`) | [emulator-verified 2026-11-10] | none: Phone B has no SIM and is never used for calling tests (TARGET-PLAN §7) |
+| SMS and call signaling (`adb emu sms send`, `adb emu gsm call`) | [emulator-verified 2026-11-10] | none: on Phone B no test sends an SMS or places or answers a call (TARGET-PLAN comms device rule, M2, and eval house rule 2); Phone B has no SIM (the Pixel 8a holds the only SIM, Caleb 2026-10-18: "the only sim we have is on the pixel 8a") |
 | AEC, Bluetooth headset audio | not available on the emulator | [phone only] (`m1/echo-barge.sh`, S-27a step 8) |
 
 ## 5. Pause sweep (#247): `docs/runbooks/turn-detection-sweep.md`
 
-5.1 **Owner's go-ahead first.** Every trial is a real `grok-voice-3.0` turn and fixture synthesis is a paid call: the sweep makes **paid vendor calls** and runs only when Caleb says so. [phone only]
+5.1 **Owner's go-ahead first.** Every trial is a real `grok-voice-3.0` turn and fixture synthesis is a paid call: the sweep makes **paid vendor calls** and runs only when Caleb says so.
 
-5.2 **Preconditions** (the sweep runbook's "Ground rules" and "Setup") [phone only]: debug builds of both apps (release builds ignore the overrides); `ANDROID_SERIAL` set; 08:00–22:00; installed with `vos_install_apps` (session first, #341); `vos_grant_mic`; a sealed key (`vos_seal_key_if_missing`); `vos_clear_debug_overrides`; the pause fixtures made once and reused. Then its sections 1–5; results to #247.
+5.2 **Preconditions** (the sweep runbook's "Ground rules" and "Setup") [phone only]: debug builds of both apps (release builds ignore the overrides); `ANDROID_SERIAL` set; 08:00–22:00; installed with `vos_install_apps` (session first, then the actuator, then the session again on a fresh device, #341); `vos_grant_mic`; a sealed key (`vos_seal_key_if_missing`); `vos_clear_debug_overrides`; the pause fixtures made once and reused. Then its sections 1–5; results to #247.
 
 5.3 **Emulator pre-check limits** [emulator-verified 2026-11-10]: on the API 36 lane, mic injection for the sweep works only through the emulator's token-protected gRPC `injectAudio`, with the mic already open; injecting while no app is recording crashes the emulator. AEC is not available there and Bluetooth headset audio cannot be tested. The numbers that pick the values come from Phone B only.
 

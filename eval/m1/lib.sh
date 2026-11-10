@@ -27,7 +27,8 @@ vos_daytime_only() {
 # installed, the app installed before the other's definition exists is left without that permission,
 # and every turn then fails to bind (#341). Upgrades are not affected. So after both installs it reads
 # both grants back, reinstalls an app that lacks its grant once, and returns 1 (loudly) if one is
-# still missing. Returns 1 rather than exiting: the sweep runbook calls it from an interactive shell.
+# still missing. Returns 1 rather than exiting: the sweep runbook calls it from an interactive shell
+# (as `vos_install_apps || echo "STOP: ..."`); runners under set -e exit 1 on it.
 # shellcheck disable=SC2120 # the extra APKs are optional; most runners pass none
 vos_install_apps() {
     local apk

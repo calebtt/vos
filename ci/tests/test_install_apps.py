@@ -18,7 +18,7 @@ set -euo pipefail
 ROOT="$1"
 source "$ROOT/eval/m1/lib.sh"
 LOG="$2" MODE="$3"
-pkg_of() { case "$1" in *actuator*) echo com.vos.actuator ;; *session*) echo com.vos.session ;; *) echo other ;; esac; }
+pkg_of() { case "${1##*/}" in actuator-*) echo com.vos.actuator ;; session-*) echo com.vos.session ;; *) echo other ;; esac; }
 # granted PKG PEER: PKG's last install came after PEER's first install, unless MODE says never.
 granted() {
     [[ $MODE == never && $1 == com.vos.actuator ]] && return 1
