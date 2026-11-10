@@ -19,8 +19,28 @@ that catches:
 
 The last two pass because every check compares the file with itself. `verify(raw, head)` also
 checks the newest record against a head, but the only head that exists is the writer's in-memory
-one. That head is recovered from the file at startup, and `JsonlAudit.chainHead()` has no caller,
-so after a restart the head agrees with whatever file is on disk.
+one. That head is recovered from the file at startup, and `JsonlAudit.chainHead()` has no
+production caller, so after a restart the head agrees with whatever file is on disk.
+
+## The fail-closed gate today (#340)
+
+What the gate covers:
+
+- **Scope:** state-changing acts by the actuator only. Every state-changing fast tool is refused,
+  with nothing done, while `JsonlAudit.writable()` is false.
+- **When it is false:** the chain head is unknown. That happens after a failed write, or when the
+  head cannot be recovered at startup.
+- **How it heals:** the next line written recovers the head from the file, and a successful write
+  makes the audit writable again.
+- **When it does not heal:** recovery needs a complete record within the file's last `MAX_TAIL`
+  (4 MiB) bytes, and a readable file. If either is missing, every state-changing tool stays refused
+  until the owner deals with the file. M2 needs an owner acknowledgement flow for this, the same
+  one an anchor mismatch uses (below).
+
+Open question for the owner: the session's model egress is **not** gated. The session writes a
+`model.pick` line to its own audit, then sends the request to the vendor whether or not that line
+was written. Should an upload be refused when its audit line cannot be written (compare P12, "every
+upload is audited")? This change leaves it ungated on purpose.
 
 ## Threat
 
@@ -85,8 +105,18 @@ escape, which UID separation (§3.1) already covers.
 
 ## Retention and rotation (30 days)
 
-Rotation (`AuditFile.rotate`) renames the file. A new file starts at genesis or, better, at the
-last head of the previous file. With 30-day retention the oldest files are deleted, so:
+Rotation (`AuditFile.rotate`) renames the file. A new file should start at the last head of the
+previous file rather than at genesis, so the files chain into each other.
+
+That does not work today. `AuditChain.verify` expects a file's first chained record to carry
+`GENESIS`, or to follow a legacy prefix. The `Writer` also keeps its in-memory head across
+`AuditFile.rotate`. So the first record of a rotated file carries the previous file's head, and
+`verify` reports a break there. Before rotation ships, one of these has to change:
+
+- `verify` takes a starting head (from the previous file, or from an `audit.retention` record);
+- or each file opens with a header record that names its starting head.
+
+With 30-day retention the oldest files are deleted, so:
 
 - A checkpoint names a head in a specific file. Each checkpoint should record which file it covers
   (its first record's hash), and each rotation should write a closing checkpoint for the old file
@@ -114,10 +144,13 @@ Today's row ("change one byte, verification fails at that line") stays. Add:
    resumes once a line is written again.
 7. In a release build, run a turn and check that logcat has no `VOS_AUDIT` line contents.
 8. Rotate the log and let a file expire: verification still passes across the boundary, and the
-   expiry shows up as an `audit.retention` record.
+   expiry shows up as an `audit.retention` record. This case cannot pass until `verify` takes a
+   starting head or files get a header record (see Retention and rotation).
+9. Make the head unrecoverable (no complete record in the last 4 MiB): every state-changing tool
+   stays refused across writes and restarts until the owner acknowledges it.
 
 Some of this has JVM tests already. `AuditChainLimitsTest` covers case 1, plus the helper-level
 parts of cases 2 to 5 (for case 5 it asserts the local-only limit). `JsonlAuditTest` and
-`FastToolsTest` cover case 6. The device runs and the wiring are still to do. The "not detected"
+`FastToolsTest` cover case 6, and `JsonlAuditTest` covers the JVM half of case 9. The device runs and the wiring are still to do. The "not detected"
 tests in `AuditChainLimitsTest` assert the chain-only behaviour; change them when the anchor is
 wired.

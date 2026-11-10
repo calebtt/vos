@@ -230,8 +230,18 @@ public class FastToolsTest {
             {"shell_nav", "{\"action\":\"home\"}"},
             {"app_open", "{\"name\":\"Maps\"}"},
         };
+        java.util.Set<String> listed = new java.util.HashSet<>();
         for (String[] a : acts) {
-            assertTrue(a[0], FastTools.changesState(a[0]));
+            listed.add(a[0]);
+        }
+        java.util.Set<String> stateChanging = new java.util.HashSet<>();
+        for (String n : FastTools.NAMES) {
+            if (FastTools.changesState(n)) {
+                stateChanging.add(n);
+            }
+        }
+        assertEquals("every state-changing tool is covered here", stateChanging, listed);
+        for (String[] a : acts) {
             JSONObject r = gated.run(a[0], a[1], media).json;
             assertEquals(a[0], "FAILED", r.getString("status"));
             assertEquals(a[0], FastTools.AUDIT_REFUSED, r.getString("detail"));

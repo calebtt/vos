@@ -9,6 +9,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -117,7 +118,7 @@ public class JsonlAuditTest {
     public void anUnrecoverableHeadIsNotWritable() throws Exception {
         File f = new File(tmp.getRoot(), "audit.jsonl");
         byte[] junk = new byte[AuditChain.MAX_TAIL + 1]; // no complete record in the last MAX_TAIL bytes
-        java.util.Arrays.fill(junk, (byte) 'x');
+        Arrays.fill(junk, (byte) 'x');
         Files.write(f.toPath(), junk);
         JsonlAudit a = audit(f, false);
         assertNull(a.chainHead());

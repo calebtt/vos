@@ -5,12 +5,16 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.json.JSONObject;
 import org.junit.Rule;
 import org.junit.Test;
@@ -111,7 +115,7 @@ public class AuditChainLimitsTest {
         List<String> heads = log(6);
         File forged = new File(tmp.getRoot(), "forged.jsonl");
         write(forged, 3, "time_get#"); // a different, innocent-looking history
-        Files.move(forged.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Files.move(forged.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
         assertTrue(AuditChain.verify(file, null).ok());
         assertTrue(AuditChain.verify(file, AuditChain.recoverHead(file)).ok());
         assertFalse("only the old head sees it", AuditChain.verify(file, heads.get(5)).ok());
@@ -135,7 +139,7 @@ public class AuditChainLimitsTest {
         AuditCheckpoint cp = AuditCheckpoint.sign(heads.get(5), 2000, KEY);
         File forged = new File(tmp.getRoot(), "forged.jsonl");
         List<String> forgedHeads = write(forged, 3, "time_get#");
-        Files.move(forged.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Files.move(forged.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
         assertEquals(AuditCheckpoint.Verdict.HEAD_MISSING, AuditCheckpoint.check(bytes(), cp, KEY));
         // Without the key the editor cannot sign the forged head, and an edited checkpoint fails.
         AuditCheckpoint guess = AuditCheckpoint.sign(forgedHeads.get(2), 2000, OTHER_KEY);
@@ -155,10 +159,52 @@ public class AuditChainLimitsTest {
         assertTrue(back.authentic(KEY));
         assertEquals("an empty log's checkpoint holds for any log", AuditCheckpoint.Verdict.OK,
                 AuditCheckpoint.check(new byte[0], back, KEY));
+        assertNull(AuditCheckpoint.parse(null));
         assertNull(AuditCheckpoint.parse("not json"));
         assertNull(AuditCheckpoint.parse("{\"v\":2}"));
-        assertNull(AuditCheckpoint.parse("{\"v\":1,\"head\":\"ab\",\"ts\":1,\"mac\":\"00\"}"));
+
+        String head = "ab".repeat(32);
+        String mac = "cd".repeat(AuditCheckpoint.MAC_BYTES);
+        String good = "{\"v\":1,\"head\":\"" + head + "\",\"ts\":7,\"mac\":\"" + mac + "\"}";
+        AuditCheckpoint parsed = AuditCheckpoint.parse(good);
+        assertEquals(head, parsed.head);
+        assertEquals(7, parsed.ts);
+        String[] junk = {
+            good.replace("\"v\":1", "\"v\":\"1\""), // v must be the integer 1, not a string
+            good.replace("\"v\":1", "\"v\":1.5"),
+            good.replace("\"v\":1,", ""),
+            good.replace("\"ts\":7", "\"ts\":\"7\""), // ts must be a number
+            good.replace("\"ts\":7", "\"ts\":7.5"), // and a whole one
+            good.replace("\"ts\":7,", ""),
+            good.replace(head, "ab"), // head: 64 lowercase hex digits
+            good.replace(head, head.toUpperCase(Locale.ROOT)),
+            good.replace(head, "zz" + head.substring(2)),
+            good.replace("\"head\":\"" + head + "\"", "\"head\":1"),
+            good.replace(mac, "cd"), // mac: exactly 32 bytes
+            good.replace(mac, mac + "cd"),
+            good.replace(mac, "zz" + mac.substring(2)),
+            good.replace(mac, mac.toUpperCase(Locale.ROOT)),
+            good.replace(mac, mac.substring(1)),
+        };
+        for (String j : junk) {
+            assertNull(j, AuditCheckpoint.parse(j));
+        }
         assertNull(AuditCheckpoint.parse(cp.toJson().replace("\"mac\":\"", "\"mac\":\"zz")));
+
+        for (String bad : new String[] {null, "ab", AuditChain.GENESIS.toUpperCase(Locale.ROOT).replace('0', 'A')}) {
+            try {
+                AuditCheckpoint.sign(bad, 1, KEY);
+                fail("signed a non-head: " + bad);
+            } catch (IllegalArgumentException expected) {
+                // a checkpoint only ever names a chain head
+            }
+        }
+        try {
+            AuditCheckpoint.sign(AuditChain.GENESIS, 1, data -> new byte[16]);
+            fail("a 16-byte MAC was accepted");
+        } catch (GeneralSecurityException expected) {
+            // HMAC-SHA256 only
+        }
     }
 
     /** The anchor's documented limits: asserted so a change to them is a decision, not a surprise. */

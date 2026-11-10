@@ -29,14 +29,24 @@ import org.json.JSONObject;
  * count and the exception, whose message names the file, never the record (#340).
  *
  * <p>Fail-closed contract (#340). {@link #record} returns whether the line reached the file; logging
- * may ignore that (best effort). A path that performs an externally visible or irreversible act must
- * not act unless the audit can take its line: it checks {@link #writable()} (the head is known and
- * the last write succeeded) before acting and refuses with a FAILED result otherwise. An
- * irreversible act (none is wired in M1) must also write its intent line first and act only if
- * {@link #record} returned true, because {@link #writable()} cannot see a failure that has not
- * happened yet. The writable state heals: the next line that reaches the file (the refusal's own
- * line, for instance) makes it true again. A record that cannot be linked is never appended
+ * may ignore that (best effort). An externally visible or irreversible act <em>by the actuator</em>
+ * must not happen unless the audit can take its line: the acting path checks {@link #writable()}
+ * before acting and refuses with a FAILED result otherwise (today: every state-changing fast tool,
+ * gated in {@code FastTools.run}). An irreversible act (none is wired in M1) must also write its
+ * intent line first and act only if {@link #record} returned true, because {@link #writable()}
+ * cannot see a failure that has not happened yet. A record that cannot be linked is never appended
  * ({@link AuditChain.Writer} fails closed).
+ *
+ * <p>Healing. After a failed write the head is unknown; the next {@link #record} (the refusal's own
+ * line, for instance) recovers it from the file and, if the write succeeds, the audit is writable
+ * again. That needs a recoverable head: if the last {@link AuditChain#MAX_TAIL} bytes of the file
+ * hold no complete record (or the file cannot be read), recovery keeps failing and every
+ * state-changing tool stays refused until the owner acts on the file (M2: an owner acknowledgement
+ * flow; docs/design/audit-chain-anchor.md).
+ *
+ * <p>Not gated. The session's own acts are outside this contract: its model egress (a
+ * {@code model.pick} line in the session's audit, then the request to the vendor) goes ahead whether
+ * or not that line was written. Whether to gate it is an open question for the owner (the design doc).
  */
 public final class JsonlAudit implements BinderGuard.Audit {
     public static final String TAG = "VOS_AUDIT";
@@ -65,7 +75,6 @@ public final class JsonlAudit implements BinderGuard.Audit {
     private final AuditChain.Writer chain;
     private final boolean mirror;
     private final Logcat logcat;
-    private boolean lastWriteOk = true; // guarded by this
     private long failures; // guarded by this
 
     public JsonlAudit(Context context) {
@@ -87,11 +96,13 @@ public final class JsonlAudit implements BinderGuard.Audit {
 
     /**
      * Whether the audit can take a line now: the chain's head is known (recovered at startup, or by a
-     * later write) and the last write reached the file. False: an act must be refused (the class
-     * comment's contract). It does not probe the disk, so a write can still fail after a true.
+     * later write). The writer clears the head on every failed write, so this is also "the last write
+     * reached the file", read under the writer's own lock (no second flag to order against it).
+     * False: an act must be refused (the class comment's contract). It does not probe the disk, so a
+     * write can still fail after a true.
      */
-    public synchronized boolean writable() {
-        return lastWriteOk && chain.head() != null;
+    public boolean writable() {
+        return chain.head() != null;
     }
 
     /** How many lines this audit failed to write since it was built. */
@@ -130,8 +141,10 @@ public final class JsonlAudit implements BinderGuard.Audit {
 
     /**
      * One audit line from a map whose {@code "event"} entry names it (e.g. the AudioPlane's
-     * transitions). Values: strings, numbers, booleans, null, or collections of those. Returns
-     * whether the line reached the file; a caller about to act irreversibly acts only on true.
+     * transitions). Values: strings, numbers, booleans, null, or collections of those. Returns true
+     * when the line, and the {@code audit.torn_tail} note if one was due, reached the file. False
+     * means the line or its torn-tail note was not written (the line may be in the file without its
+     * note). A caller about to act irreversibly acts only on true.
      */
     public boolean record(Map<String, Object> fields) {
         JSONObject o = new JSONObject();
@@ -161,15 +174,11 @@ public final class JsonlAudit implements BinderGuard.Audit {
         } catch (IOException e) {
             long n;
             synchronized (this) {
-                lastWriteOk = false;
                 n = ++failures;
             }
-            // Never the record's contents, in any build: the line is lost, and logcat is not the audit.
-            logcat.error("audit write failed (" + n + " so far); the line was not written", e);
+            // Never the record's contents, in any build: logcat is not the audit.
+            logcat.error("audit write failed (" + n + " so far); the line or its torn-tail note was not written", e);
             return false;
-        }
-        synchronized (this) {
-            lastWriteOk = true;
         }
         if (mirror) {
             for (String line : written) {

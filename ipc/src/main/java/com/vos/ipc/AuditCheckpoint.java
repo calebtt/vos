@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -30,13 +31,15 @@ public final class AuditCheckpoint {
     public static Key hmacSha256(byte[] key) {
         byte[] k = key.clone();
         return data -> {
-            javax.crypto.Mac m = javax.crypto.Mac.getInstance("HmacSHA256");
+            Mac m = Mac.getInstance("HmacSHA256");
             m.init(new SecretKeySpec(k, "HmacSHA256"));
             return m.doFinal(data);
         };
     }
 
     private static final String DOMAIN = "vos-audit-checkpoint-v1\n";
+    /** HMAC-SHA256's output, in bytes. */
+    static final int MAC_BYTES = 32;
 
     /** The chain head this checkpoint names: {@link AuditChain.Writer#head()} when it was taken. */
     public final String head;
@@ -52,10 +55,14 @@ public final class AuditCheckpoint {
 
     /** A checkpoint of {@code head} at {@code ts}, signed with {@code key}. */
     public static AuditCheckpoint sign(String head, long ts, Key key) throws GeneralSecurityException {
-        if (head == null || head.length() != 64) {
-            throw new IllegalArgumentException("head must be a chain head");
+        if (!AuditChain.isSha256Hex(head)) {
+            throw new IllegalArgumentException("head must be a chain head: 64 lowercase hex digits");
         }
-        return new AuditCheckpoint(head, ts, key.mac(signed(head, ts)));
+        byte[] mac = key.mac(signed(head, ts));
+        if (mac.length != MAC_BYTES) {
+            throw new GeneralSecurityException("the checkpoint key must be HMAC-SHA256");
+        }
+        return new AuditCheckpoint(head, ts, mac);
     }
 
     private static byte[] signed(String head, long ts) {
@@ -72,18 +79,34 @@ public final class AuditCheckpoint {
         }
     }
 
-    /** The checkpoint in {@code json}, or null if it is not one. Not yet checked: see {@link #authentic}. */
+    /**
+     * The checkpoint in {@code json}, or null if it is not exactly one: {@code v} the integer 1,
+     * {@code head} 64 lowercase hex digits, {@code ts} an integer, {@code mac} 32 bytes in hex. No
+     * coercion (a string "1" or a fractional ts is rejected). Not yet checked: see {@link #authentic}.
+     */
     public static AuditCheckpoint parse(String json) {
         JSONObject o = json == null ? null : AuditFile.object(json);
-        if (o == null || o.optInt("v") != 1) {
+        if (o == null) {
             return null;
         }
-        String head = o.optString("head", "");
-        byte[] mac = unhex(o.optString("mac", ""));
-        if (head.length() != 64 || mac == null || !o.has("ts")) {
+        Object v = o.opt("v");
+        Object head = o.opt("head");
+        Object ts = o.opt("ts");
+        Object mac = o.opt("mac");
+        if (!isInteger(v) || ((Number) v).longValue() != 1 || !isInteger(ts)
+                || !(head instanceof String) || !AuditChain.isSha256Hex((String) head)
+                || !(mac instanceof String)) {
             return null;
         }
-        return new AuditCheckpoint(head, o.optLong("ts"), mac);
+        byte[] m = unhex((String) mac);
+        if (m == null || m.length != MAC_BYTES) {
+            return null;
+        }
+        return new AuditCheckpoint((String) head, ((Number) ts).longValue(), m);
+    }
+
+    private static boolean isInteger(Object x) {
+        return x instanceof Integer || x instanceof Long;
     }
 
     /** Whether {@code key} signed this checkpoint (constant-time compare). */
@@ -129,14 +152,19 @@ public final class AuditCheckpoint {
         return Verdict.HEAD_MISSING;
     }
 
+    private static int lowerHexDigit(char c) {
+        return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+    }
+
+    /** Lowercase hex to bytes, or null (as {@link #toJson} writes it). */
     private static byte[] unhex(String s) {
         if (s.length() % 2 != 0 || s.isEmpty()) {
             return null;
         }
         byte[] b = new byte[s.length() / 2];
         for (int i = 0; i < b.length; i++) {
-            int hi = Character.digit(s.charAt(2 * i), 16);
-            int lo = Character.digit(s.charAt(2 * i + 1), 16);
+            int hi = lowerHexDigit(s.charAt(2 * i));
+            int lo = lowerHexDigit(s.charAt(2 * i + 1));
             if (hi < 0 || lo < 0) {
                 return null;
             }

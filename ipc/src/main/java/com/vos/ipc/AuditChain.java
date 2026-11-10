@@ -174,7 +174,8 @@ public final class AuditChain {
         return !text.isBlank() && AuditFile.object(text) != null;
     }
 
-    private static boolean isSha256Hex(String s) {
+    /** Whether {@code s} is 64 lowercase hex digits (a chain head or {@code prev}). */
+    static boolean isSha256Hex(String s) {
         if (s == null || s.length() != 64) {
             return false;
         }
@@ -214,7 +215,9 @@ public final class AuditChain {
 
         /**
          * Sets {@code o}'s {@code prev}, appends it, and returns the lines written, in order: the
-         * record, then the {@code audit.torn_tail} note if the tail was torn.
+         * record, then the {@code audit.torn_tail} note if the tail was torn. Every IOException it
+         * throws leaves {@link #head()} null (a failed recovery, or a failed write of the record or
+         * the note); {@code JsonlAudit.writable()} relies on that.
          */
         public synchronized List<String> append(JSONObject o) throws IOException {
             List<String> written = new ArrayList<>(2);
