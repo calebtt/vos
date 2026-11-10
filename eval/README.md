@@ -26,3 +26,66 @@ Exit codes: 0 PASS, 1 FAIL (a defect), 2 usage error, 3 SKIP. A runner that find
 [`m1/make_fixture.py`](m1/make_fixture.py) caches each spoken fixture it has verified (#313), so a rerun makes only the turn's own xAI calls. The cache lives in `$VOS_FIXTURE_CACHE_DIR`, or `eval/runs/fixture-cache/` in the checkout if that is unset (gitignored). Each entry is keyed by a sha256 over the text and every synthesis input (model URL, voice, audio format, instructions, prompt template, cache version), so changing any of them makes a new entry. A sidecar records the entry's length and sha256: a damaged entry counts as a miss and is rebuilt. A hit needs neither `GROK_API_KEY` nor `websockets`. Set `VOS_FIXTURE_CACHE=0` to bypass the cache (it then neither reads nor writes). Its stderr says `hit`, `miss` or `off`. `ci/tests/test_make_fixture.py` tests the cache offline with a fake synthesizer (`./gradlew policyCheckTests`).
 
 `m1/auth-probe/` is the on-device probe (`AuthProbe`, a plain `Instrumentation` with no AndroidX), compiled into the androidTest APKs and the fixtures. It reaches a service three ways: through `PeerLink` with the protocol-version handshake, by a raw `transact()` (the guard in `onTransact`), and by `Stub.asInterface()` (in the same process, a direct call on the Stub, so the guard inside each method). The two `ok` cases also time 200 guarded calls and record p50/p95 in `results.tsv`. With `-e probe mic` it runs `MicProbe` instead (M1-AUD-02: the session tries to record). `fixtures/auth/` builds two fixture APKs: `wrongpkg` (same debug cert, wrong package) and `foreign` (a throwaway key made in `build/` at build time).
+
+## Emulator lane
+
+A headless AOSP emulator runs the checks that need no real microphone, speaker, radio or bootloader, so a change gets device evidence without touching Phone B (#314). It is a pre-check, not acceptance: a PASS here does not replace the same test on Phone B. The image is not the target build (Phone B runs Android 17, API 37; the lane runs API 35 or 36), it has no real audio path, and the differences listed below are real. Where the Device column above says only "Phone B", the tables here say whether the runner also works on the emulator.
+
+| AVD | System image | Android | Use |
+|---|---|---|---|
+| `vos_emu_lane_api35` | `system-images;android-35;default;x86_64` | 15 | the lane so far |
+| `vos_emu_lane_api36` | `system-images;android-36;default;x86_64` | 16 | the closest published image to Phone B |
+
+`default` is the AOSP image: no Google APIs, no Play. The SDK publishes no API 37 image yet. When it does, add it to [`emulator/create-avd.sh`](emulator/create-avd.sh) and to this table, and move the lane to it.
+
+### Create and start
+
+```sh
+eval/emulator/create-avd.sh 36             # or 35; needs ANDROID_HOME (or ANDROID_SDK_ROOT)
+eval "$(eval/emulator/start-avd.sh 36)"    # boots it on port 5584 and exports ANDROID_SERIAL=emulator-5584
+adb -s "$ANDROID_SERIAL" wait-for-device shell 'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done'
+```
+
+- [`emulator/create-avd.sh`](emulator/create-avd.sh) installs the image and the emulator with `sdkmanager` if the SDK lacks them, then runs `avdmanager create avd` (hardware profile `pixel_7`, or `--device`). An AVD that exists is left alone; `--force` recreates it and discards its data. `--dry-run` prints the commands. It never calls adb.
+- [`emulator/start-avd.sh`](emulator/start-avd.sh) runs `emulator -avd NAME -port 5584 -no-window -no-audio -no-boot-anim -no-snapshot-save -gpu swiftshader_indirect -memory 4096 -cores 4` in the background and prints the `export ANDROID_SERIAL=...` line on stdout. The console port fixes the serial: port 5584 is always `emulator-5584`. It refuses a port that is in use, so run one lane AVD at a time or give the second another even port (`--port 5586`). It never calls adb either.
+- Stop the emulator with `adb -s emulator-5584 emu kill`.
+
+### Keeping the lane off Phone B
+
+Every runner calls plain `adb`, and `ANDROID_SERIAL` picks the device. With it unset and one device attached, adb uses that device, which may be the phone: the runners install APKs, grant permissions and change volumes.
+
+- Never run an eval script with `ANDROID_SERIAL` unset while a phone is attached. Export `ANDROID_SERIAL=emulator-5584` before the first adb or eval command of a lane run, and check the `... on <serial> (<fingerprint>)` line each runner prints first.
+- Pass `-s emulator-<port>` to any adb command of your own in a lane run, never a phone's serial.
+
+### What runs there
+
+A lane run builds and unit-tests first (the Gradle unit tests and debug APKs, the Python tests in `ci/tests`), installs the debug actuator and session with `adb install -r -t`, then runs the keyless runners. The keyed runners are an explicit opt-in, because they cost xAI API calls.
+
+| Runs on the emulator | Needs | Notes |
+|---|---|---|
+| `m1/auth-01.sh` | nothing | |
+| `m1/aud-02.sh` | debug builds installed | With `--control`, the control leg PASSes when the actuator's probe records (seen on API 36). On an emulator where the probe holds the permission but records nothing (seen on API 35, #311) it prints `SKIP control: ...` and is not counted; the run still ends PASS, exit 0. |
+| `m1/turn-pipes.sh` | nothing | File mic and file speaker. Not `--live-mic`. |
+| `m2/audit-01.sh --device` | an actuator audit with chained lines: run it after `turn-pipes.sh` | Read only. On a fresh AVD with no audit yet it is a FAIL, not a SKIP. |
+| `m1/voice-roundtrip.sh`, `m1/fast-tools.sh`, `m1/indicator.sh`, `m1/chat.sh`, `m1/context-budget.sh` | `GROK_API_KEY`, network, python3 with `websockets` | Each turn costs xAI API calls; fixture audio is cached after the first run (#313). Without `--speaker`. `indicator.sh` turns VOS's accessibility service on for the run, which it does only on an emulator. `chat.sh` and `context-budget.sh` run there since #312, #333 and #334. |
+| `m1/key-01.sh`, `m1/model-02.sh` | a session that has sealed its key and used the network: run them after a keyed runner | They call no vendor and need no key in the environment (`key-01.sh` also scans for the exact key if `XAI_API_KEY` or `GROK_API_KEY` is set). On an AVD that has had no keyed turn they SKIP, exit 3. |
+
+The `--self-test` modes (`aud-02`, `key-01`, `model-02`, `chat`, `context-budget`, `m2/audit-01`) need no device at all.
+
+| Does not run on the emulator | Why |
+|---|---|
+| `m1/echo-barge.sh` | Plays replies on the phone speaker and listens with the live mic in a quiet room; the lane has no audio. |
+| `m1/assistant.sh` | Live-mic assist summons: it times each summon to the first non-zero mic buffer of a real microphone, which the emulator's virtual mic is not (its timings would say nothing about Phone B). It also hands VOS the assistant role, a Phone B setup step. |
+| `m1/turn-pipes.sh --live-mic`, any `--speaker` run | The real microphone or speaker is what they test. |
+| Bluetooth, flashing (`image/`), field tests | No radio, no bootloader, no owner. They have no eval runner yet; they are Phone B work. |
+
+Known differences from Phone B:
+
+- On API 35 the assistant stream (11) aliases media (3), so setting one moves the other (#312).
+- The emulator mic is a virtual input, not a room microphone. Whether it delivers anything depends on the image: the `aud-02.sh --control` probe recorded nothing on API 35 (#311) and recorded on API 36. Either way it carries no speech and no echo of the speaker, so a check that depends on what the mic hears cannot be judged there.
+- Android 15's `dumpsys audio` output differs from Android 17's (#333).
+- Both images set `ro.kernel.qemu=1` (API 36 also `ro.boot.qemu=1`), which is how `aud-02.sh` and `indicator.sh` detect an emulator.
+
+On 2026-11-10 the keyless set (`auth-01.sh`, `aud-02.sh --control`, `turn-pipes.sh`, `m2/audit-01.sh --device`) passed on `vos_emu_lane_api36`.
+
+Exit codes are the ones above: 0 PASS, 1 FAIL, 2 usage error, 3 SKIP. Only `key-01.sh` and `model-02.sh` exit 3 today; a lane must report a 3 as SKIP, never as PASS. A keyed runner started without `GROK_API_KEY` stops before it touches the device with a non-zero exit that is not 3. CI runs shellcheck on `eval/emulator/*.sh` too.
