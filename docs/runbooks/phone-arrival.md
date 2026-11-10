@@ -2,7 +2,7 @@
 
 For the day Phone B (Pixel 7 `panther`) comes back from the screen replacement (same unit). It covers the M0 gate spikes that have never run on the phone (S-01 #11, S-03 #12, S-27a #44), the unlock-ability re-check (M0-06, #131), Play removal for M1-NOGOOG-01 (#142) and the pause sweep (#247). Sources are the repo docs named in each step; where the repo does not say how, the step says **not yet verified**.
 
-Every step carries one mark:
+Every device step carries one mark:
 
 - **[desk-verified]**: S-01 steps 1–3 desk build passed on the workstation (S-01.md, "Result: desk build PASS", 2026-10-19/20, with throwaway test keys).
 - **[emulator-verified 2026-11-10]**: the mechanic worked on the API 36 lane AVD (`vos_emu_lane_api36`, eval/README.md "Emulator lane") in a capability run on 2026-11-10. The emulator is not Phone B: the same step still has to pass on the phone.
@@ -164,7 +164,7 @@ Apps that depend on Play (banking, push) may stop working; that inventory is S-2
 adb shell pm list packages | grep -iE 'google|com\.android\.vending'    # expect: no output
 ```
 
-4.3 **Install the debug pair for the M1 suite** [phone only; the fixed install path is tested offline only, `ci/tests/test_install_apps.py`, not yet on any device]. A freshly wiped or Play-removed phone is a fresh device for VOS: install through `vos_install_apps` (session first, then actuator, then the session again on a fresh device, both cross grants checked, #341), which every `eval/m1` runner does. On a fresh device the app installed first always lacks its grant (session first: the session lacks `SESSION`), so one reinstall of the session is expected. By hand: session, actuator, session again, then check both grants:
+4.3 **Install the debug pair for the M1 suite** [phone only; the fixed install path is tested offline only, `ci/tests/test_install_apps.py`, not yet on any device]. A freshly wiped phone, or one that never had the VOS apps, is a fresh device for VOS: install through `vos_install_apps` (session first, then actuator, then the session again on a fresh device, both cross grants checked, #341), which every `eval/m1` runner does. On a fresh device the app installed first always lacks its grant (session first: the session lacks `SESSION`), so one reinstall of the session is expected. By hand: session, actuator, session again, then check both grants:
 
 ```bash
 adb install -r -t session/build/outputs/apk/debug/session-debug.apk
@@ -172,7 +172,7 @@ adb install -r -t actuator/build/outputs/apk/debug/actuator-debug.apk
 adb install -r -t session/build/outputs/apk/debug/session-debug.apk
 adb shell dumpsys package com.vos.actuator | grep 'com.vos.permission.ACTUATOR: granted=true'
 adb shell dumpsys package com.vos.session  | grep 'com.vos.permission.SESSION: granted=true'
-# on a fresh device the session line is missing until the session is reinstalled
+# both lines must print; a missing line: reinstall that app once and check again
 ```
 
 4.4 **The M1 suite**: the runners in eval/README.md's table, each with its own preconditions there. Mechanics proven on the emulator, still to be proven on the phone:
