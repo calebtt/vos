@@ -44,6 +44,12 @@ import org.json.JSONObject;
  * legacy prefix it must carry {@link #GENESIS}. A record without {@code prev} after the first chained
  * one is a break, as before.
  *
+ * <p>What the chain cannot see (#340). Every check is relative to the file itself, so a tail cut at
+ * a line boundary (the last N records gone) and a whole file rewritten from genesis both verify,
+ * unless {@link #verify(byte[], String)} gets a head kept somewhere the editor could not change; the
+ * writer's own head is recovered from the file at startup, so it is no such anchor.
+ * {@link AuditCheckpoint} and docs/design/audit-chain-anchor.md cover that.
+ *
  * <p>Known limit. A whole record that lost only its newline in a power
  * cut is an unfinished line when the writer recovers, so the writer chains past it; once the next
  * append's repair gives it a newline it is a record, and the link after it reads as a change rather
@@ -63,7 +69,12 @@ public final class AuditChain {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
-        StringBuilder b = new StringBuilder(64);
+        return hex(d);
+    }
+
+    /** Lowercase hex of {@code d}. */
+    static String hex(byte[] d) {
+        StringBuilder b = new StringBuilder(d.length * 2);
         for (byte x : d) {
             b.append(Character.forDigit((x >> 4) & 0xf, 16)).append(Character.forDigit(x & 0xf, 16));
         }
@@ -163,7 +174,8 @@ public final class AuditChain {
         return !text.isBlank() && AuditFile.object(text) != null;
     }
 
-    private static boolean isSha256Hex(String s) {
+    /** Whether {@code s} is 64 lowercase hex digits (a chain head or {@code prev}). */
+    static boolean isSha256Hex(String s) {
         if (s == null || s.length() != 64) {
             return false;
         }
@@ -203,7 +215,9 @@ public final class AuditChain {
 
         /**
          * Sets {@code o}'s {@code prev}, appends it, and returns the lines written, in order: the
-         * record, then the {@code audit.torn_tail} note if the tail was torn.
+         * record, then the {@code audit.torn_tail} note if the tail was torn. Every IOException it
+         * throws leaves {@link #head()} null (a failed recovery, or a failed write of the record or
+         * the note); {@code JsonlAudit.writable()} relies on that.
          */
         public synchronized List<String> append(JSONObject o) throws IOException {
             List<String> written = new ArrayList<>(2);

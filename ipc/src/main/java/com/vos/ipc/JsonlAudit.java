@@ -5,14 +5,15 @@ import android.util.Log;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Append-only audit lines in the app's CE storage ({@code files/audit/audit.jsonl}) and logcat
- * (tag {@code VOS_AUDIT}). The actuator's file is the audit of record; audit v1 replaces this
+ * Append-only audit lines in the app's CE storage ({@code files/audit/audit.jsonl}), mirrored to
+ * logcat in debug builds only (below). The actuator's file is the audit of record; audit v1 replaces this
  * writer with rotation, the owner view and export (§3.8). Each line is one write on the caller's
  * thread. The fsync runs on the process's one sync thread ({@link AuditFile#backgroundSyncer()}),
  * coalesced, so a line is durable within one sync period. A torn tail left by a power cut is
@@ -22,16 +23,91 @@ import org.json.JSONObject;
  * recovered when the audit is built, from a bounded read of the file's end, never the whole
  * file. Lines from before the chain are accepted as a legacy prefix ({@link AuditChain} lists the
  * rules).
+ *
+ * <p>Logcat. A debug build mirrors every line to logcat (tag {@code VOS_AUDIT}), which the eval
+ * runners read. A release build never puts a line's contents in logcat: a failed write logs only a
+ * count and the exception, whose message names the file, never the record (#340).
+ *
+ * <p>Fail-closed contract (#340). {@link #record} returns whether the line reached the file; logging
+ * may ignore that (best effort). An externally visible or irreversible act <em>by the actuator</em>
+ * must not happen unless the audit can take its line: the acting path checks {@link #writable()}
+ * before acting and refuses with a FAILED result otherwise (today: every state-changing fast tool,
+ * gated in {@code FastTools.run}). An irreversible act (none is wired in M1) must also write its
+ * intent line first and act only if {@link #record} returned true, because {@link #writable()}
+ * cannot see a failure that has not happened yet. A record that cannot be linked is never appended
+ * ({@link AuditChain.Writer} fails closed).
+ *
+ * <p>Healing. After a failed write the head is unknown; the next {@link #record} (the refusal's own
+ * line, for instance) recovers it from the file and, if the write succeeds, the audit is writable
+ * again. That needs a recoverable head: if the last {@link AuditChain#MAX_TAIL} bytes of the file
+ * hold no complete record (or the file cannot be read), recovery keeps failing and every
+ * state-changing tool stays refused until the owner acts on the file (M2: an owner acknowledgement
+ * flow; docs/design/audit-chain-anchor.md).
+ *
+ * <p>Not gated. The session's own acts are outside this contract: its model egress (a
+ * {@code model.pick} line in the session's audit, then the request to the vendor) goes ahead whether
+ * or not that line was written. Whether to gate it is an open question for the owner (the design doc).
  */
 public final class JsonlAudit implements BinderGuard.Audit {
     public static final String TAG = "VOS_AUDIT";
 
+    /** Where the audit's own logcat output goes: android.util.Log in the app, a recorder in tests. */
+    interface Logcat {
+        /** A line's contents (debug builds only). */
+        void line(String line);
+
+        /** A failure, without any line's contents. */
+        void error(String message, Throwable e);
+    }
+
+    private static final Logcat ANDROID = new Logcat() {
+        @Override
+        public void line(String line) {
+            Log.w(TAG, line);
+        }
+
+        @Override
+        public void error(String message, Throwable e) {
+            Log.e(TAG, message, e);
+        }
+    };
+
     private final AuditChain.Writer chain;
+    private final boolean mirror;
+    private final Logcat logcat;
+    private long failures; // guarded by this
 
     public JsonlAudit(Context context) {
-        this.chain = new AuditChain.Writer(new AuditFile(
+        this(new AuditChain.Writer(new AuditFile(
                 new File(new File(context.getFilesDir(), "audit"), "audit.jsonl"),
-                AuditFile.backgroundSyncer(), e -> Log.e(TAG, "audit sync failed", e)));
+                AuditFile.backgroundSyncer(), e -> Log.e(TAG, "audit sync failed", e))),
+                BuildConfig.DEBUG, ANDROID);
+    }
+
+    /**
+     * {@code mirror}: copy each line's contents to logcat ({@code BuildConfig.DEBUG} in the app, so
+     * never in a release build).
+     */
+    JsonlAudit(AuditChain.Writer chain, boolean mirror, Logcat logcat) {
+        this.chain = chain;
+        this.mirror = mirror;
+        this.logcat = logcat;
+    }
+
+    /**
+     * Whether the audit can take a line now: the chain's head is known (recovered at startup, or by a
+     * later write). The writer clears the head on every failed write, so this is also "the last write
+     * reached the file", read under the writer's own lock (no second flag to order against it).
+     * False: an act must be refused (the class comment's contract). It does not probe the disk, so a
+     * write can still fail after a true.
+     */
+    public boolean writable() {
+        return chain.head() != null;
+    }
+
+    /** How many lines this audit failed to write since it was built. */
+    public synchronized long failures() {
+        return failures;
     }
 
     /**
@@ -65,9 +141,12 @@ public final class JsonlAudit implements BinderGuard.Audit {
 
     /**
      * One audit line from a map whose {@code "event"} entry names it (e.g. the AudioPlane's
-     * transitions). Values: strings, numbers, booleans, null, or collections of those.
+     * transitions). Values: strings, numbers, booleans, null, or collections of those. Returns true
+     * when the line, and the {@code audit.torn_tail} note if one was due, reached the file. False
+     * means the line or its torn-tail note was not written (the line may be in the file without its
+     * note). A caller about to act irreversibly acts only on true.
      */
-    public void record(Map<String, Object> fields) {
+    public boolean record(Map<String, Object> fields) {
         JSONObject o = new JSONObject();
         try {
             o.put("ts", System.currentTimeMillis());
@@ -85,17 +164,27 @@ public final class JsonlAudit implements BinderGuard.Audit {
         } catch (JSONException e) {
             throw new IllegalStateException(e);
         }
-        append(o);
+        return append(o);
     }
 
-    private void append(JSONObject o) {
+    private boolean append(JSONObject o) {
+        List<String> written;
         try { // the write only: the fsync is on the syncer thread, never here or under a lock
-            for (String line : chain.append(o)) { // the record, then the torn-tail note if one was due
-                Log.w(TAG, line);
-            }
+            written = chain.append(o); // the record, then the torn-tail note if one was due
         } catch (IOException e) {
-            Log.w(TAG, o.toString());
-            Log.e(TAG, "audit write failed", e);
+            long n;
+            synchronized (this) {
+                n = ++failures;
+            }
+            // Never the record's contents, in any build: logcat is not the audit.
+            logcat.error("audit write failed (" + n + " so far); the line or its torn-tail note was not written", e);
+            return false;
         }
+        if (mirror) {
+            for (String line : written) {
+                logcat.line(line);
+            }
+        }
+        return true;
     }
 }
