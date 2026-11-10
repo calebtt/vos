@@ -12,7 +12,7 @@ them yet. Relates to §3.3 OfflinePlane and HOLD, P5, §5.5 step 6 and spike S-1
 
 `OfflineGrammar.match(recognition)` returns one `Command` or null (no match). The vocabulary is
 §3.3's list, stop/pause/volume/yes/no (volume up/down as M1-OFF-01 words it), plus cancel, which
-is not in the plan and was added by the brief for #343. No other variants are matched.
+the plan does not list (added for #343). No other variants are matched.
 
 | Command | Matches | Partial? | Confidence |
 |---|---|---|---|
