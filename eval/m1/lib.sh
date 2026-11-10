@@ -21,14 +21,47 @@ vos_daytime_only() {
     (( h >= 8 && h < 22 )) || { echo "$1: daytime only (08:00-22:00)" >&2; exit 2; }
 }
 
-# vos_install_apps [APK...]: the debug actuator and session, then any extra APKs (e.g. a test APK).
+# vos_install_apps [APK...]: the debug session, then the debug actuator, then any extra APKs (e.g. a
+# test APK). Each app defines the signature permission the other uses (the session defines
+# com.vos.permission.ACTUATOR, the actuator com.vos.permission.SESSION). On a device with neither
+# installed, the app installed before the other's definition exists is left without that permission,
+# and every turn then fails to bind (#341). Upgrades are not affected. So after both installs it reads
+# both grants back, reinstalls an app that lacks its grant once, and returns 1 (loudly) if one is
+# still missing. Returns 1 rather than exiting: the sweep runbook calls it from an interactive shell
+# (as `vos_install_apps || echo "STOP: ..."`); runners under set -e exit 1 on it.
 # shellcheck disable=SC2120 # the extra APKs are optional; most runners pass none
 vos_install_apps() {
     local apk
-    for apk in "$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk" \
-            "$ROOT/session/build/outputs/apk/debug/session-debug.apk" "$@"; do
+    local session_apk="$ROOT/session/build/outputs/apk/debug/session-debug.apk"
+    local actuator_apk="$ROOT/actuator/build/outputs/apk/debug/actuator-debug.apk"
+    adb install -r -t "$session_apk" >/dev/null
+    adb install -r -t "$actuator_apk" >/dev/null
+    vos_ensure_grant com.vos.actuator com.vos.permission.ACTUATOR "$actuator_apk" || return 1
+    vos_ensure_grant com.vos.session com.vos.permission.SESSION "$session_apk" || return 1
+    for apk in "$@"; do
         adb install -r -t "$apk" >/dev/null
     done
+}
+
+# vos_perm_granted PERM: reads `dumpsys package PKG` on stdin; true if it lists "PERM: granted=true"
+# (leading blanks, a trailing CR and anything after the match, e.g. ", flags=[...]", allowed). awk
+# reads all its input, so a pipe from adb never dies of SIGPIPE under pipefail (grep -q could).
+vos_perm_granted() {
+    awk -v want="$1: granted=true" '
+        { sub(/\r$/, ""); sub(/^[ \t]+/, "") }
+        index($0, want) == 1 { found = 1 }
+        END { exit !found }'
+}
+
+# vos_ensure_grant PKG PERM APK: PKG holds PERM, or it is reinstalled from APK once and checked
+# again. Returns 1 with a FAIL line on stderr if PERM is still not granted.
+vos_ensure_grant() {
+    adb shell dumpsys package "$1" | vos_perm_granted "$2" && return 0
+    echo "$1 lacks $2 (install order, #341): reinstalling $1 once" >&2
+    adb install -r -t "$3" >/dev/null
+    adb shell dumpsys package "$1" | vos_perm_granted "$2" && return 0
+    echo "FAIL: $1 still lacks $2 after one reinstall (#341); every turn would fail to bind" >&2
+    return 1
 }
 
 # vos_grant_mic: a microphone-type foreground service needs RECORD_AUDIO, even when the mic is a file.
@@ -108,6 +141,17 @@ vos_lib_self_test() {
         || { echo "lib self-test FAIL: vos_low_target" >&2; return 1; }
     if ! { vos_volume_is_low 1 2 && vos_volume_is_low 2 2 && ! vos_volume_is_low 3 2 && ! vos_volume_is_low "" 2; }; then
         echo "lib self-test FAIL: vos_volume_is_low" >&2; return 1
+    fi
+    local p=com.vos.permission.ACTUATOR
+    local dump=$'    install permissions:\r\n      android.permission.INTERNET: granted=true\r\n'
+    if ! { vos_perm_granted "$p" <<<"$dump      $p: granted=true"$'\r' \
+            && vos_perm_granted "$p" <<<"$dump      $p: granted=true, flags=[ ]" \
+            && ! vos_perm_granted "$p" <<<"$dump      $p: granted=false" \
+            && ! vos_perm_granted "$p" <<<"$dump    requested permissions:"$'\n'"      $p" \
+            && ! vos_perm_granted "$p" <<<"$dump      x$p: granted=true" \
+            && ! vos_perm_granted "$p" <<<"$dump      ${p}_X: granted=true" \
+            && ! vos_perm_granted "$p" </dev/null; }; then
+        echo "lib self-test FAIL: vos_perm_granted" >&2; return 1
     fi
 }
 

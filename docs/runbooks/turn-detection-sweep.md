@@ -27,11 +27,13 @@ Same order as `eval/m1/voice-roundtrip.sh`. From the repo root:
 ROOT="$(pwd)"
 source "$ROOT/eval/m1/lib.sh"
 ./gradlew :actuator:assembleDebug :session:assembleDebug
-vos_install_apps
+vos_install_apps || echo "STOP: fix the install (#341) before any trial"
 vos_grant_mic   # needed even when the mic is a file (foreground service)
 vos_seal_key_if_missing
 vos_clear_debug_overrides   # drops a stale files/debug/chat_voice (e.g. debug:echo from turn-pipes)
 ```
+
+If `vos_install_apps` prints STOP, run no trial until the install is fixed.
 
 Without the mic grant the summon is refused and the trial produces nothing. Without clearing `chat_voice`, a leftover `debug:echo` override makes every trial skip xAI.
 
