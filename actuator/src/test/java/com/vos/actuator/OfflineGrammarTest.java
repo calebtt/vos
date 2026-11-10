@@ -44,23 +44,23 @@ public class OfflineGrammarTest {
         assertEquals(Command.NO, match("no"));
     }
 
+    /** Stop and cancel match anywhere (fail-safe), so any phrase holding them works; no listed variants. */
     @Test
-    public void variants() {
+    public void failSafeWordsInLongerPhrases() {
         for (String s : List.of("stop it", "stop that", "please stop", "stop stop", "stop now", "okay stop", "don't stop")) {
             assertEquals(s, Command.STOP, match(s));
         }
         for (String s : List.of("cancel that", "cancel it", "please cancel")) {
             assertEquals(s, Command.CANCEL, match(s));
         }
-        for (String s : List.of("pause it", "pause that", "pause music", "pause the music")) {
-            assertEquals(s, Command.PAUSE, match(s));
-        }
+        assertEquals(Command.STOP, match("non-stop")); // the hyphen splits it: fail-safe on purpose
     }
 
     @Test
     public void variantsNotInThePlanAreNotMatched() {
         for (String s : List.of("yeah", "yep", "yup", "sure", "okay", "yes please", "yes yes", "nope", "no thanks",
-                "louder", "quieter", "turn it up", "halt", "pause please now")) {
+                "louder", "quieter", "turn it up", "halt", "pause please now",
+                "pause it", "pause that", "pause music", "pause the music")) {
             assertNull(s, match(s));
         }
     }
@@ -73,10 +73,18 @@ public class OfflineGrammarTest {
         assertEquals(Command.YES, match("\tYES!\n"));
         assertEquals(Command.VOLUME_UP, match("Volume   up"));
         assertEquals(Command.VOLUME_DOWN, match("volume-down"));
-        assertEquals(Command.PAUSE, match("Pause, the music."));
+        assertEquals(Command.PAUSE, match("Pause."));
         assertEquals(Command.STOP, match("ＳＴＯＰ")); // full-width
         assertEquals(List.of("dont", "stop"), OfflineGrammar.normalize("Don’t   stop!"));
+        assertEquals(List.of("dont", "stop"), OfflineGrammar.normalize("Don\u00B4t stop"));
+        assertEquals(List.of("dont", "stop"), OfflineGrammar.normalize("Don\u02BCt stop"));
+        assertEquals(List.of("dont"), OfflineGrammar.normalize("don`t"));
+        assertEquals(List.of("dont"), OfflineGrammar.normalize("don\u2018t"));
         assertEquals(List.of("cafe"), OfflineGrammar.normalize("Café"));
+        assertEquals(List.of("volume", "2", "up"), OfflineGrammar.normalize("volume 2 up"));
+        assertNull(match("volume 2 up"));
+        assertEquals(List.of("stop2"), OfflineGrammar.normalize("stop\u00B2")); // NFKD: superscript two is "2"
+        assertNull(match("stop\u00B2"));
         assertEquals(List.of(), OfflineGrammar.normalize(" .,!? "));
         assertEquals(List.of(), OfflineGrammar.normalize(null));
     }
@@ -102,6 +110,7 @@ public class OfflineGrammarTest {
         assertNull(OfflineGrammar.match(fin("pause", 0.69)));
         assertEquals(Command.PAUSE, OfflineGrammar.match(fin("pause", 0.7)));
         assertNull(OfflineGrammar.match(fin("no", 0.69)));
+        assertEquals(Command.NO, OfflineGrammar.match(fin("no", 0.7)));
         assertNull(OfflineGrammar.match(fin("yes", 0.89)));
         assertEquals(Command.YES, OfflineGrammar.match(fin("yes", 0.9)));
     }
@@ -154,6 +163,7 @@ public class OfflineGrammarTest {
         assertNull(OfflineGrammar.match(alts(true, "volume", 0.9, "volume up", 0.85)));
         // Ties keep the engine's order.
         assertEquals(Command.VOLUME_UP, OfflineGrammar.match(alts(true, "volume up", 0.8, "volume down", 0.8)));
+        assertEquals(Command.VOLUME_DOWN, OfflineGrammar.match(alts(true, "volume down", 0.8, "volume up", 0.8)));
         // A fail-safe word in any alternative at its threshold wins, even below the top.
         assertEquals(Command.STOP, OfflineGrammar.match(alts(true, "pause", 0.9, "stop", 0.55)));
         assertEquals(Command.STOP, OfflineGrammar.match(alts(false, "top", 0.9, "stop", 0.55)));
@@ -168,7 +178,22 @@ public class OfflineGrammarTest {
         assertNull(OfflineGrammar.match(alts(true, "yes", 0.95, "no", 0.1)));
         assertNull(OfflineGrammar.match(alts(true, "yes", 0.95, "not yet", 0.1)));
         assertNull(OfflineGrammar.match(alts(true, "yes", 0.95, "wait", 0.2)));
+        assertNull(OfflineGrammar.match(alts(true, "yes", 0.95, "nah", 0.1)));
+        assertNull(OfflineGrammar.match(alts(true, "yes", 0.95, "I can't", 0.1)));
         assertNull(OfflineGrammar.match(alts(true, "yeah", 0.95, "yes", 0.92)));
+    }
+
+    /** The spoken "yes" is no looser than the typed one (§5.5 step 6b): only a trailing . or ! */
+    @Test
+    public void yesRawTextMirrorsTheTypedRule() {
+        for (String s : List.of("yes", "Yes.", "YES!", " yes ", "\uFF39\uFF25\uFF33")) {
+            assertEquals(s, Command.YES, match(s));
+        }
+        for (String s : List.of("yes?", "\u00BFyes", "'yes'", "\"yes\"", "-yes-", "yes\u2026", "yes...", "yes!!",
+                "yes.!", "(yes)", "yes,")) {
+            assertNull(s, match(s));
+            assertEquals(s, Command.CANCEL, OfflineGrammar.confirm(fin(s, 0.99)));
+        }
     }
 
     @Test

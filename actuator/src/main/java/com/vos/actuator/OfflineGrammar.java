@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * The bundled offline grammar (§3.3 OfflinePlane: stop/pause/volume/yes/no; P5 "say stop"; §5.5 step
@@ -25,12 +26,15 @@ import java.util.Set;
  *   <li><b>Everything else is a whole-utterance match on a final result</b>, read from the top
  *       alternative only, at {@link #COMMAND_MIN_CONFIDENCE}.
  *   <li><b>"yes" is strict.</b> Only the exact word "yes", final, top alternative, at
- *       {@link #YES_MIN_CONFIDENCE}, and no alternative carries a negation. Not "yeah", not
- *       "yes please", not "yes but", not "no yes".
+ *       {@link #YES_MIN_CONFIDENCE}, and no alternative carries a negation. Its raw text must be
+ *       {@code yes} with at most one trailing {@code .} or {@code !}, as the typed "yes" of step 6b.
+ *       Not "yeah", "yes please", "yes but", "no yes", "yes?" or "'yes'".
  *   <li><b>Silence never means yes.</b> {@link #confirm} turns silence, a timeout, an error or any
  *       final that is not a strict "yes" into {@link Command#CANCEL}.
  * </ul>
  * The thresholds are provisional until spike S-15 (#25) measures the bound engine's scores.
+ *
+ * <p>Stateless: the tables are immutable and every method is static, so it is safe from any thread.
  */
 public final class OfflineGrammar {
     public enum Command { STOP, CANCEL, PAUSE, VOLUME_UP, VOLUME_DOWN, YES, NO }
@@ -47,20 +51,22 @@ public final class OfflineGrammar {
             Map.entry("stop", Command.STOP),
             Map.entry("cancel", Command.CANCEL));
 
-    /** Whole-utterance phrases, after {@link #normalize}. "yes" and "no" have no variants on purpose. */
+    /** Whole-utterance phrases, after {@link #normalize}: the plan's words only, no variants. */
     private static final Map<String, Command> PHRASES = Map.of(
             "yes", Command.YES,
             "no", Command.NO,
             "pause", Command.PAUSE,
-            "pause it", Command.PAUSE,
-            "pause that", Command.PAUSE,
-            "pause music", Command.PAUSE,
-            "pause the music", Command.PAUSE,
             "volume up", Command.VOLUME_UP,
             "volume down", Command.VOLUME_DOWN);
 
     /** Any of these in any alternative means the owner may not have meant "yes". */
-    private static final Set<String> NEGATIONS = Set.of("no", "not", "dont", "nope", "never", "wait");
+    private static final Set<String> NEGATIONS = Set.of("no", "not", "dont", "cant", "nope", "nah", "never", "wait");
+
+    /** The raw text of a spoken "yes" (after NFKC, trim, lower case), as the typed "yes" of §5.5 step 6b. */
+    private static final Pattern YES_RAW = Pattern.compile("yes[.!]?");
+
+    /** Apostrophe-like characters, dropped before NFKD (which would turn some into a space). */
+    private static final String APOSTROPHES = "['\u2019\u2018\u02BC`\u00B4]";
 
     private OfflineGrammar() { }
 
@@ -89,7 +95,8 @@ public final class OfflineGrammar {
             return null;
         }
         if (c == Command.YES) {
-            if (top.confidence < YES_MIN_CONFIDENCE) {
+            String raw = Normalizer.normalize(top.raw, Normalizer.Form.NFKC).trim().toLowerCase(Locale.ROOT);
+            if (top.confidence < YES_MIN_CONFIDENCE || !YES_RAW.matcher(raw).matches()) {
                 return null;
             }
             for (Reading x : readings) {
@@ -109,6 +116,10 @@ public final class OfflineGrammar {
      * then null when the window closes. Returns {@link Command#YES} only for a strict "yes",
      * {@link Command#CANCEL} for a fail-safe word, any other final, silence or a timeout (null), and
      * null only to keep listening (a partial with no fail-safe word).
+     *
+     * <p>Stateless: the caller acts on the first non-null result and stops there, and drops every
+     * recognition that arrives after the window closed (a late final delivered by
+     * {@link OfflineRecognizer#stop} must never count as a yes).
      */
     public static Command confirm(Recognition r) {
         if (r == null) {
@@ -132,10 +143,9 @@ public final class OfflineGrammar {
         if (text == null) {
             return List.of();
         }
-        String s = Normalizer.normalize(text, Normalizer.Form.NFKD)
+        String s = Normalizer.normalize(text.replaceAll(APOSTROPHES, ""), Normalizer.Form.NFKD)
                 .replaceAll("\\p{M}", "")
                 .toLowerCase(Locale.ROOT)
-                .replaceAll("['’]", "")
                 .replaceAll("[^\\p{L}\\p{N}]+", " ")
                 .trim();
         return s.isEmpty() ? List.of() : Arrays.asList(s.split(" "));
@@ -147,7 +157,7 @@ public final class OfflineGrammar {
         for (Hypothesis h : r.alternatives()) {
             List<String> tokens = normalize(h.text());
             if (!tokens.isEmpty()) {
-                out.add(new Reading(tokens, sane(h.confidence())));
+                out.add(new Reading(h.text(), tokens, sane(h.confidence())));
             }
         }
         out.sort(Comparator.comparingDouble((Reading x) -> x.confidence).reversed());
@@ -159,5 +169,5 @@ public final class OfflineGrammar {
         return c >= 0 && c <= 1 ? c : 0;
     }
 
-    private record Reading(List<String> tokens, double confidence) { }
+    private record Reading(String raw, List<String> tokens, double confidence) { }
 }
