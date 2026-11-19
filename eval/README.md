@@ -31,6 +31,8 @@ Exit codes: 0 PASS, 1 FAIL (a defect), 2 usage error, 3 SKIP. A runner that find
 
 A headless AOSP emulator runs the checks that need no real microphone, speaker, radio or bootloader, so a change gets device evidence without touching Phone B (#314). It is a pre-check, not acceptance: a PASS here does not replace the same test on Phone B. The image is not the target build (Phone B runs Android 17, API 37; the lane runs API 35 or 36), it has no real audio path, and the differences listed below are real. Where the Device column above says only "Phone B", the tables here say whether the runner also works on the emulator.
 
+For phone-dependent checks (mic injection on API 36, speaker capture, the assistant role, SMS/call signaling, keyguard, snapshots) and what each still needs from Phone B, see [`docs/runbooks/emulator-first-testing.md`](../docs/runbooks/emulator-first-testing.md).
+
 | AVD | System image | Android | Use |
 |---|---|---|---|
 | `vos_emu_lane_api35` | `system-images;android-35;default;x86_64` | 15 | the lane so far |
