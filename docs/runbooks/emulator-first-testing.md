@@ -27,7 +27,7 @@ The session defines `com.vos.permission.ACTUATOR` and the actuator defines `com.
 | Bluetooth | The virtual controller can be enabled. BLE GATT peripherals are possible through `emulated_bluetooth.proto` (untested). | Virtual only: no Bluetooth audio devices; headset, HFP and SCO need hardware. | Every headset, HFP/SCO and MFB long-press check, on Phone B with a real headset. |
 | Keyguard / locked state | `locksettings set-pin <pin>`, `KEYCODE_SLEEP` / `KEYCODE_WAKEUP`, then `wm dismiss-keyguard` and `input text <pin>` to unlock. `KEYCODE_ASSIST` while locked still opened a turn. Use a throwaway PIN on the AVD only. | `locksettings clear` left `get-disabled` true; restore with `locksettings set-disabled false`. Before-first-unlock (BFU) state untested. | Locked summons and §3.6/§5.6 locked rules on Phone B (GrapheneOS keyguard, BFU after a reboot). |
 | Speaker capture | gRPC `streamAudio` returns device playback (16 kHz mono): time reply start and stop, and barge-in ducking. | Digital output only, no speaker or room. | Speaker runs (`--speaker`) and any loudness or audibility check on Phone B. |
-| Network delay | `adb emu network delay 300` (ms) and the emulator's speed profiles (`adb emu network speed ...`). | Shapes the emulator's link, not Wi-Fi or LTE behaviour. With the real backend it is a paid run. | Turn timing on Wi-Fi and LTE (logged separately, decision 31). |
+| Network delay | `adb emu network delay 300` (ms) and the emulator's speed profiles (`adb emu network speed ...`). | Shapes the emulator's link, not Wi-Fi or LTE behaviour. With the real backend it is a paid run. | Turn timing on Phone B's real network (M1-VOICE-01 is a Wi-Fi daytime smoke of the decision 31 targets). |
 | Clock | Root (`adb root`), `settings put global auto_time 0`, then `date`. | AVD only; the AOSP image allows root. | Time-dependent behaviour on Phone B where the clock is not set by hand. |
 | Reset between trials | `adb emu avd snapshot save NAME` once, then `adb emu avd snapshot load NAME` before each trial (~1.3-1.4 s). | Restores the whole AVD state, including installed apps and audit files: save after install and setup. `start-avd.sh` passes `-no-snapshot-save`, which affects only the quick-boot snapshot on exit. | None for the reset itself; Phone B trials reset per their runbooks. |
 
@@ -39,7 +39,7 @@ There is no helper script yet; one can come later. By hand:
 2. **Use API 36.** On API 35 injection does not reach `AudioRecord` (consistent with #311).
 3. **Open the mic first.** Start the turn (or whatever records), and wait for the actuator's capture log line before injecting. Injecting while no app records crashed the emulator (3 of 3).
 4. **Inject** with `EmulatorController.injectAudio`: 16 kHz, signed 16-bit, mono PCM. The proto is at `$ANDROID_HOME/emulator/lib/emulator_controller.proto`. The path measured end to end was the actuator's real capture (`VOICE_COMMUNICATION`, `aec=false ns=false`) with the debug echo backend.
-5. **Levels:** gain was ~1.1-1.2, so keep fixtures below about -3 dBFS peak to avoid clipping.
+5. **Levels:** gain was ~1.1-1.2 on MIC and `VOICE_RECOGNITION`, and ~0.9 on `VOICE_COMMUNICATION`, so keep fixtures below about -3 dBFS peak to avoid clipping.
 6. **Speaker side (optional):** `EmulatorController.streamAudio` returns playback as 16 kHz mono for timing.
 
 ## Open decisions for the owner
